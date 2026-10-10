@@ -21,6 +21,19 @@
 //#define agpu_log gpu_log
 #define agpu_log(...)
 
+#ifdef __vita__
+#include <psp2/kernel/processmgr.h>
+/* Microseconds and count of the emulation thread's waits for the GPU thread
+ * (full syncs and a full buffer), for the Vita frontend's progress lines. */
+unsigned long long gpu_async_wait_us;
+unsigned gpu_async_wait_n;
+#define WAIT_BEGIN() const SceUInt64 wait_start_ = sceKernelGetProcessTimeWide()
+#define WAIT_END() (gpu_async_wait_us += sceKernelGetProcessTimeWide() - wait_start_, gpu_async_wait_n++)
+#else
+#define WAIT_BEGIN()
+#define WAIT_END()
+#endif
+
 // these constants must be power of 2
 #define AGPU_BUF_LEN    (128*1024/4u)
 #define AGPU_BUF_MASK   (AGPU_BUF_LEN - 1)
@@ -37,6 +50,8 @@
 #define FAKECMD_SET_INTERLACE 0xdeu
 #define FAKECMD_DMA_WRITE     0xddu
 #define FAKECMD_BREAK         0xdcu
+#define FAKECMD_PRESENT       0xdbu
+#define FAKECMD_PRESENT_BLANK 0xdau
 
 #if defined(__aarch64__) || defined(HAVE_ARMV7)
 #define BARRIER() __asm__ __volatile__ ("dmb ishst" ::: "memory")
@@ -117,6 +132,21 @@ struct cmd_break
   uint32_t u32s[3];
 };
 
+#ifdef GPU_VITA_CTR
+// The vita_ctr renderer presents the frame packet built from the commands
+// before it, so its present goes in the queue (it has no scanout to wait for).
+union cmd_present
+{
+  uint32_t u32s[4];
+  struct {
+    uint32_t cmd;
+    short src_x, src_y;
+    short w, h;
+    int rgb24;
+  };
+};
+#endif
+
 static int noinline do_notify_screen_change(struct psx_gpu *gpu,
     const union cmd_screen_change *cmd);
 static int do_set_interlace(struct psx_gpu *gpu,
@@ -193,6 +223,7 @@ static void do_add_with_wait(struct psx_gpu_async *agpu,
   {
     if (do_add(agpu, list, list_words))
       break;
+    WAIT_BEGIN();
     slock_lock(agpu->lock);
     run_thread_nolock(agpu);
     while (list_words > AGPU_BUF_LEN - (agpu->pos_added - RDPOS(agpu->pos_used))) {
@@ -202,6 +233,7 @@ static void do_add_with_wait(struct psx_gpu_async *agpu,
       scond_wait(agpu->cond_add, agpu->lock);
     }
     slock_unlock(agpu->lock);
+    WAIT_END();
   }
 }
 
@@ -550,6 +582,20 @@ static STRHEAD_RET_TYPE gpu_async_thread(void *unused)
           renderer_flush_queues();
           renderer_dirty = 0;
           break;
+#ifdef GPU_VITA_CTR
+        case FAKECMD_PRESENT: {
+          const union cmd_present *p = list;
+          renderer_present_frame_rect(p->src_x, p->src_y, p->w, p->h, p->rgb24);
+          done += sizeof(*p) / 4;
+          renderer_dirty = 0;
+          break;
+        }
+        case FAKECMD_PRESENT_BLANK:
+          renderer_present_blank();
+          done += sizeof(union cmd_present) / 4;
+          renderer_dirty = 0;
+          break;
+#endif
         default:
           assert(0);
           if (!done)
@@ -631,6 +677,44 @@ void gpu_async_set_interlace(struct psx_gpu *gpu, int enable, int is_odd)
   do_add_with_wait(gpu->async, cmd.u32s, sizeof(cmd) / 4);
 }
 
+#ifdef GPU_VITA_CTR
+int gpu_async_present(struct psx_gpu *gpu, int src_x, int src_y)
+{
+  struct psx_gpu_async *agpu = gpu->async;
+  union cmd_present cmd;
+  int w, h;
+
+  if (!renderer_present_size(gpu, &w, &h))
+    return 0;
+  if (RDPOS(agpu->idle) && agpu->pos_added == RDPOS(agpu->pos_used))
+    return renderer_present_frame(gpu, src_x, src_y);
+  cmd.cmd = HTOLE32(FAKECMD_PRESENT << 24);
+  cmd.src_x = src_x;
+  cmd.src_y = src_y;
+  cmd.w = w;
+  cmd.h = h;
+  cmd.rgb24 = !!(gpu->status & PSX_GPU_STATUS_RGB24);
+  do_add_with_wait(agpu, cmd.u32s, sizeof(cmd) / 4);
+  run_thread(agpu);
+  return 1;
+}
+
+void gpu_async_present_blank(struct psx_gpu *gpu)
+{
+  struct psx_gpu_async *agpu = gpu->async;
+  union cmd_present cmd;
+
+  if (RDPOS(agpu->idle) && agpu->pos_added == RDPOS(agpu->pos_used)) {
+    renderer_present_blank();
+    return;
+  }
+  memset(&cmd, 0, sizeof(cmd));
+  cmd.cmd = HTOLE32(FAKECMD_PRESENT_BLANK << 24);
+  do_add_with_wait(agpu, cmd.u32s, sizeof(cmd) / 4);
+  run_thread(agpu);
+}
+#endif
+
 static int do_set_interlace(struct psx_gpu *gpu,
     const union cmd_set_interlace *cmd)
 {
@@ -676,6 +760,7 @@ static void gpu_async_sync_nocheck(struct psx_gpu *gpu)
   if (!agpu || (RDPOS(agpu->idle) && agpu->pos_added == RDPOS(agpu->pos_used)))
     return;
   agpu_log(gpu, "agpu: sync %d\n", agpu->pos_added - agpu->pos_used);
+  WAIT_BEGIN();
   slock_lock(agpu->lock);
   if (agpu->idle && agpu->pos_added != RDPOS(agpu->pos_used)) {
     agpu_log(gpu, "agpu: idle %d\n", agpu->pos_added - agpu->pos_used);
@@ -687,6 +772,7 @@ static void gpu_async_sync_nocheck(struct psx_gpu *gpu)
     scond_wait(agpu->cond_add, agpu->lock);
   }
   slock_unlock(agpu->lock);
+  WAIT_END();
   assert(agpu->pos_added == agpu->pos_used);
   assert(agpu->idle);
 }

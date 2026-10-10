@@ -11,6 +11,7 @@
 
 #include <string.h>
 #include "gpu.h"
+#include "gpu_async.h"
 #include "../../frontend/plugin_lib.h"
 
 static const struct rearmed_cbs *cbs;
@@ -93,6 +94,8 @@ int vout_update(struct psx_gpu *gpu, int src_x, int src_y)
   check_mode_change(gpu, 0);
 #ifdef GPU_VITA_CTR
   gpu->state.dims_changed = 0;
+  if (gpu_async_enabled(gpu))
+    return gpu_async_present(gpu, src_x, src_y);
   return renderer_present_frame(gpu, src_x, src_y);
 #endif
   if (gpu->state.enhancement_active) {
@@ -125,7 +128,10 @@ void vout_blank(struct psx_gpu *gpu)
 
   check_mode_change(gpu, 0);
 #ifdef GPU_VITA_CTR
-  renderer_present_blank();
+  if (gpu_async_enabled(gpu))
+    gpu_async_present_blank(gpu);
+  else
+    renderer_present_blank();
   return;
 #endif
   if (gpu->state.enhancement_active) {

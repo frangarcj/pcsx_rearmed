@@ -723,6 +723,10 @@ static int do_vram_io(struct psx_gpu *gpu, uint32_t *data, int count, int is_rea
 #ifndef GPU_VITA_CTR
   if (o == 0)
     sync_renderer(gpu);
+#else
+  // The GPU thread may still read or write the guest VRAM written here.
+  if (o == 0 && gpu_async_enabled(gpu))
+    gpu_async_sync(gpu);
 #endif
   /* GPU_VITA_CTR keeps its own VRAM: these writes reach it only through
    * renderer_update_caches, which orders them after earlier draws, and a
@@ -789,6 +793,9 @@ static noinline void start_vram_transfer(struct psx_gpu *gpu, uint32_t pos_word,
 
   if (is_read) {
 #ifdef GPU_VITA_CTR
+    // The renderer's frontend belongs to the GPU thread while it runs.
+    if (gpu_async_enabled(gpu))
+      gpu_async_sync(gpu);
     renderer_sync_vram_to_cpu(gpu->dma.x, gpu->dma.y, gpu->dma.w, gpu->dma.h);
 #endif
     const uint16_t *mem = VRAM_MEM_XY(gpu->vram, gpu->dma.x, gpu->dma.y);
@@ -1569,10 +1576,14 @@ static void GPUupdateLace(void)
   }
 #endif
 
+#ifdef GPU_VITA_CTR
+  // vout_update queues the present behind the frame's commands.
+#else
   if (gpu_async_enabled(&gpu))
     delay_vout_update = gpu_async_sync_scanout(&gpu);
   else
     renderer_flush_queues();
+#endif
 
   if (!delay_vout_update)
     updated = vout_update(&gpu, gpu.screen.src_x, gpu.screen.src_y);

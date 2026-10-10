@@ -1221,6 +1221,17 @@ static void print_wait_stats(unsigned runs)
     last_board_us = system12_board_wait_us;
     last_board_n = system12_board_wait_n;
 #endif
+#ifdef USE_ASYNC_GPU
+    {
+        extern unsigned long long gpu_async_wait_us;
+        extern unsigned gpu_async_wait_n;
+        static unsigned long long last_gpu_us;
+        static unsigned last_gpu_n;
+        WAIT_FIELD("gpu_thread", gpu_async_wait_us - last_gpu_us, gpu_async_wait_n - last_gpu_n);
+        last_gpu_us = gpu_async_wait_us;
+        last_gpu_n = gpu_async_wait_n;
+    }
+#endif
     WAIT_FIELD("vblank", g_vblank_wait_us - last_vblank_us, g_vblank_wait_n - last_vblank_n);
 #undef WAIT_FIELD
     last_vblank_us = g_vblank_wait_us;

@@ -1076,21 +1076,32 @@ void renderer_notify_screen_change(const struct psx_gpu_screen *screen)
     (void)screen;
 }
 
+int renderer_present_size(const struct psx_gpu *psx_gpu, int *width, int *height)
+{
+    *width = psx_gpu->screen.hres > 0 ? psx_gpu->screen.hres : psx_gpu->screen.w;
+    *height = psx_gpu->screen.vres > 0 ? psx_gpu->screen.vres : psx_gpu->screen.h;
+    return *width > 0 && *height > 0;
+}
+
 int renderer_present_frame(struct psx_gpu *psx_gpu, int src_x, int src_y)
 {
     int width;
     int height;
 
+    if (!renderer_present_size(psx_gpu, &width, &height))
+        return 0;
+    return renderer_present_frame_rect(src_x, src_y, width, height,
+        !!(psx_gpu->status & PSX_GPU_STATUS_RGB24));
+}
+
+/* The present of renderer_present_frame, from values taken when it was
+ * requested: gpulib's GPU thread runs it in order with the commands. */
+int renderer_present_frame_rect(int src_x, int src_y, int width, int height, int rgb24)
+{
     if (!s_context_ready)
         return 0;
 
-    width = psx_gpu->screen.hres > 0 ? psx_gpu->screen.hres : psx_gpu->screen.w;
-    height = psx_gpu->screen.vres > 0 ? psx_gpu->screen.vres : psx_gpu->screen.h;
-    if (width <= 0 || height <= 0)
-        return 0;
-
-    VitaCtrNativeGpu_SetDisplayEnv(src_x, src_y, width, height,
-        !!(psx_gpu->status & PSX_GPU_STATUS_RGB24));
+    VitaCtrNativeGpu_SetDisplayEnv(src_x, src_y, width, height, rgb24);
     NativeGpu_SetFrontendDisplayBlank(0);
     if (!s_frame_started) {
         NativeGpu_BeginFrontendFrame();

@@ -23,6 +23,10 @@ void gpu_async_sync_ecmds(struct psx_gpu *gpu);
 void gpu_async_try_delayed_flip(struct psx_gpu *gpu, int force);
 void gpu_async_notify_screen_change(struct psx_gpu *gpu);
 void gpu_async_set_interlace(struct psx_gpu *gpu, int enable, int is_odd);
+#ifdef GPU_VITA_CTR
+int  gpu_async_present(struct psx_gpu *gpu, int src_x, int src_y);
+void gpu_async_present_blank(struct psx_gpu *gpu);
+#endif
 
 #else
 
@@ -37,6 +41,8 @@ void gpu_async_set_interlace(struct psx_gpu *gpu, int enable, int is_odd);
 #define gpu_async_try_delayed_flip(gpu, force)
 #define gpu_async_notify_screen_change(gpu)
 #define gpu_async_set_interlace(gpu, enable, is_odd)
+#define gpu_async_present(gpu, src_x, src_y) 0
+#define gpu_async_present_blank(gpu)
 
 #endif
 

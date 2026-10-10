@@ -97,10 +97,24 @@ sthread_t *pcsxr_sthread_create(void (*thread_func)(void *),
 #else
 	h = sthread_create(thread_func, NULL);
  #ifdef VITA
-	/* Main emulation stays on core 0 (set by the frontend). */
+	/* Main emulation stays on core 0 (set by the frontend). With the vitaGL
+	 * renderer its own thread has core 1, so the GPU thread (building frame
+	 * packets) shares core 2 with the board. */
+#ifdef GPU_VITA_CTR
+	if (h && (type == PCSXRT_GPU || type == PCSXRT_BOARD))
+		sceKernelChangeThreadCpuAffinityMask(h->id, SCE_KERNEL_CPU_MASK_USER_2);
+	/* The board thread falls behind the emulation as soon as it waits for
+	 * the core; the GPU thread has slack (lower number, higher priority). */
+	if (h && type == PCSXRT_GPU)
+	{
+		const int prio = sceKernelGetThreadCurrentPriority() + 1;
+		sceKernelChangeThreadPriority(h->id, prio > 191 ? 191 : prio);
+	}
+#else
 	if (h && (type == PCSXRT_GPU || type == PCSXRT_BOARD))
 		sceKernelChangeThreadCpuAffinityMask(h->id, type == PCSXRT_GPU
 			? SCE_KERNEL_CPU_MASK_USER_1 : SCE_KERNEL_CPU_MASK_USER_2);
+#endif
 	/* gpu_neon's second render stage: the frontend picks the core. */
 	if (h && type == PCSXRT_GPU2 && pcsxr_gpu2_core >= 0 && pcsxr_gpu2_core <= 2)
 		sceKernelChangeThreadCpuAffinityMask(h->id,

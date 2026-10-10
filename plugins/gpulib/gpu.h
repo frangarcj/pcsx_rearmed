@@ -181,6 +181,8 @@ void renderer_notify_screen_change(const struct psx_gpu_screen *screen);
 void renderer_barrier(void);
 void renderer_sync_vram_to_cpu(int x, int y, int w, int h);
 int  renderer_present_frame(struct psx_gpu *gpu, int src_x, int src_y);
+int  renderer_present_size(const struct psx_gpu *gpu, int *width, int *height);
+int  renderer_present_frame_rect(int src_x, int src_y, int width, int height, int rgb24);
 void renderer_present_blank(void);
 #endif
 
