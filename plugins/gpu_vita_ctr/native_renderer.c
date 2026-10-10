@@ -21,6 +21,7 @@ extern b32 NativeGhostInput_GetReplayOverlayState(u32 *buttonsHeld, u8 *stickLX,
 #if defined(__EMSCRIPTEN__)
 #include <GLES3/gl3.h>
 #elif defined(__vita__)
+#include <psp2/kernel/processmgr.h>
 #include <vitaGL.h>
 #elif defined(PCSX_NATIVE_VITA_PATH)
 #include "platform/mac_vita_compat.h"
@@ -5134,7 +5135,16 @@ void NativeRenderer_SwapWindow(void)
 		          s_presentViewport.x, s_presentViewport.y, s_presentViewport.w, s_presentViewport.h);
 	}
 	#endif
+#if defined(__vita__)
+	extern unsigned long long pcsx_vita_ctr_wait_us[NATIVE_GPU_WAIT_COUNT];
+	extern unsigned pcsx_vita_ctr_wait_n[NATIVE_GPU_WAIT_COUNT];
+	const SceUInt64 swapStart = sceKernelGetProcessTimeWide();
 	vglSwapBuffers(GL_FALSE);
+	pcsx_vita_ctr_wait_us[NATIVE_GPU_WAIT_RENDER_SWAP] += sceKernelGetProcessTimeWide() - swapStart;
+	pcsx_vita_ctr_wait_n[NATIVE_GPU_WAIT_RENDER_SWAP]++;
+#else
+	vglSwapBuffers(GL_FALSE);
+#endif
 	if (pcsx_vita_swap_cb)
 		pcsx_vita_swap_cb();
 #else

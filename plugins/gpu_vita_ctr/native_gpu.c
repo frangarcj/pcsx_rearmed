@@ -20,6 +20,7 @@
 #include "../../libpcsxcore/system.h"
 #endif
 #ifdef __vita__
+#include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/threadmgr.h>
 #include <psp2/kernel/threadmgr/lw_cond.h>
 #include <psp2/kernel/threadmgr/lw_mutex.h>
@@ -180,7 +181,10 @@ typedef struct
 	int endScene;
 } NativeGpuFramePacket;
 
-#define NATIVE_GPU_FRAME_PACKET_COUNT 2
+/* Three, so the frontend can queue a frame's first packet while the
+ * renderer still draws the previous frame's last one (the split at an
+ * upload a pending draw uses): with two it waited for it. */
+#define NATIVE_GPU_FRAME_PACKET_COUNT 3
 
 global_variable NativeGpuFramePacket s_gpuFramePackets[NATIVE_GPU_FRAME_PACKET_COUNT] __attribute__((aligned(64)));
 global_variable int s_gpuFrontendPacketIndex;
@@ -193,7 +197,12 @@ global_variable int s_gpuFrameBegun;
  * as only the CPU wrote there. */
 global_variable u32 s_gpuGuestStaleTiles[NATIVE_GPU_PENDING_TILE_WORDS];
 #ifdef __vita__
+/* The packet the renderer thread is drawing (that thread only). */
 global_variable NativeGpuFramePacket *s_gpuBackendPacket;
+/* Submitted packets the renderer has not finished, oldest first from
+ * s_gpuBackendPacketIndex: the frontend's packet is the next slot. */
+global_variable int s_gpuBackendPacketIndex;
+global_variable int s_gpuPacketsQueued;
 global_variable NativeGpuBackendTaskFn s_gpuBackendTask;
 global_variable void *s_gpuBackendTaskArg;
 global_variable DRAWENV s_gpuBackendDrawEnv;
@@ -203,8 +212,8 @@ global_variable DISPENV s_gpuBackendTaskDispEnv;
 global_variable SceKernelLwMutexWork s_gpuBackendMutex;
 global_variable SceKernelLwCondWork s_gpuBackendCond;
 global_variable SceUID s_gpuBackendThread = -1;
-global_variable int s_gpuBackendBusy;
-global_variable int s_gpuBackendWorkReady;
+/* A synchronous task posted and not finished yet. */
+global_variable int s_gpuBackendTaskPending;
 global_variable int s_gpuBackendInitComplete;
 global_variable volatile int s_gpuBackendExit;
 global_variable int s_gpuBackendEnabled;
@@ -257,12 +266,56 @@ internal void NativeGpu_BackendUnlock(void)
 	sceKernelUnlockLwMutex(&s_gpuBackendMutex, 1);
 }
 
+/* Microseconds and count of the times one thread blocked on the other,
+ * read by the frontend's progress lines (NATIVE_GPU_WAIT_*). */
+unsigned long long pcsx_vita_ctr_wait_us[NATIVE_GPU_WAIT_COUNT];
+unsigned pcsx_vita_ctr_wait_n[NATIVE_GPU_WAIT_COUNT];
+
+internal void NativeGpu_WaitAdd(int slot, SceUInt64 start)
+{
+	pcsx_vita_ctr_wait_us[slot] += sceKernelGetProcessTimeWide() - start;
+	pcsx_vita_ctr_wait_n[slot]++;
+}
+
+internal int NativeGpu_BackendIdleLocked(void)
+{
+	return s_gpuPacketsQueued == 0 && !s_gpuBackendTaskPending;
+}
+
 internal void NativeGpu_BackendWaitIdleLocked(void)
 {
-	while (s_gpuBackendBusy)
+	while (!NativeGpu_BackendIdleLocked())
 	{
 		sceKernelWaitLwCond(&s_gpuBackendCond, NULL);
 	}
+}
+
+internal void NativeGpu_BackendWaitIdleTimed(int slot)
+{
+	if (NativeGpu_BackendIdleLocked())
+		return;
+	const SceUInt64 start = sceKernelGetProcessTimeWide();
+	NativeGpu_BackendWaitIdleLocked();
+	NativeGpu_WaitAdd(slot, start);
+}
+
+/* Queues the frontend's packet for the renderer and moves the frontend to
+ * the next slot, once the renderer has finished the packet that used it. */
+internal void NativeGpu_BackendQueuePacketLocked(int waitSlot)
+{
+	s_gpuPacketsQueued++;
+	s_gpuFrontendPacketIndex = (s_gpuFrontendPacketIndex + 1) % NATIVE_GPU_FRAME_PACKET_COUNT;
+	sceKernelSignalLwCond(&s_gpuBackendCond);
+	if (s_gpuPacketsQueued >= NATIVE_GPU_FRAME_PACKET_COUNT)
+	{
+		const SceUInt64 start = sceKernelGetProcessTimeWide();
+		while (s_gpuPacketsQueued >= NATIVE_GPU_FRAME_PACKET_COUNT)
+		{
+			sceKernelWaitLwCond(&s_gpuBackendCond, NULL);
+		}
+		NativeGpu_WaitAdd(waitSlot, start);
+	}
+	NativeGpu_BindFrontendPacket();
 }
 
 internal void NativeGpu_BackendApplyEnv(const DRAWENV *drawEnv, const DISPENV *dispEnv)
@@ -366,27 +419,37 @@ internal int NativeGpu_BackendThreadMain(SceSize args, void *argp)
 	NativeGpu_BackendLock();
 	for (;;)
 	{
-		while (!s_gpuBackendWorkReady && !s_gpuBackendExit)
+		if (NativeGpu_BackendIdleLocked() && !s_gpuBackendExit)
 		{
-			sceKernelWaitLwCond(&s_gpuBackendCond, NULL);
+			const SceUInt64 idleStart = sceKernelGetProcessTimeWide();
+			while (NativeGpu_BackendIdleLocked() && !s_gpuBackendExit)
+			{
+				sceKernelWaitLwCond(&s_gpuBackendCond, NULL);
+			}
+			NativeGpu_WaitAdd(NATIVE_GPU_WAIT_RENDER_IDLE, idleStart);
 		}
 		if (s_gpuBackendExit)
 		{
 			break;
 		}
-		NativeGpuFramePacket *packet = s_gpuBackendPacket;
-		NativeGpuBackendTaskFn task = s_gpuBackendTask;
-		void *taskArg = s_gpuBackendTaskArg;
-		if (packet != NULL)
+		/* Tasks are posted only once the queue is empty. */
+		NativeGpuFramePacket *packet = NULL;
+		NativeGpuBackendTaskFn task = NULL;
+		void *taskArg = NULL;
+		if (s_gpuPacketsQueued > 0)
 		{
+			packet = &s_gpuFramePackets[s_gpuBackendPacketIndex];
 			NativeGpu_BackendApplyEnv(&packet->drawEnv, &packet->dispEnv);
 		}
 		else
 		{
+			task = s_gpuBackendTask;
+			taskArg = s_gpuBackendTaskArg;
 			NativeGpu_BackendApplyEnv(&s_gpuBackendTaskDrawEnv, &s_gpuBackendTaskDispEnv);
 		}
-		s_gpuBackendWorkReady = 0;
+		s_gpuBackendPacket = packet;
 		NativeGpu_BackendUnlock();
+		const SceUInt64 workStart = sceKernelGetProcessTimeWide();
 		if (packet != NULL)
 		{
 			if (packet->beginScene)
@@ -403,11 +466,20 @@ internal int NativeGpu_BackendThreadMain(SceSize args, void *argp)
 		{
 			task(taskArg);
 		}
+		NativeGpu_WaitAdd(packet != NULL ? NATIVE_GPU_WAIT_RENDER_PACKET : NATIVE_GPU_WAIT_RENDER_TASK, workStart);
 		NativeGpu_BackendLock();
 		s_gpuBackendPacket = NULL;
-		s_gpuBackendTask = NULL;
-		s_gpuBackendTaskArg = NULL;
-		s_gpuBackendBusy = 0;
+		if (packet != NULL)
+		{
+			s_gpuBackendPacketIndex = (s_gpuBackendPacketIndex + 1) % NATIVE_GPU_FRAME_PACKET_COUNT;
+			s_gpuPacketsQueued--;
+		}
+		else
+		{
+			s_gpuBackendTask = NULL;
+			s_gpuBackendTaskArg = NULL;
+			s_gpuBackendTaskPending = 0;
+		}
 		sceKernelSignalLwCondAll(&s_gpuBackendCond);
 	}
 	NativeGpu_BackendUnlock();
@@ -428,10 +500,11 @@ int NativeGpu_InitBackend(int width, int height)
 	s_gpuFrontendFramePrepared = 0;
 	s_gpuSynchronousFrame = 0;
 	s_gpuBackendPacket = NULL;
+	s_gpuBackendPacketIndex = 0;
+	s_gpuPacketsQueued = 0;
 	s_gpuBackendTask = NULL;
 	s_gpuBackendTaskArg = NULL;
-	s_gpuBackendBusy = 0;
-	s_gpuBackendWorkReady = 0;
+	s_gpuBackendTaskPending = 0;
 	s_gpuBackendInitComplete = 0;
 	s_gpuBackendExit = 0;
 	s_gpuBackendInitWidth = width;
@@ -447,7 +520,11 @@ int NativeGpu_InitBackend(int width, int height)
 		sceKernelDeleteLwMutex(&s_gpuBackendMutex);
 		return 0;
 	}
-	s_gpuBackendThread = sceKernelCreateThread("CTR Renderer", NativeGpu_BackendThreadMain, 0x10000100, 0x40000, 0, 0, NULL);
+	/* Core 1: the emulation runs on core 0 and the System 12 board thread on
+	 * core 2 (frontend/pcsxr-threads.c); left to the scheduler, the renderer
+	 * also ran on core 2 and the main thread waited for the board. */
+	s_gpuBackendThread = sceKernelCreateThread("CTR Renderer", NativeGpu_BackendThreadMain, 0x10000100, 0x40000, 0,
+	                                           SCE_KERNEL_CPU_MASK_USER_1, NULL);
 	if (s_gpuBackendThread < 0)
 	{
 		sceKernelDeleteLwCond(&s_gpuBackendCond);
@@ -503,7 +580,7 @@ void NativeGpu_SyncBackend(void)
 		return;
 	}
 	NativeGpu_BackendLock();
-	NativeGpu_BackendWaitIdleLocked();
+	NativeGpu_BackendWaitIdleTimed(NATIVE_GPU_WAIT_SYNC);
 	NativeGpu_BackendUnlock();
 #endif
 }
@@ -521,16 +598,14 @@ void NativeGpu_RunBackendTaskSync(NativeGpuBackendTaskFn task, void *arg)
 		return;
 	}
 	NativeGpu_BackendLock();
-	NativeGpu_BackendWaitIdleLocked();
-	s_gpuBackendPacket = NULL;
+	NativeGpu_BackendWaitIdleTimed(NATIVE_GPU_WAIT_TASK_PREVIOUS);
 	s_gpuBackendTask = task;
 	s_gpuBackendTaskArg = arg;
 	s_gpuBackendTaskDrawEnv = activeDrawEnv;
 	s_gpuBackendTaskDispEnv = activeDispEnv;
-	s_gpuBackendBusy = 1;
-	s_gpuBackendWorkReady = 1;
+	s_gpuBackendTaskPending = 1;
 	sceKernelSignalLwCond(&s_gpuBackendCond);
-	NativeGpu_BackendWaitIdleLocked();
+	NativeGpu_BackendWaitIdleTimed(NATIVE_GPU_WAIT_TASK);
 	NativeGpu_BackendUnlock();
 #else
 	if (task != NULL)
@@ -762,15 +837,7 @@ int NativeGpu_SubmitPartialFrame(void)
 	packet->beginScene = !s_gpuFrameBegun;
 	packet->endScene = 0;
 	NativeGpu_BackendLock();
-	NativeGpu_BackendWaitIdleLocked();
-	s_gpuBackendPacket = packet;
-	s_gpuBackendTask = NULL;
-	s_gpuBackendTaskArg = NULL;
-	s_gpuBackendBusy = 1;
-	s_gpuBackendWorkReady = 1;
-	s_gpuFrontendPacketIndex ^= 1;
-	NativeGpu_BindFrontendPacket();
-	sceKernelSignalLwCond(&s_gpuBackendCond);
+	NativeGpu_BackendQueuePacketLocked(NATIVE_GPU_WAIT_PARTIAL);
 	NativeGpu_BackendUnlock();
 #else
 	const int blankDisplay = packet->blankDisplay;
@@ -832,20 +899,12 @@ int NativeGpu_SubmitFrontendFrame(void)
 	packet->beginScene = !s_gpuFrameBegun;
 	packet->endScene = 1;
 	NativeGpu_BackendLock();
-	NativeGpu_BackendWaitIdleLocked();
-	s_gpuBackendPacket = packet;
-	s_gpuBackendTask = NULL;
-	s_gpuBackendTaskArg = NULL;
-	s_gpuBackendBusy = 1;
-	s_gpuBackendWorkReady = 1;
-	s_gpuFrontendPacketIndex ^= 1;
-	NativeGpu_BindFrontendPacket();
+	NativeGpu_BackendQueuePacketLocked(NATIVE_GPU_WAIT_SUBMIT);
+	NativeGpu_BackendUnlock();
 	ClearSplits();
 	s_gpuFrontendFramePrepared = 0;
 	s_gpuSynchronousFrame = 0;
 	s_gpuFrameBegun = 0;
-	sceKernelSignalLwCond(&s_gpuBackendCond);
-	NativeGpu_BackendUnlock();
 	return 1;
 #else
 	if (s_gpuSynchronousFrame)

@@ -13,6 +13,23 @@
 
 typedef void (*NativeGpuBackendTaskFn)(void *arg);
 
+/* Where the threads block on each other (pcsx_vita_ctr_wait_us/_n): the
+ * frontend for a free packet, before and during a synchronous task, or for
+ * an idle renderer; the renderer for work, in vglSwapBuffers, and its work. */
+enum
+{
+	NATIVE_GPU_WAIT_SUBMIT,
+	NATIVE_GPU_WAIT_PARTIAL,
+	NATIVE_GPU_WAIT_TASK_PREVIOUS,
+	NATIVE_GPU_WAIT_TASK,
+	NATIVE_GPU_WAIT_SYNC,
+	NATIVE_GPU_WAIT_RENDER_IDLE,
+	NATIVE_GPU_WAIT_RENDER_SWAP,
+	NATIVE_GPU_WAIT_RENDER_PACKET,
+	NATIVE_GPU_WAIT_RENDER_TASK,
+	NATIVE_GPU_WAIT_COUNT
+};
+
 extern DISPENV activeDispEnv;
 extern DRAWENV activeDrawEnv;
 extern int g_GPUDisabledState;

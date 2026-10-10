@@ -60,6 +60,8 @@ static uint16_t g_xmap[GAME_W];
 static uint16_t g_ymap[DISPLAY_H];
 static char g_report_path[1024];
 static char g_capture_path[1024];
+/* --progress-every N: frames between progress lines (600). */
+static unsigned g_progress_every = 600;
 static uint16_t *g_capture_pixels;
 static size_t g_capture_capacity;
 static unsigned g_capture_width;
@@ -1171,6 +1173,62 @@ static void load_args_file(int *argc, char ***argv)
     *argv = g_args_argv;
 }
 
+/* Microseconds and count of the vblank waits in pace_frame. */
+static unsigned long long g_vblank_wait_us;
+static unsigned g_vblank_wait_n;
+
+/* Where the threads waited since the last progress line, in ms per frame
+ * (and waits per frame): the frontend for the renderer by reason, the
+ * renderer for work, in vglSwapBuffers and working, the main thread for the
+ * board thread and the vblank. */
+static void print_wait_stats(unsigned runs)
+{
+#ifdef STANDALONE_VITAGL
+    extern unsigned long long pcsx_vita_ctr_wait_us[];
+    extern unsigned pcsx_vita_ctr_wait_n[];
+    static const char *const names[] = {
+        "submit", "partial", "task_prev", "task", "sync",
+        "r_idle", "r_swap", "r_packet", "r_task" };
+    enum { SLOTS = sizeof(names) / sizeof(names[0]) };
+    static unsigned long long last_us[SLOTS];
+    static unsigned last_n[SLOTS];
+#endif
+#ifdef ARCADE_SYSTEM12
+    extern unsigned long long system12_board_wait_us;
+    extern unsigned system12_board_wait_n;
+    static unsigned long long last_board_us;
+    static unsigned last_board_n;
+#endif
+    static unsigned long long last_vblank_us;
+    static unsigned last_vblank_n, last_runs;
+    const unsigned frames = runs - last_runs;
+    char line[512];
+    int at = 0;
+    if (!frames)
+        return;
+#define WAIT_FIELD(name, us, n) \
+    at += snprintf(line + at, sizeof(line) - at, " %s=%.2f/%.2f", (name), \
+        (double)(us) / 1000.0 / frames, (double)(n) / frames)
+#ifdef STANDALONE_VITAGL
+    for (int i = 0; i < SLOTS; i++) {
+        WAIT_FIELD(names[i], pcsx_vita_ctr_wait_us[i] - last_us[i], pcsx_vita_ctr_wait_n[i] - last_n[i]);
+        last_us[i] = pcsx_vita_ctr_wait_us[i];
+        last_n[i] = pcsx_vita_ctr_wait_n[i];
+    }
+#endif
+#ifdef ARCADE_SYSTEM12
+    WAIT_FIELD("board", system12_board_wait_us - last_board_us, system12_board_wait_n - last_board_n);
+    last_board_us = system12_board_wait_us;
+    last_board_n = system12_board_wait_n;
+#endif
+    WAIT_FIELD("vblank", g_vblank_wait_us - last_vblank_us, g_vblank_wait_n - last_vblank_n);
+#undef WAIT_FIELD
+    last_vblank_us = g_vblank_wait_us;
+    last_vblank_n = g_vblank_wait_n;
+    last_runs = runs;
+    sceClibPrintf("pcsx-vita: waits ms/frame (waits/frame)%s\n", line);
+}
+
 /* Vblank pacing, once per emulated frame: at most one frame per display
  * refresh (a frame finished late does not wait), and the audio resampling
  * ratio follows the queue, within 0.5% of the nominal ratio, so the queue
@@ -1189,7 +1247,10 @@ static void pace_frame(void)
     }
     int now = sceDisplayGetVcount();
     if (now == g_last_vcount) {
+        const SceUInt64 start = sceKernelGetProcessTimeWide();
         sceDisplayWaitVblankStart();
+        g_vblank_wait_us += sceKernelGetProcessTimeWide() - start;
+        g_vblank_wait_n++;
         now = sceDisplayGetVcount();
     }
     g_last_vcount = now;
@@ -1330,6 +1391,11 @@ int main(int argc, char **argv)
             if (ret + 1 >= argc || !argv[ret + 1][0] ||
                 strlen(argv[ret + 1]) >= sizeof(g_report_path)) return 4;
             snprintf(g_report_path, sizeof(g_report_path), "%s", argv[++ret]);
+            continue;
+        }
+        if (!strcmp(argv[ret], "--progress-every") && ret + 1 < argc) {
+            g_progress_every = (unsigned)atoi(argv[++ret]);
+            if (!g_progress_every) g_progress_every = 600;
             continue;
         }
         if (!strcmp(argv[ret], "--capture-ppm")) {
@@ -1507,7 +1573,7 @@ int main(int argc, char **argv)
         if (runs % 60 == 0)
             sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
 #ifdef ARCADE_SYSTEM12
-        if (report_progress && (runs % 600 == 0 || runs == validation_frames)) {
+        if (report_progress && (runs % g_progress_every == 0 || runs == validation_frames)) {
             /* Source frames the audio device consumed since the last line, per
              * second of wall time: the pacing clock's real rate. */
             static uint64_t last_consumed, last_ms;
@@ -1533,6 +1599,7 @@ int main(int argc, char **argv)
                 runs, validation_frames,
                 (unsigned long long)(SDL_GetTicks() - validation_started_ms),
                 g_next_input_event, g_input_event_count, (unsigned)(mem.size_user / 1024), gl_free_kb);
+            print_wait_stats(runs);
         }
 #endif
     }

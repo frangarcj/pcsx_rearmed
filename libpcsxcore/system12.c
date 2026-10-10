@@ -29,6 +29,9 @@
 #include <errno.h>
 #ifdef SYSTEM12_BOARD_THREAD
 #include <stdatomic.h>
+#ifdef __vita__
+#include <psp2/kernel/processmgr.h>
+#endif
 #include <retro_timers.h>
 #include "../frontend/pcsxr-threads.h"
 #endif
@@ -688,10 +691,20 @@ static STRHEAD_RET_TYPE board_thread(void *unused)
 
 /* Wait until the board has run the commands before `target` (modulo 2^32),
  * delivering board audio meanwhile. */
+#ifdef __vita__
+/* Microseconds and count of the main thread's waits for the board thread,
+ * for the Vita frontend's progress lines. */
+unsigned long long system12_board_wait_us;
+unsigned system12_board_wait_n;
+#endif
+
 static void board_wait(unsigned target)
 {
     if ((int)(atomic_load_explicit(&bt.done, memory_order_acquire) - target) >= 0)
         return;
+#ifdef __vita__
+    const SceUInt64 wait_start = sceKernelGetProcessTimeWide();
+#endif
     slock_lock(bt.lock);
     while ((int)(atomic_load_explicit(&bt.done, memory_order_acquire) - target) < 0) {
         if (board_audio_pending()) {
@@ -703,6 +716,10 @@ static void board_wait(unsigned target)
         scond_wait(bt.done_cond, bt.lock);
     }
     slock_unlock(bt.lock);
+#ifdef __vita__
+    system12_board_wait_us += sceKernelGetProcessTimeWide() - wait_start;
+    system12_board_wait_n++;
+#endif
 }
 #endif
 
