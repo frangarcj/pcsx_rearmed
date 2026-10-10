@@ -1386,6 +1386,31 @@ void MakeVertexRect(GrVertex *vertex, VERTTYPE *p0, s16 w, s16 h)
 	vertex[3].y = vertex[0].y;
 }
 
+#if defined(__vita__) || defined(PCSX_NATIVE_VITA_PATH)
+/* A polygon whose vertices share a U (or V) stretches one texel column (or
+ * row) over it: every pixel samples that texel. Its coordinate interpolates
+ * to the texel's left (top) edge, an exact integer the shaders floor(), and
+ * the Vita's half-precision varyings (vglUseLowPrecision) can bring it one
+ * step below: the previous texel was drawn (Soul Calibur's life bars, a
+ * stretched column, lost their green to a transparent neighbour). Sample
+ * the texel's centre instead: tcx/tcy are half-texel offsets. */
+internal void CentreConstantTexcoords(GrVertex *vertex, int count)
+{
+	bool sameU = true;
+	bool sameV = true;
+	for (int i = 1; i < count; i++)
+	{
+		sameU = sameU && vertex[i].u == vertex[0].u;
+		sameV = sameV && vertex[i].v == vertex[0].v;
+	}
+	for (int i = 0; i < count; i++)
+	{
+		vertex[i].tcx = sameU ? 1 : 0;
+		vertex[i].tcy = sameV ? 1 : 0;
+	}
+}
+#endif
+
 void MakeTexcoordQuad(GrVertex *vertex, u8 *uv0, u8 *uv1, u8 *uv2, u8 *uv3, s16 page, s16 clut, u8 dither)
 {
 	assert(uv0);
@@ -1423,6 +1448,9 @@ void MakeTexcoordQuad(GrVertex *vertex, u8 *uv0, u8 *uv1, u8 *uv2, u8 *uv3, s16 
 	vertex[3].dither = dither;
 	vertex[3].page = texPage;
 	vertex[3].clut = clut;
+#if defined(__vita__) || defined(PCSX_NATIVE_VITA_PATH)
+	CentreConstantTexcoords(vertex, 4);
+#endif
 	/* if (g_cfg_bilinearFiltering) { vertex[0].tcx = -1; vertex[0].tcy = -1; vertex[1].tcx = -1; vertex[1].tcy = -1; vertex[2].tcx = -1; vertex[2].tcy = -1; vertex[3].tcx = -1; vertex[3].tcy = -1; } */
 }
 
@@ -1455,6 +1483,9 @@ void MakeTexcoordTriangle(GrVertex *vertex, u8 *uv0, u8 *uv1, u8 *uv2, s16 page,
 	vertex[2].dither = dither;
 	vertex[2].page = texPage;
 	vertex[2].clut = clut;
+#if defined(__vita__) || defined(PCSX_NATIVE_VITA_PATH)
+	CentreConstantTexcoords(vertex, 3);
+#endif
 	/* if (g_cfg_bilinearFiltering) { vertex[0].tcx = -1; vertex[0].tcy = -1; vertex[1].tcx = -1; vertex[1].tcy = -1; vertex[2].tcx = -1; vertex[2].tcy = -1; vertex[3].tcx = -1; vertex[3].tcy = -1; } */
 }
 
