@@ -2107,9 +2107,12 @@ internal void AddSplit(bool semiTrans, bool textured, bool framebufferFeedback, 
 	}
 
 #if defined(__vita__) || defined(PCSX_NATIVE_VITA_PATH)
-	const bool p4CacheEligible = textured && s_gpu.overrideTexture == 0 && texFormat == TF_4_BIT && !framebufferFeedback;
-	const bool p4SuperTurboTint = p4CacheEligible && superTurboTint;
-	const s16 p4Page = p4CacheEligible ? GetTPageBase(tpage) : -1;
+	/* 8-bit pages too (as GXM P8), when the page does not run past VRAM's
+	 * right edge; their page carries NATIVE_P8_PAGE_FLAG (0x40). */
+	const bool p8Page = texFormat == TF_8_BIT && (GetTPageBase(tpage) & 15) < 15;
+	const bool p4CacheEligible = textured && s_gpu.overrideTexture == 0 && (texFormat == TF_4_BIT || p8Page) && !framebufferFeedback;
+	const bool p4SuperTurboTint = p4CacheEligible && texFormat == TF_4_BIT && superTurboTint;
+	const s16 p4Page = p4CacheEligible ? (s16)(GetTPageBase(tpage) | (texFormat == TF_8_BIT ? 0x40 : 0)) : -1;
 	const u16 p4Clut = p4CacheEligible ? (u16)clut : 0;
 #endif
 

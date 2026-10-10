@@ -155,9 +155,15 @@ void (*pcsx_vita_gpu_label_cb)(int kind, const char *name, unsigned handle);
 #define NATIVE_P4_PALETTE_BYTES  (16 * 4)
 #define NATIVE_P4_INDEX_BYTES    (TPAGE_WIDTH * TPAGE_HEIGHT / 2)
 #define NATIVE_P4_UPLOAD_BYTES   (NATIVE_P4_PALETTE_BYTES + NATIVE_P4_INDEX_BYTES)
+/* The cache also holds 8-bit pages, as GXM P8 textures: their page carries
+ * this flag (the page index itself is 0..63), and they span two 64-wide
+ * VRAM page columns and a 256-entry CLUT. */
+#define NATIVE_P8_PAGE_FLAG      0x40
+#define NATIVE_P8_PALETTE_BYTES  (256 * 4)
+#define NATIVE_P8_PAGE_BYTES     (TPAGE_WIDTH * TPAGE_HEIGHT)
 #define NATIVE_PALETTE_CLUT_COUNT (64 * VRAM_MAX_HEIGHT)
 
-/* A cached 4-bit texture: one (page, CLUT, tint), built from the CPU's VRAM
+/* A cached 4-bit (or 8-bit) texture: one (page, CLUT, tint), built from the CPU's VRAM
  * copy. It is current while the versions it was built from are those of
  * its page and CLUT (s_p4PageVersion, s_p4ClutVersion). */
 struct NativeP4CacheEntry
@@ -171,7 +177,7 @@ struct NativeP4CacheEntry
 	u32 builtPageVersion; /* 0: not built */
 	u32 builtClutVersion;
 #if defined(__vita__)
-	void *palette; /* GXM palette (16 ABGR words) of this entry */
+	void *palette; /* GXM palette (16, or 256, ABGR words) of this entry */
 #endif
 	b32 occupied;
 };
@@ -189,7 +195,7 @@ global_variable struct
 {
 	void *data;
 	u32 version;
-} s_p4PageData[(1024 / TPAGE_HEIGHT) * 16];
+} s_p4PageData[(1024 / TPAGE_HEIGHT) * 16], s_p8PageData[(1024 / TPAGE_HEIGHT) * 16];
 #endif
 
 global_variable struct NativeP4CacheEntry s_p4Cache[NATIVE_P4_CACHE_CAPACITY];
@@ -220,7 +226,7 @@ internal u32 NativeRenderer_P4HashSlot(u32 key)
 
 internal u32 NativeRenderer_P4Key(int page, int clut, int superTurboTint)
 {
-	return ((u32)(page & 0x3f) << 17) | ((u32)(superTurboTint != 0) << 16) | (u16)clut;
+	return ((u32)(page & 0x7f) << 17) | ((u32)(superTurboTint != 0) << 16) | (u16)clut;
 }
 
 internal void NativeRenderer_InsertP4Hash(u32 key, int cacheIndex)
@@ -712,8 +718,12 @@ void NativeRenderer_Shutdown(void)
 	}
 #if defined(__vita__)
 	for (int page = 0; page < (int)SDL_arraysize(s_p4PageData); page++)
+	{
 		vglLazyFree(s_p4PageData[page].data);
+		vglLazyFree(s_p8PageData[page].data);
+	}
 	SDL_memset(s_p4PageData, 0, sizeof(s_p4PageData));
+	SDL_memset(s_p8PageData, 0, sizeof(s_p8PageData));
 #endif
 	NativeRenderer_DestroyTexture(s_presentLutTexture);
 #endif
@@ -2621,8 +2631,12 @@ int NativeRenderer_InitialisePSX(void)
 		s_p4ClutVersion[clut] = 1;
 #if defined(__vita__)
 	for (int page = 0; page < (int)SDL_arraysize(s_p4PageData); page++)
+	{
 		vglLazyFree(s_p4PageData[page].data);
+		vglLazyFree(s_p8PageData[page].data);
+	}
 	SDL_memset(s_p4PageData, 0, sizeof(s_p4PageData));
+	SDL_memset(s_p8PageData, 0, sizeof(s_p8PageData));
 #endif
 	s_p4CacheUseCounter = 0;
 	s_p4FrameSerial = 1;
@@ -3092,15 +3106,37 @@ internal int NativeRenderer_VRAMRectsOverlap(const RECT16 *a, const RECT16 *b)
 
 internal void NativeRenderer_GetP4SourceRects(int page, int clut, RECT16 *pageRect, RECT16 *clutRect)
 {
+	const int p8 = (page & NATIVE_P8_PAGE_FLAG) != 0;
+	page &= NATIVE_P8_PAGE_FLAG - 1;
 	pageRect->x = (s16)((page & 15) * 64);
 	pageRect->y = (s16)((page >> 4) * 256);
-	pageRect->w = 64;
+	pageRect->w = p8 ? 128 : 64;
 	pageRect->h = 256;
 
 	clutRect->x = (s16)((clut & 0x3f) << 4);
 	clutRect->y = (s16)(clut >> 6);
-	clutRect->w = 16;
+	clutRect->w = p8 ? 256 : 16;
 	clutRect->h = 1;
+}
+
+/* The versions a cached texture is built from: the newest of the 64-wide
+ * pages and 16-texel CLUT units its rects cover (versions only grow). */
+internal u32 NativeRenderer_P4SourcePageVersion(int page)
+{
+	const int base = page & (NATIVE_P8_PAGE_FLAG - 1);
+	const u32 version = s_p4PageVersion[base];
+	if (!(page & NATIVE_P8_PAGE_FLAG))
+		return version;
+	return SDL_max(version, s_p4PageVersion[base + 1]);
+}
+
+internal u32 NativeRenderer_P4SourceClutVersion(const RECT16 *clutRect)
+{
+	const u32 *versions = &s_p4ClutVersion[clutRect->y * 64 + clutRect->x / 16];
+	u32 version = versions[0];
+	for (int unit = 1; unit < clutRect->w / 16; unit++)
+		version = SDL_max(version, versions[unit]);
+	return version;
 }
 
 internal void NativeRenderer_InvalidatePaletteCacheRows(const RECT16 *rect)
@@ -3163,11 +3199,11 @@ internal int NativeRenderer_EnsureP4Texture(struct NativeP4CacheEntry *entry)
 	return 1;
 }
 
-/* The entry's palette as GXM P4_ABGR words (byte order R, G, B, A). */
+/* The entry's palette as GXM P4_ABGR / P8_ABGR words (byte order R, G, B, A). */
 internal void NativeRenderer_ConvertP4Palette(const struct NativeP4CacheEntry *entry, const RECT16 *clutRect, u8 *paletteOut)
 {
 	const u16 *palette = s_vram.cpuPixels + (size_t)clutRect->y * VRAM_WIDTH + clutRect->x;
-	for (int colorIndex = 0; colorIndex < 16; colorIndex++)
+	for (int colorIndex = 0; colorIndex < clutRect->w; colorIndex++)
 	{
 		const u16 color = palette[colorIndex];
 		u8 r = (u8)(color & 31);
@@ -3188,12 +3224,71 @@ internal void NativeRenderer_ConvertP4Palette(const struct NativeP4CacheEntry *e
 	}
 }
 
+internal int NativeRenderer_BuildP8Texture(struct NativeP4CacheEntry *entry, const RECT16 *pageRect, const RECT16 *clutRect,
+                                          u32 pageVersion, u32 clutVersion)
+{
+	const int page = entry->page & (NATIVE_P8_PAGE_FLAG - 1);
+#if defined(__vita__)
+	/* As the 4-bit pages: the PSX's 8-bit texels are GXM P8's, as they are. */
+	if (s_p8PageData[page].data == NULL || s_p8PageData[page].version != pageVersion)
+	{
+		u8 *indices = (u8 *)vglMemalign(128, NATIVE_P8_PAGE_BYTES);
+		if (indices == NULL)
+			return 0;
+		for (int row = 0; row < TPAGE_HEIGHT; row++)
+			SDL_memcpy(indices + row * TPAGE_WIDTH, s_vram.cpuPixels + (size_t)(pageRect->y + row) * VRAM_WIDTH + pageRect->x,
+			           TPAGE_WIDTH);
+		vglLazyFree(s_p8PageData[page].data);
+		s_p8PageData[page].data = indices;
+		s_p8PageData[page].version = pageVersion;
+	}
+	if (entry->palette == NULL || entry->builtClutVersion != clutVersion)
+	{
+		u8 *palette = (u8 *)vglMemalign(SCE_GXM_PALETTE_ALIGNMENT, NATIVE_P8_PALETTE_BYTES);
+		if (palette == NULL)
+			return 0;
+		NativeRenderer_ConvertP4Palette(entry, clutRect, palette);
+		vglLazyFree(entry->palette);
+		entry->palette = palette;
+	}
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, entry->texture);
+	vglOverloadTexDataPointer(GL_TEXTURE_2D, NULL);
+	vglSetupTexture(GL_TEXTURE_2D, s_p8PageData[page].data, SCE_GXM_TEXTURE_FORMAT_P8_ABGR,
+	                SCE_GXM_TEXTURE_LINEAR, TPAGE_WIDTH, TPAGE_HEIGHT, 1);
+	sceGxmTextureSetPalette(vglGetGxmTexture(GL_TEXTURE_2D), entry->palette);
+#else
+	(void)page;
+	u8 palette[NATIVE_P8_PALETTE_BYTES];
+	NativeRenderer_ConvertP4Palette(entry, clutRect, palette);
+	u8 *rgba = (u8 *)malloc((size_t)TPAGE_WIDTH * TPAGE_HEIGHT * 4);
+	if (rgba == NULL)
+		return 0;
+	for (int row = 0; row < TPAGE_HEIGHT; row++)
+	{
+		const u8 *src = (const u8 *)(s_vram.cpuPixels + (size_t)(pageRect->y + row) * VRAM_WIDTH + pageRect->x);
+		for (int texel = 0; texel < TPAGE_WIDTH; texel++)
+			SDL_memcpy(rgba + ((size_t)row * TPAGE_WIDTH + texel) * 4, palette + src[texel] * 4, 4);
+	}
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, entry->texture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, TPAGE_WIDTH, TPAGE_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+	free(rgba);
+#endif
+	s_lastBoundTexture = (TextureID)-1;
+	entry->builtPageVersion = pageVersion;
+	entry->builtClutVersion = clutVersion;
+	return 1;
+}
+
 internal int NativeRenderer_BuildP4Texture(struct NativeP4CacheEntry *entry, const RECT16 *pageRect, const RECT16 *clutRect)
 {
-	const u32 pageVersion = s_p4PageVersion[entry->page];
-	const u32 clutVersion = s_p4ClutVersion[clutRect->y * 64 + clutRect->x / 16];
+	const u32 pageVersion = NativeRenderer_P4SourcePageVersion(entry->page);
+	const u32 clutVersion = NativeRenderer_P4SourceClutVersion(clutRect);
 	if (!NativeRenderer_EnsureP4Texture(entry))
 		return 0;
+	if (entry->page & NATIVE_P8_PAGE_FLAG)
+		return NativeRenderer_BuildP8Texture(entry, pageRect, clutRect, pageVersion, clutVersion);
 #if defined(__vita__)
 	/* The page's indices once for all its CLUTs, the entry's palette, and a
 	 * texture pointing at both: nothing is copied per entry. */
@@ -3279,14 +3374,26 @@ internal void NativeRenderer_QueueStaleP4Rect(const RECT16 *rect, int wholePage)
 
 void NativeRenderer_QueueStaleP4Sources(int page, int clut)
 {
-	if (page < 0 || page >= (int)(VRAM_HEIGHT / TPAGE_HEIGHT) * 16 || clut < 0)
+	if (page < 0 || (page & (NATIVE_P8_PAGE_FLAG - 1)) >= (int)(VRAM_HEIGHT / TPAGE_HEIGHT) * 16 || clut < 0)
 		return;
 	RECT16 pageRect;
 	RECT16 clutRect;
 	NativeRenderer_GetP4SourceRects(page, clut, &pageRect, &clutRect);
 	if (clutRect.y < 0 || clutRect.y >= VRAM_HEIGHT || clutRect.x < 0 || clutRect.x + clutRect.w > VRAM_WIDTH)
 		return;
-	NativeRenderer_QueueStaleP4Rect(&pageRect, 1);
+	if (pageRect.w > 64)
+	{
+		/* An 8-bit page: its two 64-wide pages, each tracked on its own. */
+		RECT16 half = pageRect;
+		half.w = 64;
+		NativeRenderer_QueueStaleP4Rect(&half, 1);
+		half.x = (s16)(half.x + 64);
+		NativeRenderer_QueueStaleP4Rect(&half, 1);
+	}
+	else
+	{
+		NativeRenderer_QueueStaleP4Rect(&pageRect, 1);
+	}
 	NativeRenderer_QueueStaleP4Rect(&clutRect, 0);
 }
 
@@ -3303,7 +3410,7 @@ void NativeRenderer_SyncStaleP4Sources(void)
 TextureID NativeRenderer_GetCachedP4Texture(int page, int clut, int superTurboTint)
 {
 
-	if (page < 0 || page >= (int)(VRAM_HEIGHT / TPAGE_HEIGHT) * 16 || clut < 0)
+	if (page < 0 || (page & (NATIVE_P8_PAGE_FLAG - 1)) >= (int)(VRAM_HEIGHT / TPAGE_HEIGHT) * 16 || clut < 0)
 	{
 		return (0);
 	}
@@ -3311,7 +3418,8 @@ TextureID NativeRenderer_GetCachedP4Texture(int page, int clut, int superTurboTi
 	RECT16 pageRect;
 	RECT16 clutRect;
 	NativeRenderer_GetP4SourceRects(page, clut, &pageRect, &clutRect);
-	if (clutRect.y < 0 || clutRect.y >= VRAM_HEIGHT || clutRect.x < 0 || clutRect.x + clutRect.w > VRAM_WIDTH)
+	if (clutRect.y < 0 || clutRect.y >= VRAM_HEIGHT || clutRect.x < 0 || clutRect.x + clutRect.w > VRAM_WIDTH ||
+	    pageRect.x + pageRect.w > VRAM_WIDTH)
 	{
 		return (0);
 	}
@@ -3341,8 +3449,8 @@ TextureID NativeRenderer_GetCachedP4Texture(int page, int clut, int superTurboTi
 		}
 	}
 
-	if (entry != NULL && entry->builtPageVersion == s_p4PageVersion[page] &&
-	    entry->builtClutVersion == s_p4ClutVersion[clutRect.y * 64 + clutRect.x / 16])
+	if (entry != NULL && entry->builtPageVersion == NativeRenderer_P4SourcePageVersion(page) &&
+	    entry->builtClutVersion == NativeRenderer_P4SourceClutVersion(&clutRect))
 	{
 		entry->lastUse = ++s_p4CacheUseCounter;
 		entry->lastUseFrame = s_p4FrameSerial;
