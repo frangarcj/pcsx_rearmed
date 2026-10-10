@@ -105,6 +105,11 @@ typedef struct
 	bool p4SuperTurboTint;
 	s16 p4Page;
 	u16 p4Clut;
+	/* Bounds of the split's first boundsVerts vertices (frontend only):
+	 * vertices are only appended, so NativeGpu_SplitWriteRect extends them
+	 * instead of rescanning the split at every query. */
+	u16 boundsVerts;
+	s16 boundsMinX, boundsMaxX, boundsMinY, boundsMaxY;
 #endif
 	s16 overrideTextureWidth;
 	s16 overrideTextureHeight;
@@ -157,6 +162,13 @@ typedef struct
 	 * write (draw areas, fills), and those of the queued uploads. */
 	u32 pendingTiles[NATIVE_GPU_PENDING_TILE_WORDS];
 	u32 uploadTiles[NATIVE_GPU_PENDING_TILE_WORDS];
+	/* The draw area and texture sources AddSplit last marked in
+	 * pendingTiles: a run of primitives with the same state marks them
+	 * once (marks only accumulate until ClearSplits). */
+	RECT16 markedClip;
+	bool markedSources;
+	int markedTpage;
+	int markedClut;
 #endif
 } NativeGpuState;
 
@@ -1012,12 +1024,38 @@ int NativeGpu_PendingSplitsTouch(int x, int y, int w, int h)
 	       NativeGpu_PendingSplitsAccess(x, y, w, h, 1);
 }
 
+/* Extends a draw split's cached vertex bounds to its current vertices. */
+internal void NativeGpu_ExtendSplitBounds(GPUDrawSplit *split, int count)
+{
+	const GrVertex *v = &s_gpu.vertexBuffer[split->startVertex];
+	int k = split->boundsVerts;
+	if (k <= 0 || k > count)
+	{
+		k = 1;
+		split->boundsMinX = split->boundsMaxX = v->x;
+		split->boundsMinY = split->boundsMaxY = v->y;
+	}
+	int minX = split->boundsMinX, maxX = split->boundsMaxX, minY = split->boundsMinY, maxY = split->boundsMaxY;
+	for (; k < count; k++)
+	{
+		minX = v[k].x < minX ? v[k].x : minX;
+		maxX = v[k].x > maxX ? v[k].x : maxX;
+		minY = v[k].y < minY ? v[k].y : minY;
+		maxY = v[k].y > maxY ? v[k].y : maxY;
+	}
+	split->boundsVerts = (u16)count;
+	split->boundsMinX = (s16)minX;
+	split->boundsMaxX = (s16)maxX;
+	split->boundsMinY = (s16)minY;
+	split->boundsMaxY = (s16)maxY;
+}
+
 /* The VRAM rect a frontend split writes: the bounds of its vertices within
  * its draw area, or its fill. Returns 0 when it writes nothing (queued
  * uploads write what the guest VRAM already holds). */
 internal int NativeGpu_SplitWriteRect(int i, RECT16 *rect)
 {
-	const GPUDrawSplit *split = &s_gpu.splits[i];
+	GPUDrawSplit *split = &s_gpu.splits[i];
 	if (split->drawPrimMode == 2)
 	{
 		if (split->uploadPixels != NULL)
@@ -1029,15 +1067,8 @@ internal int NativeGpu_SplitWriteRect(int i, RECT16 *rect)
 		const int count = i == s_gpu.splitIndex ? s_gpu.vertexIndex - split->startVertex : split->numVerts;
 		if (count <= 0 || split->drawenv.clip.w <= 0 || split->drawenv.clip.h <= 0)
 			return 0;
-		const GrVertex *v = &s_gpu.vertexBuffer[split->startVertex];
-		int minX = v->x, maxX = v->x, minY = v->y, maxY = v->y;
-		for (int k = 1; k < count; k++)
-		{
-			minX = v[k].x < minX ? v[k].x : minX;
-			maxX = v[k].x > maxX ? v[k].x : maxX;
-			minY = v[k].y < minY ? v[k].y : minY;
-			maxY = v[k].y > maxY ? v[k].y : maxY;
-		}
+		NativeGpu_ExtendSplitBounds(split, count);
+		int minX = split->boundsMinX, maxX = split->boundsMaxX, minY = split->boundsMinY, maxY = split->boundsMaxY;
 		/* Vertices are relative to the draw area; keep a pixel of margin. */
 		minX = minX - 1 < 0 ? 0 : minX - 1;
 		minY = minY - 1 < 0 ? 0 : minY - 1;
@@ -1118,6 +1149,9 @@ internal void NativeGpu_MarkPacketWrites(void)
 internal int NativeGpu_PendingWritesTouch(int x, int y, int w, int h)
 {
 	RECT16 rect;
+	/* Every split writes inside the tiles AddSplit or a fill marked. */
+	if (!NativeGpu_PendingTiles(x, y, w, h, 0))
+		return 0;
 	for (int i = 1; i <= s_gpu.splitIndex; i++)
 		if (NativeGpu_SplitWriteRect(i, &rect) && NativeGpu_RectOverlaps(rect.x, rect.y, rect.w, rect.h, x, y, w, h))
 			return 1;
@@ -1192,6 +1226,8 @@ void ClearSplits(void)
 #if defined(__vita__) || defined(PCSX_NATIVE_VITA_PATH)
 	memset(s_gpu.pendingTiles, 0, sizeof(s_gpu.pendingTiles));
 	memset(s_gpu.uploadTiles, 0, sizeof(s_gpu.uploadTiles));
+	memset(&s_gpu.markedClip, 0, sizeof(s_gpu.markedClip));
+	s_gpu.markedSources = false;
 	s_gpu.uploadTexels = 0;
 	s_gpu.packetHasDraws = false;
 #endif
@@ -2034,13 +2070,28 @@ internal void AddSplit(bool semiTrans, bool textured, bool framebufferFeedback, 
 	}
 
 	GPUDrawSplit *curSplit = &s_gpu.splits[s_gpu.splitIndex];
+#if defined(__vita__) || defined(PCSX_NATIVE_VITA_PATH)
+	/* The previous primitives' vertices are still in the cache. */
+	if (s_gpu.splitIndex > 0 && curSplit->drawPrimMode != 2 && s_gpu.vertexIndex > curSplit->startVertex)
+		NativeGpu_ExtendSplitBounds(curSplit, s_gpu.vertexIndex - curSplit->startVertex);
+#endif
 
 	BlendMode blendMode = semiTrans ? GET_TPAGE_BLEND(tpage) : BM_NONE;
 	TexFormat texFormat = GetTPageFormat(tpage);
 #if defined(__vita__) || defined(PCSX_NATIVE_VITA_PATH)
 	s_gpu.packetHasDraws = true;
-	NativeGpu_PendingTiles(activeDrawEnv.clip.x, activeDrawEnv.clip.y, activeDrawEnv.clip.w, activeDrawEnv.clip.h, 1);
-	NativeGpu_MarkPendingSources(textured, tpage, clut);
+	if (memcmp(&activeDrawEnv.clip, &s_gpu.markedClip, sizeof(s_gpu.markedClip)) != 0)
+	{
+		NativeGpu_PendingTiles(activeDrawEnv.clip.x, activeDrawEnv.clip.y, activeDrawEnv.clip.w, activeDrawEnv.clip.h, 1);
+		s_gpu.markedClip = activeDrawEnv.clip;
+	}
+	if (textured && (!s_gpu.markedSources || tpage != s_gpu.markedTpage || clut != s_gpu.markedClut))
+	{
+		NativeGpu_MarkPendingSources(textured, tpage, clut);
+		s_gpu.markedSources = true;
+		s_gpu.markedTpage = tpage;
+		s_gpu.markedClut = clut;
+	}
 #endif
 	TextureID textureId = textured ? NativeRenderer_GetVRAMTexture() : NativeRenderer_GetWhiteTexture();
 	bool psxTexturedSemiTrans = semiTrans && textured && (s_gpu.overrideTexture == 0 || s_gpu.overrideTexturePsxStp);
@@ -2116,6 +2167,9 @@ internal void AddSplit(bool semiTrans, bool textured, bool framebufferFeedback, 
 
 	split->startVertex = s_gpu.vertexIndex;
 	split->numVerts = 0;
+#if defined(__vita__) || defined(PCSX_NATIVE_VITA_PATH)
+	split->boundsVerts = 0;
+#endif
 }
 
 internal void NativeGpu_SetSplitShaderState(const GPUDrawSplit *split, int semiTransPass, BlendMode blendMode, bool offscreen)
