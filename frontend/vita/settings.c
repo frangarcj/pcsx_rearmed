@@ -13,26 +13,21 @@ typedef struct VitaOptionEntry {
     char value[VALUE_SIZE];
 } VitaOptionEntry;
 
+/* Options that change something in this app (cd_readahead and
+ * fractional_framerate stay for the ROM selector's menu, rom_selector.cpp);
+ * the others reach the core with option_value()'s defaults (standalone.c). */
 static VitaOptionEntry g_options[] = {
     { "pcsx_rearmed_memcard1", "shared", {0} },
     { "pcsx_rearmed_memcard2", "none", {0} },
     { "pcsx_rearmed_bios", "auto", {0} },
     { "pcsx_rearmed_show_bios_bootlogo", "disabled", {0} },
-    { "pcsx_rearmed_rgb32_output", "disabled", {0} },
-    { "pcsx_rearmed_frameskip_type", "disabled", {0} },
     { "pcsx_rearmed_region", "auto", {0} },
-    { "pcsx_rearmed_display_info", "disabled", {0} },
-    { "pcsx_rearmed_vibration", "disabled", {0} },
     { "pcsx_rearmed_dithering", "enabled", {0} },
     { "pcsx_rearmed_neon_interlace_enable_v2", "auto", {0} },
-    { "pcsx_rearmed_neon_enhancement_enable", "disabled", {0} },
-    { "pcsx_rearmed_scale_hires", "disabled", {0} },
-    { "pcsx_rearmed_gpu_thread_rendering", "disabled", {0} },
     { "pcsx_rearmed_spu_reverb", "enabled", {0} },
     { "pcsx_rearmed_spu_interpolation", "gaussian", {0} },
     { "pcsx_rearmed_nocdaudio", "enabled", {0} },
     { "pcsx_rearmed_noxadecoding", "enabled", {0} },
-    { "pcsx_rearmed_spu_thread", "disabled", {0} },
     { "pcsx_rearmed_cd_turbo", "disabled", {0} },
     { "pcsx_rearmed_cd_readahead", "64", {0} },
     { "pcsx_rearmed_drc", "enabled", {0} },

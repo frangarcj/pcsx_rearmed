@@ -14,9 +14,6 @@ static const ShelfChoice k_bios_logo_choices[] = {
 	{ "disabled", "Off" }, { "enabled", "On" },
 	{ "enabled_no_pcsx", "On, no PCSX logo" }
 };
-static const ShelfChoice k_fractional_choices[] = {
-	{ "auto", "Auto" }, { "disabled", "Off" }, { "enabled", "On" }
-};
 static const ShelfChoice k_flip_choices[] = {
 	{ "auto", "Auto" }, { "early", "Early" }, { "late", "Late" }
 };
@@ -25,10 +22,6 @@ static const ShelfChoice k_centering_choices[] = {
 };
 static const ShelfChoice k_toggle_choices[] = {
 	{ "disabled", "Off" }, { "enabled", "On" }
-};
-static const ShelfChoice k_cd_readahead_choices[] = {
-	{ "0", "Off" }, { "12", "12 sectors" }, { "32", "32 sectors" },
-	{ "64", "64 sectors" }, { "128", "128 sectors" }, { "256", "256 sectors" }
 };
 static const ShelfChoice k_interp_choices[] = {
 	{ "off", "Off" }, { "simple", "Simple" },
@@ -71,16 +64,12 @@ static const struct
 	  "pcsx_rearmed_psxclock", k_auto_choice, 1, 30, 100, "%" } },
 	{ SCOPE_DISC, { "PLAYSTATION", "Turbo CD", "Accelerates the emulated CD-ROM timing to reduce loading times. Some games rely on original drive timing and may misbehave, so disable it if a title has loading or streaming problems.",
 	  "pcsx_rearmed_cd_turbo", k_toggle_choices, 2, 0, 0, NULL } },
-	{ SCOPE_DISC, { "PLAYSTATION", "CD Read-Ahead", "Caches upcoming sectors on a background thread. This reduces storage stalls without changing PlayStation CD-ROM timing.",
-	  "pcsx_rearmed_cd_readahead", k_cd_readahead_choices, 6, 0, 0, NULL } },
 	{ SCOPE_SELECTOR, { "VIDEO", "Renderer", "vitaGL draws on the GPU at the screen's resolution, with antialiasing. NEON draws on the CPU, exactly as the PlayStation GPU does, at its own resolution. Applies to the next game started.",
 	  "pcsx_rearcade_renderer", k_renderer_choices, 2, 0, 0, NULL } },
 	{ SCOPE_ALL, { "VIDEO", "Aspect Ratio", "4:3 is the original output. 16:9 Stretched fills the screen by stretching 4:3. 16:9 Unstretched uses an experimental widescreen projection that preserves geometry proportions and can reveal extra horizontal content, but some games may show culling or background artifacts.",
 	  "vita_aspect_ratio", k_aspect_choices, 3, 0, 0, NULL } },
 	{ SCOPE_ALL, { "VIDEO", "Screen Borders", "Borderless removes vertical blanking outside the game's active display range. Auto and Game preserve the console timing canvas when a title intentionally uses it.",
 	  "pcsx_rearmed_screen_centering", k_centering_choices, 3, 0, 0, NULL } },
-	{ SCOPE_ALL, { "VIDEO", "Fractional Frame Rate", "Uses the console's fractional video timing when appropriate, such as 59.94 Hz instead of exactly 60 Hz.",
-	  "pcsx_rearmed_fractional_framerate", k_fractional_choices, 3, 0, 0, NULL } },
 	{ SCOPE_ALL, { "VIDEO", "Framebuffer Readout", "Changes when the displayed framebuffer is read. Early/Late can fix games with unusual framebuffer timing.",
 	  "pcsx_rearmed_alt_flip", k_flip_choices, 3, 0, 0, NULL } },
 	{ SCOPE_DISC, { "PLAYSTATION AUDIO", "Reverb", "Enables PlayStation SPU reverb effects.",
@@ -106,6 +95,8 @@ static const struct
 	  "pcsx_rearmed_arcade_r1", k_arcade_functions, k_arcade_function_count, 0, 0, NULL } },
 	{ SCOPE_ARCADE, { "ARCADE CONTROLS", "Select", "What the Select button does on an arcade board: Coin inserts a credit. Start + Select still opens the pause menu.",
 	  "pcsx_rearmed_arcade_select", k_arcade_functions, k_arcade_function_count, 0, 0, NULL } },
+	{ SCOPE_ARCADE, { "ARCADE CONTROLS", "Start", "What the Start button does on an arcade board. Start + Select still opens the pause menu.",
+	  "pcsx_rearmed_arcade_start", k_arcade_functions, k_arcade_function_count, 0, 0, NULL } },
 	{ SCOPE_ARCADE, { "ARCADE CONTROLS", "L2 (PS TV)", "What L2 does on an arcade board, on a PS TV or a Vita with rear touch mapped to it.",
 	  "pcsx_rearmed_arcade_l2", k_arcade_functions, k_arcade_function_count, 0, 0, NULL } },
 	{ SCOPE_ARCADE, { "ARCADE CONTROLS", "R2 (PS TV)", "What R2 does on an arcade board, on a PS TV or a Vita with rear touch mapped to it.",
