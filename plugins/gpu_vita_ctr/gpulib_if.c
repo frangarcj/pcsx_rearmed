@@ -1138,7 +1138,10 @@ void renderer_notify_screen_change(const struct psx_gpu_screen *screen)
 int renderer_present_size(const struct psx_gpu *psx_gpu, int *width, int *height)
 {
     *width = psx_gpu->screen.hres > 0 ? psx_gpu->screen.hres : psx_gpu->screen.w;
-    *height = psx_gpu->screen.vres > 0 ? psx_gpu->screen.vres : psx_gpu->screen.h;
+    /* Borderless (Screen Borders): the picture is the whole display, as
+     * Rinnegatamante's f3e05d98 made it; otherwise the console's canvas. */
+    *height = psx_gpu->state.screen_centering_type == C_BORDERLESS || psx_gpu->screen.vres <= 0
+        ? psx_gpu->screen.h : psx_gpu->screen.vres;
     return *width > 0 && *height > 0;
 }
 
@@ -1178,6 +1181,10 @@ int renderer_present_frame_rect(int src_x, int src_y, int width, int height,
 {
     if (!s_context_ready)
         return 0;
+#ifndef __vita__
+    if (getenv("PCSX_TRACE_PRESENT"))
+        fprintf(stderr, "present src %d,%d disp %dx%d pic %d,%d %dx%d\n", src_x, src_y, width, height, pic_x, pic_y, pic_w, pic_h);
+#endif
 
     VitaCtrNativeGpu_SetDisplayEnv(src_x, src_y, width, height, pic_x, pic_y, pic_w, pic_h, rgb24,
         widescreen_3d_frame());
