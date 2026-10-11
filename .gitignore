@@ -132,6 +132,9 @@ psx_gpu_offsets_update
 /pcsx-rearmed-vita.velf
 /pcsx-rearmed-vita.vpk
 /pcsx-rearmed-vita-razor.vpk
+/pcsx-rearcade*.elf
+/pcsx-rearcade*.velf
+/pcsx-rearcade*.vpk
 /eboot.bin
 /eboot_razor.bin
 /eboot_razor_debug.bin

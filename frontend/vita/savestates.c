@@ -9,7 +9,7 @@
 #include <psp2/io/stat.h>
 #include <psp2/kernel/sysmem.h>
 
-#define APP_ROOT "ux0:data/pcsx-rearmed"
+#include "app_root.h"
 #define STATE_DIR APP_ROOT "/savestates"
 #define SLOT_PATH STATE_DIR "/slot.cfg"
 #define STATE_MAGIC "PCSXST01"

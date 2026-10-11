@@ -15,7 +15,7 @@
 #include "savestates.h"
 #include "settings.h"
 
-#define APP_ROOT "ux0:data/pcsx-rearmed"
+#include "app_root.h"
 #define ROMS_DIR APP_ROOT "/roms"
 
 #define MENU_W 960

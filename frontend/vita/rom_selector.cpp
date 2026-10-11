@@ -24,7 +24,7 @@
 #include "settings.h"
 #include "savestates.h"
 
-#define APP_ROOT "ux0:data/pcsx-rearmed"
+#include "app_root.h"
 #define ROMS_DIR APP_ROOT "/roms"
 #define COVERS_DIR APP_ROOT "/covers"
 
@@ -1711,7 +1711,7 @@ static void draw_text_overlay(const std::vector<RomEntry> &roms, int selected)
         ImGui::SetCursorPos(ImVec2((MENU_W - hint_size.x) * 0.5f, MENU_H - 40.0f));
         ImGui::Text("%s", hint);
     } else {
-        const char *empty = "No PlayStation games found in ux0:data/pcsx-rearmed or /roms";
+        const char *empty = "No PlayStation games found in " APP_ROOT " or /roms";
         const ImVec2 size = ImGui::CalcTextSize(empty);
         ImGui::SetCursorPos(ImVec2((MENU_W - size.x) * 0.5f, MENU_H * 0.5f));
         ImGui::Text("%s", empty);

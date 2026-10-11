@@ -369,6 +369,9 @@ endif
 	VITAGL_DIR ?= ../vitaGL
 	CFLAGS += -I$(VITAGL_DIR)/source -I$(VITASDK)/include -Ifrontend/vita
 	CFLAGS += -DNO_DYLIB
+ifeq ($(PCSX_REARCADE),1)
+	CFLAGS += -DPCSX_REARCADE
+endif
 	ASFLAGS += -mcpu=cortex-a9 -mtune=cortex-a9 -mfpu=neon
 
 	HAVE_NEON_ASM = 1

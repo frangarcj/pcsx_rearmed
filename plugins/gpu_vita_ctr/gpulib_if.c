@@ -2,6 +2,9 @@
 
 #include <SDL3/SDL.h>
 #include "platform/native_vita_path.h"
+#ifdef __vita__
+#include "app_root.h"
+#endif
 #if defined(__vita__)
 #include <psp2/io/dirent.h>
 #include <psp2/io/fcntl.h>
@@ -788,8 +791,8 @@ static int init_context(void)
         return 0;
 
 #ifdef __vita__
-    sceIoMkdir("ux0:data/pcsx-rearmed", 0777);
-    sceIoMkdir("ux0:data/pcsx-rearmed/shader_cache", 0777);
+    sceIoMkdir(APP_ROOT, 0777);
+    sceIoMkdir(APP_ROOT "/shader_cache", 0777);
 #endif
 
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {

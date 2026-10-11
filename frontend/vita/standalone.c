@@ -38,7 +38,7 @@
 void gpu_sync_renderer(void);
 #endif
 
-#define APP_ROOT "ux0:data/pcsx-rearmed"
+#include "app_root.h"
 #define BIOS_DIR APP_ROOT "/bios"
 #define SAVE_DIR APP_ROOT "/saves"
 

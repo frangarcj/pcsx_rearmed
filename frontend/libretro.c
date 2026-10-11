@@ -1297,7 +1297,9 @@ void retro_get_system_info(struct retro_system_info *info)
 #define GIT_VERSION ""
 #endif
    memset(info, 0, sizeof(*info));
-#ifdef VITA
+#if defined(PCSX_REARCADE)
+   info->library_name     = "PCSX ReArcade";
+#elif defined(VITA)
    info->library_name     = "PCSX AwO";
 #else
    info->library_name     = "PCSX-ReARMed";

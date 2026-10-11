@@ -3,6 +3,9 @@
 #include <SDL3/SDL.h>
 #include <macros.h>
 #include "platform/native_vita_path.h"
+#ifdef __vita__
+#include "app_root.h"
+#endif
 #include "platform/native_gpu.h"
 
 #include <platform.h>
@@ -402,7 +405,7 @@ internal int NativeGpu_BackendThreadMain(SceSize args, void *argp)
 	(void)args;
 	(void)argp;
 	vglSetupRenderTargetScenesNum(2, 2);
-	vglSetShaderCachePath("ux0:data/pcsx-rearmed/shader_cache");
+	vglSetShaderCachePath(APP_ROOT "/shader_cache");
 	vglUseLowPrecision(GL_TRUE);
 	vglSetupRuntimeShaderCompiler(SHARK_OPT_UNSAFE, GL_TRUE, GL_TRUE, GL_TRUE);
 	/* vitaGL's init result reports whether it had to fall back to a smaller
