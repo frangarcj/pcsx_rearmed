@@ -1,0 +1,49 @@
+# The arcade selector on macOS (tools/arcade-ui/arcade_ui_mac.cpp), to work
+# on the UI without a Vita. Needs SDL3 and libpng (Homebrew) and the
+# deps/imgui submodule.
+#   make -f Makefile.arcade-ui
+#   build/arcade-ui/arcade-ui --demo
+CC := xcrun clang
+CXX := xcrun clang++
+BUILD := build/arcade-ui
+TARGET := $(BUILD)/arcade-ui
+SDL3_CFLAGS := $(shell pkg-config --cflags sdl3)
+SDL3_LIBS := $(shell pkg-config --libs sdl3)
+LIBPNG_CFLAGS := $(shell pkg-config --cflags libpng)
+LIBPNG_LIBS := $(shell pkg-config --libs libpng)
+CFLAGS := -arch arm64 -O2 -g -Wall -Iinclude -Ideps/imgui -I$(BUILD) $(SDL3_CFLAGS) $(LIBPNG_CFLAGS)
+CXXFLAGS := $(CFLAGS) -std=c++17
+SOURCES_CXX := deps/imgui/imgui.cpp deps/imgui/imgui_draw.cpp \
+	frontend/arcade_ui/arcade_ui.cpp frontend/arcade_ui/ui_gl.cpp tools/arcade-ui/arcade_ui_mac.cpp
+SOURCES_C := libpcsxcore/arcade/system12_romset.c libpcsxcore/arcade/mame_zip.c
+OBJECTS := $(addprefix $(BUILD)/,$(SOURCES_CXX:.cpp=.o) $(SOURCES_C:.c=.o))
+FONT := $(BUILD)/roboto_medium.inc
+
+.PHONY: all clean
+all: $(TARGET)
+
+$(TARGET): $(OBJECTS)
+	$(CXX) -arch arm64 -o $@ $^ $(SDL3_LIBS) $(LIBPNG_LIBS) -lz -framework OpenGL
+
+# Roboto Medium (Apache License 2.0) from deps/imgui/misc/fonts, as a C array.
+$(FONT): deps/imgui/misc/fonts/Roboto-Medium.ttf
+	@mkdir -p $(BUILD)
+	cd deps/imgui/misc/fonts && xxd -i Roboto-Medium.ttf > $(CURDIR)/$@
+
+$(BUILD)/frontend/arcade_ui/arcade_ui.o: $(FONT)
+
+# Dear ImGui 1.61 predates clang's -Wnontrivial-memcall.
+$(BUILD)/deps/imgui/%.o: CXXFLAGS += -Wno-nontrivial-memcall
+
+$(BUILD)/%.o: %.cpp Makefile.arcade-ui
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD)/%.o: %.c Makefile.arcade-ui
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -std=gnu99 -MMD -MP -c $< -o $@
+
+clean:
+	rm -rf $(BUILD)
+
+-include $(OBJECTS:.o=.d)

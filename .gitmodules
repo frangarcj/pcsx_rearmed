@@ -19,3 +19,6 @@
 [submodule "deps/mman"]
 	path = deps/mman
 	url = https://github.com/witwall/mman-win32
+[submodule "deps/imgui"]
+	path = deps/imgui
+	url = https://github.com/ocornut/imgui.git

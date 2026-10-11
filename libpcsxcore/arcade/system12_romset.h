@@ -6,6 +6,10 @@
 #define PCSX_SYSTEM12_ROMSET_H
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct {
 	const char *name, *parent, *description, *unsupported;
 	int year;
@@ -30,5 +34,9 @@ int system12_romset_is_zip(const char *path);
  * what that returns: 0, -1 (the log names a missing file), or -2 for a
  * set the adapter does not emulate. */
 int system12_romset_load(const char *zip_path);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
