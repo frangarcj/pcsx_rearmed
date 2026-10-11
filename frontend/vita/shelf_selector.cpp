@@ -76,9 +76,10 @@ static int state_exists(void *user, int slot)
 
 static ShelfConfig shelf_config(const ShelfMenus *menus)
 {
+    static const std::string about = pcsx_shelf_about(PCSX_GIT_VERSION);
     const ShelfConfig config = { "PCSX", "ReArcade", APP_ROOT,
         "Copy MAME romset zips or PlayStation discs to " ROMS_DIR, MENU_W, MENU_H,
-        arcade_catalog_styles, arcade_catalog_style_count, menus };
+        arcade_catalog_styles, arcade_catalog_style_count, menus, about.c_str() };
     return config;
 }
 

@@ -259,8 +259,9 @@ int main(int argc, char **argv)
 	}
 	const ShelfMenus menus = { pcsx_shelf_options, pcsx_shelf_option_count, NULL, get_option, set_option, 10,
 		state_exists };
+	const std::string about = pcsx_shelf_about("");
 	ShelfConfig config = { "PCSX", "ReArcade", data, hint.c_str(), WIDTH, HEIGHT,
-		arcade_catalog_styles, arcade_catalog_style_count, &menus };
+		arcade_catalog_styles, arcade_catalog_style_count, &menus, about.c_str() };
 	if (!shelf_init(&config)) {
 		fprintf(stderr, "arcade-ui: init failed\n");
 		return 1;

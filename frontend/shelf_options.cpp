@@ -69,3 +69,35 @@ const ShelfOption pcsx_shelf_options[] = {
 	  "pcsx_rearmed_noxadecoding", k_toggle_choices, 2, 0, 0, NULL },
 };
 const int pcsx_shelf_option_count = sizeof(pcsx_shelf_options) / sizeof(pcsx_shelf_options[0]);
+
+std::string pcsx_shelf_about(const char *version)
+{
+	std::string text = "# PCSX ReArcade";
+	if (version && *version)
+		text += std::string(" ") + version;
+	text +=
+		"\n"
+		"Namco System 12 arcade games and PlayStation discs on the PS Vita, by "
+		"Francisco José García García (frangarcj).\n"
+		"\n"
+		"# Built on\n"
+		"PCSX-ReARMed by notaz and contributors, from PCSX-Reloaded, PCSX-df and PCSX: Ari64's dynamic "
+		"recompiler, Exophase's NEON GPU, the P.E.Op.S. SPU and the BIOS HLE.\n"
+		"PCSX AwO by Rinnegatamante: the PS Vita frontend, the ROM selector, options and save states, "
+		"the disc of the game selector, and vitaGL.\n"
+		"The native PS1 renderer by aalhendi, from PsyCross (REDRIVER2 Project, MIT).\n"
+		"\n"
+		"# Arcade hardware\n"
+		"MAME and its developers: this port follows MAME's Namco System 12 driver, its devices and its "
+		"romset definitions (BSD-3-Clause).\n"
+		"\n"
+		"# Libraries\n"
+		"VitaSDK, vitaGL, SDL, Dear ImGui (Omar Cornut), libpng, zlib, libchdr, and the Roboto font "
+		"(Christian Robertson, Apache 2.0).\n"
+		"\n"
+		"# Licence\n"
+		"GNU GPL version 2. Source: github.com/frangarcj/pcsx_rearmed\n"
+		"Not affiliated with Namco, Bandai Namco or Sony. No game data is included: use your own romsets "
+		"and discs.\n";
+	return text;
+}

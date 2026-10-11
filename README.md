@@ -11,6 +11,39 @@ recently it targets other architectures too. A fork of this emulator was
 used in [PS Classic](https://en.wikipedia.org/wiki/PlayStation_Classic)
 (without any coordination or even notification).
 
+## PCSX ReArcade (PS Vita)
+
+PCSX ReArcade is this fork's PS Vita app: Namco System 12 arcade games
+(Soul Calibur, Tekken 3...) from MAME romsets, and PlayStation discs, on
+one 3D game shelf ([arcade-shelf](deps/arcade-shelf)).
+
+```sh
+make -f Makefile.vita VITA_GPU=vitagl ARCADE_SYSTEM12=1   # pcsx-rearcade.vpk
+```
+
+It installs as `PCRA00001` and keeps its files in `ux0:data/pcsx-rearcade`:
+MAME zips and discs in `roms/`, BIOS files in `bios/`, PlayStation covers
+in `covers/`, cabinet art in `snap/` and `marquees/` (by MAME set name).
+On the shelf: left/right game, up/down version, Cross play, Square
+options, Select credits, Triangle exit. Start + Select pauses a game.
+`ARCADE_SHELF=0` builds the same core as the validation app (`PCSXG0012`,
+`ux0:data/pcsx-rearmed`) that the measurement tools use.
+
+Credits:
+* [PCSX-ReARMed](https://github.com/notaz/pcsx_rearmed) by notaz and
+  contributors, and the PCSX projects it comes from (see AUTHORS)
+* [PCSX AwO](https://github.com/Rinnegatamante/PCSX_AwO) by Rinnegatamante:
+  the PS Vita frontend, ROM selector, options, save states, the disc of the
+  game shelf, and [vitaGL](https://github.com/Rinnegatamante/vitaGL)
+* the native PS1 renderer by aalhendi, derived from
+  [PsyCross](https://github.com/OpenDriver2/PsyCross) (REDRIVER2 Project)
+* [MAME](https://www.mamedev.org/) and its developers: the Namco System 12
+  driver, devices and romset definitions this port follows
+  (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md))
+* VitaSDK, SDL, Dear ImGui, libpng, zlib, libchdr and Roboto
+
+Not affiliated with Namco, Bandai Namco or Sony; no game data is included.
+
 ## Features
 * ARM/ARM64 dynamic recompiler by Ari64
 * [lightrec](https://github.com/pcercuei/lightrec/) dynamic recompiler for other architectures
