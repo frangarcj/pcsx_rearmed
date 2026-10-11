@@ -27,15 +27,28 @@
 #include "../../libpcsxcore/system12_profile.h"
 #include "input_csv_reader.h"
 #include "vita_gpuprof.h"
-#ifdef STANDALONE_VITAGL
+/* Menu mode: the vitaGL executable (selector, pause menu, options) and PCSX
+ * ReArcade's NEON one (a game the selector hands it, with the pause menu). */
+#if defined(STANDALONE_VITAGL) || defined(REARCADE_NEON)
+#define STANDALONE_UI
+#include <psp2/appmgr.h>
 #include "rom_selector.h"
-#ifdef ARCADE_SHELF
-#include "shelf_selector.h"
-#endif
 #include "settings.h"
 #include "savestates.h"
+#endif
+#ifdef STANDALONE_VITAGL
+#ifdef ARCADE_SHELF
+#include "shelf_selector.h"
+#include "shelf_pause.h"
+#include "shelf_common.h"
+#endif
 /* gpulib: drains the GPU thread and the renderer (plugins/gpulib/gpu.c). */
 void gpu_sync_renderer(void);
+#endif
+#ifdef REARCADE_NEON
+#include "gl_present.h"
+#include "shelf_pause.h"
+#include "shelf_common.h"
 #endif
 
 #include "app_root.h"
@@ -130,7 +143,7 @@ static uint64_t g_audio_put_frames; /* source frames handed to SDL */
 
 static SceUID g_vm_block = -1;
 extern int _newlib_vm_size_user;
-#ifdef STANDALONE_VITAGL
+#if defined(STANDALONE_VITAGL) || defined(REARCADE_NEON)
 /* Board ROMs live in the newlib heap (77 MB for Tekken Tag) and vitaGL's
  * runtime shader translation allocates there too: the default 128 MB ran out
  * at renderer start. vitaGL keeps the memory left after this. */
@@ -206,7 +219,7 @@ static const char *option_value(const char *key)
         return g_board_thread ? "enabled" : "disabled";
     if (strcmp(key, "pcsx_rearmed_neon_two_stage") == 0)
         return g_gpu2 ? "enabled" : "disabled";
-#ifdef STANDALONE_VITAGL
+#ifdef STANDALONE_UI
     if (g_ui_mode) {
         const char *value = VitaSettings_GetOption(key);
         if (value)
@@ -267,7 +280,7 @@ static bool environment_cb(unsigned cmd, void *data)
         *(bool *)data = true;
         return true;
     case RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE:
-#ifdef STANDALONE_VITAGL
+#ifdef STANDALONE_UI
         *(bool *)data = g_ui_mode && VitaSettings_ConsumeDirty();
 #else
         *(bool *)data = false;
@@ -529,6 +542,10 @@ static void video_cb(const void *data, unsigned width, unsigned height, size_t p
     int back;
     int y, x;
 
+#ifdef REARCADE_NEON
+    glp_video(data, width, height, pitch);
+    return;
+#endif
     if (g_gxm) {
         if (g_gxm_ready < 0 && data && width && height)
             gxm_rgb565_frame(data, width, height, pitch);
@@ -987,6 +1004,9 @@ static int display_init(void)
     SceDisplayFrameBuf frame;
     int i;
 
+#ifdef REARCADE_NEON
+    return glp_init();
+#endif
     if (g_gxm)
         return gxm_init();
     for (i = 0; i < 2; i++) {
@@ -1013,6 +1033,10 @@ static int display_init(void)
 static void display_finish(void)
 {
     int i;
+#ifdef REARCADE_NEON
+    glp_finish();
+    return;
+#endif
     if (g_gxm) {
         gxm_finish();
         return;
@@ -1330,7 +1354,7 @@ static void start_audio(const struct retro_system_av_info *av)
         g_pacing == PACING_VBLANK ? g_audio_base_ratio : 1.0f);
 }
 
-#ifdef STANDALONE_VITAGL
+#ifdef STANDALONE_UI
 static void wait_for_menu_input_release(void)
 {
     const uint32_t mask =
@@ -1361,10 +1385,12 @@ static int run_pause_menu(const char *game_path)
 
     if (g_audio_stream)
         SDL_PauseAudioStreamDevice(g_audio_stream);
+#ifdef STANDALONE_VITAGL
     /* The menu draws on the renderer thread: no frame may be in flight. */
     gpu_sync_renderer();
+#endif
     for (;;) {
-#ifdef ARCADE_SHELF
+#if defined(ARCADE_SHELF) || defined(REARCADE_NEON)
         ret = VitaShelfPause_Run(game_path, reopen_save_states ? 1 : 0);
 #else
         ret = VitaPauseMenu_Run(game_path, reopen_save_states ? 1 : 0);
@@ -1399,13 +1425,76 @@ static int run_pause_menu(const char *game_path)
     return ret;
 }
 
+/* One game in menu mode: it runs until the pause menu closes it (0) or
+ * the app is asked to exit (1); 3 if it does not load. */
+static int run_ui_game(const char *game_path)
+{
+    struct retro_game_info game;
+    struct retro_system_av_info av;
+    int ret;
+
+    do {
+        unsigned runs = 0;
+
+        sceClibPrintf("pcsx-vita: booting %s\n", game_path);
+        /* The test switch is for one visit to a game's test menu. */
+        VitaSettings_SetOption("pcsx_rearmed_arcade_test", "disabled");
+        memset(&game, 0, sizeof(game));
+        game.path = game_path;
+        if (!retro_load_game(&game)) {
+            sceClibPrintf("pcsx-vita: retro_load_game failed\n");
+            return 3;
+        }
+        retro_get_system_av_info(&av);
+        start_audio(&av);
+        memset(&g_pad, 0, sizeof(g_pad));
+        g_pause_requested = false;
+        g_pause_combo_down = false;
+        ret = VITA_PAUSE_CLOSE_GAME;
+        while (!g_exit_requested) {
+            retro_run();
+            pace_frame();
+            if (++runs % 60 == 0)
+                sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
+            if (!g_pause_requested)
+                continue;
+            ret = run_pause_menu(game_path);
+            if (ret != VITA_PAUSE_RESUME)
+                break;
+        }
+        audio_finish();
+        retro_unload_game();
+        if (g_exit_requested)
+            return 1;
+    } while (ret == VITA_PAUSE_RESTART);
+    sceClibPrintf("pcsx-vita: closed %s\n", game_path);
+    return 0;
+}
+
+#ifdef REARCADE_NEON
+/* The NEON executable runs the one game the selector gave it, then hands
+ * the Vita back to the selector (eboot.bin). */
+static char g_ui_game[1024], g_ui_title[256];
+
+static int run_ui(void)
+{
+    char *const args[] = { NULL };
+    VitaShelf_SetGame(g_ui_game, g_ui_title[0] ? g_ui_title : NULL);
+    VitaShelf_Presenter()->set_aspect(VitaShelf_AspectMode());
+    const int ret = run_ui_game(g_ui_game);
+    if (ret != 1) {
+        retro_deinit();
+        display_finish();
+        sceAppMgrLoadExec("app0:eboot.bin", args, NULL);
+    }
+    return ret == 3 ? 3 : 0;
+}
+#else
 /* Menu mode: selector, game, pause menu, back to the selector. Returns the
  * process exit code. */
 static int run_ui(void)
 {
     char game_path[1024];
-    struct retro_game_info game;
-    struct retro_system_av_info av;
     int ret;
 
     for (;;) {
@@ -1418,43 +1507,28 @@ static int run_ui(void)
             sceClibPrintf("pcsx-vita: ROM selector %s\n", ret < 0 ? "failed" : "closed");
             return ret < 0 ? 2 : 0;
         }
-        do {
-            unsigned runs = 0;
-
-            sceClibPrintf("pcsx-vita: booting %s\n", game_path);
-            /* The test switch is for one visit to a game's test menu. */
-            VitaSettings_SetOption("pcsx_rearmed_arcade_test", "disabled");
-            memset(&game, 0, sizeof(game));
-            game.path = game_path;
-            if (!retro_load_game(&game)) {
-                sceClibPrintf("pcsx-vita: retro_load_game failed\n");
-                return 3;
+#ifdef ARCADE_SHELF
+        {
+            /* The NEON renderer is the other executable: hand it the game. */
+            const char *renderer = VitaSettings_GetOption("pcsx_rearcade_renderer");
+            if (renderer && !strcmp(renderer, "neon")) {
+                char title[256];
+                VitaShelf_GetGameTitle(game_path, title, sizeof(title));
+                char *const args[] = { (char *)"--ui-game", game_path, (char *)"--ui-title", title, NULL };
+                sceClibPrintf("pcsx-vita: %s on NEON\n", game_path);
+                sceAppMgrLoadExec("app0:eboot_neon.bin", args, NULL);
+                sceClibPrintf("pcsx-vita: eboot_neon.bin did not start\n");
             }
-            retro_get_system_av_info(&av);
-            start_audio(&av);
-            memset(&g_pad, 0, sizeof(g_pad));
-            g_pause_requested = false;
-            g_pause_combo_down = false;
-            ret = VITA_PAUSE_CLOSE_GAME;
-            while (!g_exit_requested) {
-                retro_run();
-                pace_frame();
-                if (++runs % 60 == 0)
-                    sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
-                if (!g_pause_requested)
-                    continue;
-                ret = run_pause_menu(game_path);
-                if (ret != VITA_PAUSE_RESUME)
-                    break;
-            }
-            audio_finish();
-            retro_unload_game();
-            if (g_exit_requested)
-                return 0;
-        } while (ret == VITA_PAUSE_RESTART);
-        sceClibPrintf("pcsx-vita: closed %s\n", game_path);
+        }
+#endif
+        ret = run_ui_game(game_path);
+        if (ret == 1)
+            return 0;
+        if (ret == 3)
+            return 3;
     }
 }
+#endif
 #endif
 
 int main(int argc, char **argv)
@@ -1510,6 +1584,17 @@ int main(int argc, char **argv)
             continue;
         }
         if (!strcmp(argv[ret], "--fb-main")) { g_fb_main = true; continue; }
+#ifdef REARCADE_NEON
+        /* From the selector (eboot.bin): the game and its title. */
+        if (!strcmp(argv[ret], "--ui-game") && ret + 1 < argc) {
+            snprintf(g_ui_game, sizeof(g_ui_game), "%s", argv[++ret]);
+            continue;
+        }
+        if (!strcmp(argv[ret], "--ui-title") && ret + 1 < argc) {
+            snprintf(g_ui_title, sizeof(g_ui_title), "%s", argv[++ret]);
+            continue;
+        }
+#endif
 #ifdef STANDALONE_VITAGL
         /* A/B switches for hardware measurements of the HD presentation. */
         if (!strcmp(argv[ret], "--gl-1x")) {
@@ -1669,10 +1754,15 @@ int main(int argc, char **argv)
     if (g_report_path[0] || g_capture_path[0]) return 4;
 #endif
 
-#ifdef STANDALONE_VITAGL
+#ifdef STANDALONE_UI
+#ifdef REARCADE_NEON
+    /* The selector's game (--ui-game): menu mode. */
+    if (g_ui_game[0]) {
+#else
     /* No game and no validation run: menu mode. */
     if (game_path[0] == '\0' && !system12_profile && !validation_frames && !verify_smoke &&
         !verify_system12_drc_ram_mb) {
+#endif
         g_ui_mode = true;
         VitaSettings_Init();
         VitaSaveStates_Init();
@@ -1717,7 +1807,7 @@ int main(int argc, char **argv)
     retro_init();
     sceClibPrintf("pcsx-vita: retro_init complete\n");
 
-#ifdef STANDALONE_VITAGL
+#ifdef STANDALONE_UI
     if (g_ui_mode) {
         ret = run_ui();
         retro_deinit();

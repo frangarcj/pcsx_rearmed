@@ -41,8 +41,13 @@ static const ShelfChoice k_aspect_choices[] = {
 };
 
 /* Where an option shows: the selector shows them all but the pause-only
- * ones; a game's pause menu, those that apply to it. */
-enum { SCOPE_DISC = 1, SCOPE_ARCADE = 2, SCOPE_ALL = 3, SCOPE_ARCADE_PAUSE = 4 };
+ * ones; a game's pause menu, those that apply to it. SCOPE_SELECTOR: the
+ * selector's only (the renderer picks the executable a game runs in). */
+enum { SCOPE_DISC = 1, SCOPE_ARCADE = 2, SCOPE_ALL = 3, SCOPE_ARCADE_PAUSE = 4, SCOPE_SELECTOR = 8 };
+
+static const ShelfChoice k_renderer_choices[] = {
+	{ "vitagl", "vitaGL (HD)" }, { "neon", "NEON (exact)" }
+};
 
 static const ShelfChoice k_arcade_functions[] = {
 	{ "button1", "Button 1" }, { "button2", "Button 2" }, { "button3", "Button 3" }, { "button4", "Button 4" },
@@ -68,6 +73,8 @@ static const struct
 	  "pcsx_rearmed_cd_turbo", k_toggle_choices, 2, 0, 0, NULL } },
 	{ SCOPE_DISC, { "PLAYSTATION", "CD Read-Ahead", "Caches upcoming sectors on a background thread. This reduces storage stalls without changing PlayStation CD-ROM timing.",
 	  "pcsx_rearmed_cd_readahead", k_cd_readahead_choices, 6, 0, 0, NULL } },
+	{ SCOPE_SELECTOR, { "VIDEO", "Renderer", "vitaGL draws on the GPU at the screen's resolution, with antialiasing. NEON draws on the CPU, exactly as the PlayStation GPU does, at its own resolution. Applies to the next game started.",
+	  "pcsx_rearcade_renderer", k_renderer_choices, 2, 0, 0, NULL } },
 	{ SCOPE_ALL, { "VIDEO", "Aspect Ratio", "4:3 is the original output. 16:9 Stretched fills the screen by stretching 4:3. 16:9 Unstretched uses an experimental widescreen projection that preserves geometry proportions and can reveal extra horizontal content, but some games may show culling or background artifacts.",
 	  "vita_aspect_ratio", k_aspect_choices, 3, 0, 0, NULL } },
 	{ SCOPE_ALL, { "VIDEO", "Screen Borders", "Borderless removes vertical blanking outside the game's active display range. Auto and Game preserve the console timing canvas when a title intentionally uses it.",

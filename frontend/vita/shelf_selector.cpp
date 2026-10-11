@@ -14,10 +14,8 @@
 #include "arcade_shelf.h"
 #include "../arcade_catalog.h"
 #include "../shelf_options.h"
-#include "../shelf_snapshot.h"
 #include "rom_selector.h"
-#include "savestates.h"
-#include "settings.h"
+#include "shelf_common.h"
 
 #include "app_root.h"
 #define ROMS_DIR APP_ROOT "/roms"
@@ -32,61 +30,18 @@ extern "C" void VitaCtrNativeRenderer_SetAspectMode(int mode);
 extern "C" void NativeRenderer_SwapWindow(void);
 extern "C" void VitaCtrNativeRenderer_GetFrameViewport(int rect[4]);
 
+/* The vitaGL executable's menus: on the renderer's thread and context. */
+static const VitaShelfPresenter g_vita_ctr_presenter = {
+    NativeGpu_RunBackendTaskSync, VitaCtrNativeRenderer_PresentCurrentFrame,
+    VitaCtrNativeRenderer_GetFrameViewport, NativeRenderer_SwapWindow, VitaCtrNativeRenderer_SetAspectMode
+};
+
 struct ShelfTask {
     char *out_path;
     size_t out_size;
     int result;
 };
 
-struct PauseTask {
-    const char *game_path;
-    bool start_in_save_states;
-    int result;
-};
-
-/* The title of the game launched last, for the pause menu's header. */
-static std::string g_game_title, g_game_path;
-
-/* ---- settings: settings.cfg, as the PCSX AwO menus keep them ---- */
-
-static void apply_aspect(void)
-{
-    const char *value = VitaSettings_GetOption("vita_aspect_ratio");
-    int mode = 0;
-    if (value && !strcmp(value, "16:9_stretched"))
-        mode = 1;
-    else if (value && !strcmp(value, "16:9_unstretched"))
-        mode = 2;
-    VitaCtrNativeRenderer_SetAspectMode(mode);
-}
-
-static const char *get_option(void *, const char *key)
-{
-    return VitaSettings_GetOption(key);
-}
-
-static void set_option(void *, const char *key, const char *value)
-{
-    if (!VitaSettings_SetOption(key, value))
-        return;
-    VitaSettings_Save();
-    if (!strcmp(key, "vita_aspect_ratio"))
-        apply_aspect();
-}
-
-static int state_exists(void *user, int slot)
-{
-    return VitaSaveStates_Exists((const char *)user, slot);
-}
-
-static ShelfConfig shelf_config(const ShelfMenus *menus)
-{
-    static const std::string about = pcsx_shelf_about(PCSX_GIT_VERSION);
-    const ShelfConfig config = { "PCSX", "ReArcade", APP_ROOT,
-        "Copy MAME romset zips or PlayStation discs to " ROMS_DIR, MENU_W, MENU_H,
-        arcade_catalog_styles, arcade_catalog_style_count, menus, about.c_str() };
-    return config;
-}
 
 /* A disc from the ROM selector's scan; its cover is "covers/<art>.png". */
 static void add_disc(void *user, const char *path, const char *title, const char *cover_path)
@@ -101,65 +56,23 @@ static void add_disc(void *user, const char *path, const char *title, const char
     ((ArcadeCatalog *)user)->add_disc(path, title, art);
 }
 
-static unsigned shelf_buttons(unsigned buttons)
-{
-    static const struct { unsigned vita, shelf; } map[] = {
-        { SCE_CTRL_UP, SHELF_UP }, { SCE_CTRL_DOWN, SHELF_DOWN },
-        { SCE_CTRL_LEFT, SHELF_LEFT }, { SCE_CTRL_RIGHT, SHELF_RIGHT },
-        { SCE_CTRL_CROSS, SHELF_CROSS }, { SCE_CTRL_CIRCLE, SHELF_CIRCLE },
-        { SCE_CTRL_TRIANGLE, SHELF_TRIANGLE }, { SCE_CTRL_SQUARE, SHELF_SQUARE },
-        { SCE_CTRL_LTRIGGER, SHELF_L }, { SCE_CTRL_RTRIGGER, SHELF_R },
-        { SCE_CTRL_START, SHELF_START }, { SCE_CTRL_SELECT, SHELF_SELECT },
-    };
-    unsigned out = 0;
-    for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++)
-        if (buttons & map[i].vita)
-            out |= map[i].shelf;
-    return out;
-}
-
-static float stick_axis(unsigned char value)
-{
-    return ((int)value - 128) / 127.0f;
-}
-
-/* The pad as the shelf takes it. Buttons held when a menu opens (from the
- * game, or the menu before) count once released. */
-static ShelfInput read_input(unsigned *ignored, SceUInt64 *previous_time)
-{
-    SceCtrlData pad;
-    memset(&pad, 0, sizeof(pad));
-    if (sceCtrlPeekBufferPositiveExt2(0, &pad, 1) < 0)
-        sceCtrlPeekBufferPositive(0, &pad, 1);
-    *ignored &= pad.buttons;
-
-    const SceUInt64 now = sceKernelGetProcessTimeWide();
-    ShelfInput input;
-    input.buttons = shelf_buttons(pad.buttons & ~*ignored);
-    input.stick_x = stick_axis(pad.rx);
-    input.stick_y = stick_axis(pad.ry);
-    input.dt = (float)(now - *previous_time) / 1000000.0f;
-    *previous_time = now;
-    return input;
-}
-
 /* "Soul Calibur (Asia, SOC14/VER.C)" for the pause menu. */
 static void remember_title(const ArcadeCatalog &catalog, const char *path)
 {
-    g_game_path = path;
-    g_game_title.clear();
     for (int g = 0; g < catalog.count(); g++) {
         const ShelfGame &game = catalog.games()[g];
         for (int v = 0; v < game.version_count; v++) {
             const ShelfVersion &version = game.versions[v];
             if (strcmp(version.launch, path))
                 continue;
-            g_game_title = game.title;
+            std::string title = game.title;
             if (version.label && *version.label)
-                g_game_title += std::string(" (") + version.label + ")";
+                title += std::string(" (") + version.label + ")";
+            VitaShelf_SetGame(path, title.c_str());
             return;
         }
     }
+    VitaShelf_SetGame(path, NULL);
 }
 
 /* A file the shelf lists: a MAME zip or a disc the ROM selector takes. */
@@ -232,8 +145,8 @@ static void shelf_task(void *arg)
     ArcadeCatalog catalog;
     int option_count;
     const ShelfOption *options = pcsx_shelf_options(PCSX_OPTIONS_SELECTOR, &option_count);
-    const ShelfMenus menus = { options, option_count, NULL, get_option, set_option, 0, NULL };
-    const ShelfConfig config = shelf_config(&menus);
+    const ShelfMenus menus = { options, option_count, NULL, VitaShelf_GetOption, VitaShelf_SetOption, 0, NULL, NULL, 0 };
+    const ShelfConfig config = VitaShelf_Config(&menus);
     uint64_t signature = 0;
 
     task->result = -1;
@@ -248,7 +161,7 @@ static void shelf_task(void *arg)
     SceUInt64 previous_time = sceKernelGetProcessTimeWide();
     SceUInt64 checked = previous_time;
     for (;;) {
-        const ShelfInput input = read_input(&ignored, &previous_time);
+        const ShelfInput input = VitaShelf_ReadInput(&ignored, &previous_time);
         int action;
         draw_shelf_frame(&input, task->out_path, task->out_size, &action);
         /* Every 2 s: did the game files change? */
@@ -282,92 +195,9 @@ extern "C" int VitaShelfSelector_Run(char *out_path, size_t out_size)
     out_path[0] = '\0';
     if (!NativeGpu_InitBackend(MENU_W, MENU_H))
         return -1;
+    VitaShelf_SetPresenter(&g_vita_ctr_presenter);
 
     ShelfTask task = { out_path, out_size, -1 };
     NativeGpu_RunBackendTaskSync(shelf_task, &task);
-    return task.result;
-}
-
-static void pause_task(void *arg)
-{
-    PauseTask *task = (PauseTask *)arg;
-    const size_t length = strlen(task->game_path);
-    const bool arcade = length > 4 && !strcasecmp(task->game_path + length - 4, ".zip");
-    int option_count;
-    const ShelfOption *options = pcsx_shelf_options(arcade ? PCSX_OPTIONS_ARCADE : PCSX_OPTIONS_DISC, &option_count);
-    /* An arcade game's frame can be its cabinet's screen on the shelf:
-     * snap/<set>.png, the art name of a MAME set. */
-    static const char *const arcade_actions[] = { "Use as cabinet art" };
-    std::string art;
-    if (arcade) {
-        const char *slash = strrchr(task->game_path, '/');
-        const std::string file = slash ? slash + 1 : task->game_path;
-        art = std::string(APP_ROOT "/snap/") + file.substr(0, file.size() - 4) + ".png";
-    }
-    const ShelfMenus menus = { options, option_count, (void *)task->game_path,
-        get_option, set_option, 10, state_exists, arcade ? arcade_actions : NULL, arcade ? 1 : 0 };
-    const ShelfConfig config = shelf_config(&menus);
-    std::string title = g_game_path == task->game_path ? g_game_title : std::string();
-    if (title.empty()) {
-        const char *slash = strrchr(task->game_path, '/');
-        title = slash ? slash + 1 : task->game_path;
-        title = title.substr(0, title.find_last_of('.'));
-    }
-
-    task->result = VITA_PAUSE_RESUME;
-    if (!shelf_init(&config)) {
-        sceClibPrintf("pcsx-vita: pause menu init failed\n");
-        shelf_shutdown();
-        return;
-    }
-    shelf_pause_open(title.c_str(), VitaSaveStates_GetSlot(), task->start_in_save_states);
-    /* A game without art gets the frame it was paused on. */
-    SceIoStat stat;
-    bool snapshot = arcade && sceIoGetstat(art.c_str(), &stat) < 0;
-    unsigned ignored = ~0u;
-    SceUInt64 previous_time = sceKernelGetProcessTimeWide();
-    for (;;) {
-        const ShelfInput input = read_input(&ignored, &previous_time);
-        int slot = VitaSaveStates_GetSlot();
-        GLint framebuffer = 0;
-
-        VitaCtrNativeRenderer_PresentCurrentFrame();
-        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        if (snapshot) {
-            /* The game's frame, before the menu is drawn over it. */
-            int rect[4];
-            snapshot = false;
-            VitaCtrNativeRenderer_GetFrameViewport(rect);
-            const int saved = shelf_snapshot_save(art.c_str(), rect[0], rect[1], rect[2], rect[3]);
-            sceClibPrintf("pcsx-vita: cabinet art %s %s\n", art.c_str(), saved == 0 ? "saved" : "failed");
-            shelf_toast(saved == 0 ? "Cabinet art saved" : "Could not save the cabinet art");
-        }
-        const int action = shelf_pause_frame(&input, &slot);
-        glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)framebuffer);
-        NativeRenderer_SwapWindow();
-        if (slot != VitaSaveStates_GetSlot())
-            VitaSaveStates_SetSlot(slot);
-        if (action == SHELF_PAUSE_ACTION) {
-            snapshot = true;
-            continue;
-        }
-        if (action == SHELF_PAUSE_NONE) {
-            sceKernelDelayThread(16000);
-            continue;
-        }
-        static const int results[] = { VITA_PAUSE_RESUME, VITA_PAUSE_RESUME, VITA_PAUSE_RESTART,
-            VITA_PAUSE_CLOSE_GAME, VITA_PAUSE_SAVE_STATE, VITA_PAUSE_LOAD_STATE };
-        task->result = results[action];
-        break;
-    }
-    glFinish();
-    shelf_shutdown();
-}
-
-extern "C" int VitaShelfPause_Run(const char *game_path, int start_in_save_states)
-{
-    PauseTask task = { game_path, start_in_save_states != 0, VITA_PAUSE_RESUME };
-    NativeGpu_RunBackendTaskSync(pause_task, &task);
     return task.result;
 }
