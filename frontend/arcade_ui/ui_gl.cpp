@@ -36,7 +36,7 @@
 static GLuint s_program, s_vbo, s_ibo, s_font_texture, s_white_texture;
 static GLint s_screen_loc = -1;
 static GLuint s_program3d;
-static GLint s_vp_loc = -1, s_model_loc = -1, s_params_loc = -1;
+static GLint s_vp_loc = -1, s_model_loc = -1, s_params_loc = -1, s_tint_loc = -1;
 
 static GLuint compile_shader(GLenum type, const char *source)
 {
@@ -105,6 +105,7 @@ static bool init_3d(void)
 		"uniform mat4 u_vp;\n"
 		"uniform mat4 u_model;\n"
 		"uniform vec4 u_params;\n" /* light, emissive */
+		"uniform vec4 u_tint;\n"
 		"varying vec2 v_uv;\n"
 		"varying vec4 v_color;\n"
 		"void main() {\n"
@@ -112,7 +113,7 @@ static bool init_3d(void)
 		"  vec3 n = normalize((u_model * vec4(in_normal, 0.0)).xyz);\n"
 		"  float diffuse = 0.34 + 0.66 * max(dot(n, normalize(vec3(-0.45, 0.55, 0.70))), 0.0);\n"
 		"  float k = mix(diffuse, 1.0, u_params.y) * u_params.x;\n"
-		"  v_color = vec4(in_color.rgb * k, in_color.a);\n"
+		"  v_color = vec4(in_color.rgb * u_tint.rgb * k, in_color.a * u_tint.a);\n"
 		"  v_uv = in_uv;\n"
 		"}\n";
 	static const char *fs =
@@ -129,6 +130,7 @@ static bool init_3d(void)
 	s_vp_loc = glGetUniformLocation(s_program3d, "u_vp");
 	s_model_loc = glGetUniformLocation(s_program3d, "u_model");
 	s_params_loc = glGetUniformLocation(s_program3d, "u_params");
+	s_tint_loc = glGetUniformLocation(s_program3d, "u_tint");
 	glUseProgram(s_program3d);
 	glUniform1i(glGetUniformLocation(s_program3d, "u_texture"), 0);
 	glUseProgram(0);
@@ -336,7 +338,7 @@ void ui_gl3d_begin(int x, int y, int width, int height, int framebuffer_height, 
 }
 
 void ui_gl3d_draw(const UiVertex3D *vertices, int count, unsigned texture, const float model[16],
-	float light, int flags)
+	float light, unsigned tint, int flags)
 {
 	if (flags & UI3D_BLEND) {
 		glEnable(GL_BLEND);
@@ -345,6 +347,8 @@ void ui_gl3d_draw(const UiVertex3D *vertices, int count, unsigned texture, const
 	}
 	glUniformMatrix4fv(s_model_loc, 1, GL_FALSE, model);
 	glUniform4f(s_params_loc, light, (flags & UI3D_EMISSIVE) ? 1.0f : 0.0f, 0.0f, 0.0f);
+	glUniform4f(s_tint_loc, (tint & 0xff) / 255.0f, ((tint >> 8) & 0xff) / 255.0f,
+		((tint >> 16) & 0xff) / 255.0f, ((tint >> 24) & 0xff) / 255.0f);
 	glBindTexture(GL_TEXTURE_2D, texture);
 	glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)count * sizeof(UiVertex3D), vertices, GL_STREAM_DRAW);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(UiVertex3D), (void *)offsetof(UiVertex3D, x));

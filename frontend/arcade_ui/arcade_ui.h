@@ -17,16 +17,19 @@ typedef struct {
 	const char *rompath;   /* MAME zips */
 	const char *data_root; /* snap/, titles/, marquees/ and arcade_ui.cfg */
 	int width, height;     /* framebuffer size in pixels */
-	int demo;              /* list every supported set as present (UI work) */
+	int demo;              /* 1: list every supported set as present (UI work);
+	                        * 2: also give games every board's colours in turn */
 	int flat;              /* 2D cabinet fronts instead of the 3D carousel */
 } ArcadeUiConfig;
 
 /* Call with the GL context current. */
 bool arcade_ui_init(const ArcadeUiConfig *config);
 void arcade_ui_shutdown(void);
-/* buttons: the UI_* buttons held now; dt: seconds since the last frame.
+/* buttons: the UI_* buttons held now; stick_x/y: the right stick, -1..1
+ * (it turns the selected cabinet); dt: seconds since the last frame.
  * Draws one frame into the bound framebuffer. On ARCADE_UI_LAUNCH,
  * launch_path holds the zip path to give the core. */
-int arcade_ui_frame(unsigned buttons, float dt, char *launch_path, size_t launch_size);
+int arcade_ui_frame(unsigned buttons, float stick_x, float stick_y, float dt,
+	char *launch_path, size_t launch_size);
 
 #endif

@@ -5,6 +5,8 @@
 versions (its MAME sets) beside it:
 
 - Left and right change the game. Up and down change the version.
+- The right stick turns the selected cabinet and tilts it toward the viewer.
+  Another game starts from the rest pose.
 - Cross (or Start) plays the selected set. Circle exits.
 - The last game and the version chosen for each game are kept in
   `<data>/arcade_ui.cfg`.
@@ -44,8 +46,15 @@ lit (not shaded). Per game, both are drawn once with ImGui into textures:
 - the marquee art, or the title on a gradient;
 - the snap inside a bezel, under a glass reflection.
 
-Neighbours step back, turn toward the middle and darken. A soft shadow and a
-pool of light mark the floor. `--flat` keeps the earlier 2D fronts.
+Each board family has its own colours: the body, the T-molding, the kick
+panel and the generated marquee. System 12 is indigo with a red molding;
+System 11, System 10, Capcom ZN, Taito FX-1, Konami GV and Taito G-Net have
+their own palettes for when those boards are listed.
+
+The selected cabinet sways a few degrees, and its marquee pulses gently, as
+a lit tube does. Neighbours step back, turn toward the middle and darken. A
+soft shadow and a pool of light mark the floor. `--flat` keeps the earlier
+2D fronts.
 
 ## Code
 
@@ -66,6 +75,7 @@ pool of light mark the floor. `--flat` keeps the earlier 2D fronts.
 make -f Makefile.arcade-ui
 build/arcade-ui/arcade-ui --rompath roms --data build/arcade-ui/data
 build/arcade-ui/arcade-ui --demo        # every supported set, no zips needed
+build/arcade-ui/arcade-ui --demo-boards # and every board palette in turn
 ```
 
 Keys:
@@ -78,6 +88,7 @@ Keys:
 | S | Triangle |
 | A | Square |
 | Q, W | L, R |
+| J, L, I, K | Right stick |
 
 A game controller also works.
 
@@ -90,4 +101,5 @@ build/arcade-ui/arcade-ui --headless --demo --script "R,R,D,-" \
 ```
 
 `--script` takes `U D L R X O T S LB RB ST SE` or `-` (no button), one
-press every `--step-frames` frames.
+press every `--step-frames` frames. `SL SR SU SD` hold the right stick for
+a whole step.

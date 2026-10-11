@@ -1,12 +1,14 @@
 /* The arcade selector on macOS, to work on the UI without a Vita.
  *
- *   build/arcade-ui/arcade-ui [--rompath DIR] [--data DIR] [--demo]
+ *   build/arcade-ui/arcade-ui [--rompath DIR] [--data DIR] [--demo | --demo-boards]
  *       [--script STEPS] [--step-frames N] [--shot FILE.png] [--shots DIR] [--headless] [--flat]
  *
  * Keys: arrows; Z or Enter = cross (play); X or Esc = circle (exit);
- * S = triangle; A = square; Q/W = L/R. A game controller works too.
+ * S = triangle; A = square; Q/W = L/R; J L I K = right stick (turns the
+ * cabinet). A game controller works too.
  * --script runs a comma-separated button list (U D L R X O T S LB RB ST SE,
- * or "-" for no button), one press every --step-frames frames, then exits.
+ * or "-" for no button), one press every --step-frames frames, then exits;
+ * SL SR SU SD hold the right stick for a whole step.
  * --shots saves a PNG after each step; --shot saves the last frame.
  * --headless draws into an offscreen framebuffer instead of a window.
  * --flat draws 2D cabinet fronts instead of the 3D carousel.
@@ -45,6 +47,16 @@ extern "C" int system12_load_regions(const system12_desc *, u8 *main, u8 *banked
 {
 	free(main); free(banked); free(sub); free(wave);
 	return -1;
+}
+
+/* Script steps that hold the right stick for the whole step. */
+static bool script_stick(const std::string &name, float *x, float *y)
+{
+	if (name == "SL") { *x = -1; *y = 0; return true; }
+	if (name == "SR") { *x = 1; *y = 0; return true; }
+	if (name == "SU") { *x = 0; *y = -1; return true; }
+	if (name == "SD") { *x = 0; *y = 1; return true; }
+	return false;
 }
 
 static unsigned script_button(const std::string &name)
@@ -121,6 +133,7 @@ int main(int argc, char **argv)
 {
 	const char *rompath = "roms", *data = "build/arcade-ui/data", *shot = NULL, *shots = NULL;
 	std::vector<unsigned> script;
+	std::vector<std::pair<float, float> > script_sticks;
 	int step_frames = 15, demo = 0, flat = 0, headless = 0, result = 0;
 	for (int i = 1; i < argc; i++) {
 		const std::string arg = argv[i];
@@ -128,6 +141,7 @@ int main(int argc, char **argv)
 		if (arg == "--rompath" && has_value) rompath = argv[++i];
 		else if (arg == "--data" && has_value) data = argv[++i];
 		else if (arg == "--demo") demo = 1;
+		else if (arg == "--demo-boards") demo = 2;
 		else if (arg == "--flat") flat = 1;
 		else if (arg == "--headless") headless = 1;
 		else if (arg == "--shot" && has_value) shot = argv[++i];
@@ -138,7 +152,11 @@ int main(int argc, char **argv)
 			size_t start = 0;
 			while (start <= list.size()) {
 				size_t comma = list.find(',', start);
-				script.push_back(script_button(list.substr(start, comma == std::string::npos ? std::string::npos : comma - start)));
+				const std::string token = list.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+				float x = 0, y = 0;
+				const bool stick = script_stick(token, &x, &y);
+				script.push_back(stick ? 0 : script_button(token));
+				script_sticks.push_back(std::make_pair(x, y));
 				if (comma == std::string::npos)
 					break;
 				start = comma + 1;
@@ -200,21 +218,35 @@ int main(int argc, char **argv)
 				pad = SDL_OpenGamepad(event.gdevice.which);
 		}
 		unsigned buttons;
-		float dt;
+		float dt, stick_x = 0, stick_y = 0;
 		if (scripted) {
 			/* Fixed time step: the same script always draws the same frames. */
 			dt = 1.0f / 60.0f;
 			buttons = step < script.size() && frame % step_frames == 0 ? script[step] : 0;
+			if (step < script.size()) {
+				stick_x = script_sticks[step].first;
+				stick_y = script_sticks[step].second;
+			}
 		} else {
 			const Uint64 now = SDL_GetTicksNS();
+			const bool *keys = SDL_GetKeyboardState(NULL);
 			dt = (float)((now - last) / 1e9);
 			last = now;
 			buttons = keyboard_buttons() | gamepad_buttons(pad);
+			/* Right stick, or J L I K. */
+			if (pad) {
+				stick_x = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f;
+				stick_y = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f;
+			}
+			if (keys[SDL_SCANCODE_J]) stick_x = -1;
+			if (keys[SDL_SCANCODE_L]) stick_x = 1;
+			if (keys[SDL_SCANCODE_I]) stick_y = -1;
+			if (keys[SDL_SCANCODE_K]) stick_y = 1;
 		}
 		char launch[1024];
 		glClearColor(0, 0, 0, 1);
 		glClear(GL_COLOR_BUFFER_BIT);
-		const int action = arcade_ui_frame(buttons, dt, launch, sizeof(launch));
+		const int action = arcade_ui_frame(buttons, stick_x, stick_y, dt, launch, sizeof(launch));
 		frame++;
 		if (scripted && frame % step_frames == 0) {
 			if (shots) {

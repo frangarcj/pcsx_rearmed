@@ -48,11 +48,45 @@ struct State {
 	float repeat_time;
 	unsigned repeat_button;
 	std::vector<Art> art;
+	std::vector<std::pair<std::string, unsigned> > kick; /* kick panel per board */
 	unsigned frame;
+	float time;               /* seconds, for the idle animation */
+	float yaw, pitch;         /* right stick turn of the selected cabinet */
+	int posed_game;           /* the game yaw/pitch belong to */
 	ImFont *font_small, *font_body, *font_title, *font_marquee;
 };
 
 State *s;
+
+/* Cabinet colours per board family. */
+struct BoardStyle {
+	const char *board;
+	ImU32 body, molding, kick_top, kick_bottom, marquee_a, marquee_b;
+};
+const BoardStyle kBoardStyles[] = {
+	{ "Namco System 12", IM_COL32(64, 72, 165, 255), IM_COL32(232, 62, 52, 255), IM_COL32(44, 48, 110, 255),
+	  IM_COL32(22, 24, 60, 255), IM_COL32(240, 70, 80, 255), IM_COL32(130, 50, 200, 255) },
+	{ "Namco System 11", IM_COL32(160, 36, 46, 255), IM_COL32(28, 28, 32, 255), IM_COL32(120, 26, 36, 255),
+	  IM_COL32(60, 12, 18, 255), IM_COL32(250, 120, 40, 255), IM_COL32(200, 30, 50, 255) },
+	{ "Namco System 10", IM_COL32(30, 130, 140, 255), IM_COL32(200, 205, 215, 255), IM_COL32(24, 96, 104, 255),
+	  IM_COL32(10, 44, 50, 255), IM_COL32(40, 200, 200, 255), IM_COL32(30, 90, 170, 255) },
+	{ "Capcom ZN", IM_COL32(44, 44, 50, 255), IM_COL32(250, 196, 30, 255), IM_COL32(36, 36, 42, 255),
+	  IM_COL32(16, 16, 20, 255), IM_COL32(250, 200, 40, 255), IM_COL32(220, 70, 30, 255) },
+	{ "Taito FX-1", IM_COL32(40, 96, 190, 255), IM_COL32(235, 235, 240, 255), IM_COL32(30, 72, 150, 255),
+	  IM_COL32(12, 30, 70, 255), IM_COL32(60, 160, 255, 255), IM_COL32(30, 60, 180, 255) },
+	{ "Konami GV", IM_COL32(34, 120, 76, 255), IM_COL32(245, 130, 30, 255), IM_COL32(26, 92, 58, 255),
+	  IM_COL32(10, 40, 24, 255), IM_COL32(250, 150, 40, 255), IM_COL32(40, 160, 90, 255) },
+	{ "Taito G-Net", IM_COL32(110, 44, 140, 255), IM_COL32(200, 200, 210, 255), IM_COL32(84, 32, 110, 255),
+	  IM_COL32(36, 12, 50, 255), IM_COL32(200, 80, 240, 255), IM_COL32(90, 40, 180, 255) },
+};
+
+const BoardStyle &style_for(const std::string &board)
+{
+	for (const BoardStyle &style : kBoardStyles)
+		if (board == style.board)
+			return style;
+	return kBoardStyles[0];
+}
 
 /* "Soul Calibur (Asia, SOC14/VER.C)" -> "Soul Calibur" and "Asia, SOC14/VER.C". */
 void split_description(const char *description, std::string *title, std::string *label)
@@ -151,6 +185,10 @@ void build_catalog()
 	}
 	std::sort(s->games.begin(), s->games.end(),
 		[](const Game &a, const Game &b) { return a.title < b.title; });
+	/* Palette preview: every board family in turn (demo 2 only). */
+	if (s->config.demo == 2)
+		for (size_t i = 0; i < s->games.size(); i++)
+			s->games[i].board = kBoardStyles[i % (sizeof(kBoardStyles) / sizeof(kBoardStyles[0]))].board;
 	s->game = 0;
 	load_config(&last_game);
 	for (size_t i = 0; i < s->games.size(); i++)
@@ -360,6 +398,7 @@ float text_hint(ImDrawList *draw, float x, float y, const char *key, const char 
 struct SurfaceJob {
 	const Game *game;
 	const Art *art;
+	const BoardStyle *style;
 };
 
 /* The lit marquee: the user's art, or the title on a gradient. */
@@ -374,11 +413,11 @@ void draw_marquee3d(ImDrawList *draw, void *opaque)
 		draw->PopTextureID();
 		return;
 	}
-	draw->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(W, H), rgba(240, 70, 80), rgba(130, 50, 200),
-		rgba(90, 30, 150), rgba(190, 40, 60));
+	const ImU32 a = job->style->marquee_a, b = job->style->marquee_b;
+	draw->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(W, H), a, b, fade(b, 0.7f), fade(a, 0.75f));
 	draw->AddRectFilled(ImVec2(0, 0), ImVec2(W, H * 0.45f), rgba(255, 255, 255, 0.10f));
-	centred_text(draw, s->font_title, 96.0f, 24, W - 24, H * 0.5f + 2, rgba(0, 0, 0, 0.35f), job->game->title.c_str());
-	centred_text(draw, s->font_title, 96.0f, 24, W - 24, H * 0.5f - 2, rgba(255, 248, 225), job->game->title.c_str());
+	centred_text(draw, s->font_title, 80.0f, 24, W - 24, H * 0.5f + 2, rgba(0, 0, 0, 0.35f), job->game->title.c_str());
+	centred_text(draw, s->font_title, 80.0f, 24, W - 24, H * 0.5f - 2, rgba(255, 248, 225), job->game->title.c_str());
 }
 
 /* The screen: a black bezel around the 4:3 picture, and the glass. */
@@ -411,7 +450,7 @@ void draw_screen3d(ImDrawList *draw, void *opaque)
 
 void ensure_surfaces(const Game &game, Art *art)
 {
-	SurfaceJob job = { &game, art };
+	SurfaceJob job = { &game, art, &style_for(game.board) };
 	if (!art->marquee3d.id)
 		ui_gl_render_to_texture(&art->marquee3d, CABINET3D_MARQUEE_W, CABINET3D_MARQUEE_H, draw_marquee3d, &job);
 	if (!art->screen3d.id)
@@ -431,12 +470,26 @@ void stage_camera(float view_projection[16])
 	mat4_multiply(view_projection, projection, view);
 }
 
+unsigned kick_for(const std::string &board)
+{
+	for (const auto &entry : s->kick)
+		if (entry.first == board)
+			return entry.second;
+	const BoardStyle &style = style_for(board);
+	s->kick.push_back(std::make_pair(board, cabinet3d_kick_texture(style.kick_top, style.kick_bottom)));
+	return s->kick.back().second;
+}
+
 void cabinet_place(float model[16], float d)
 {
 	const float distance = fabsf(d);
-	/* The selected cabinet turns a little to show its side; neighbours
-	 * step back and turn toward the middle. */
-	mat4_place(model, d * 1.32f, 0.0f, -std::min(distance, 2.5f) * 1.35f, -10.0f - d * 30.0f);
+	/* The selected cabinet turns a little to show its side, sways gently
+	 * and follows the right stick; neighbours step back and turn toward the
+	 * middle. */
+	const float focus = std::max(0.0f, 1.0f - distance * 2.0f);
+	const float sway = 4.0f * sinf(s->time * 2.0f * (float)M_PI / 6.0f) * focus;
+	mat4_place_tilted(model, d * 1.32f, 0.0f, -std::min(distance, 2.5f) * 1.35f,
+		-10.0f - d * 30.0f + sway + s->yaw * focus, s->pitch * focus, 0.95f);
 }
 
 void draw_stage_3d()
@@ -461,7 +514,12 @@ void draw_stage_3d()
 	for (int i : visible) {
 		const float d = (float)i - s->scroll;
 		Art *art = art_for(s->games[i]);
-		CabinetLook look = { art->marquee3d.id, art->screen3d.id, std::max(0.28f, 1.0f - 0.36f * fabsf(d)) };
+		const BoardStyle &style = style_for(s->games[i].board);
+		const float focus = std::max(0.0f, 1.0f - fabsf(d) * 2.0f);
+		CabinetLook look = { art->marquee3d.id, art->screen3d.id, kick_for(s->games[i].board), style.body,
+			style.molding, std::max(0.28f, 1.0f - 0.36f * fabsf(d)),
+			/* The selected marquee breathes, as a lit tube does. */
+			1.0f - focus * (0.07f + 0.07f * sinf(s->time * 2.0f * (float)M_PI / 2.5f)) };
 		cabinet_place(model, d);
 		cabinet3d_draw(model, &look);
 	}
@@ -500,10 +558,13 @@ void draw_frame(ImDrawList *draw)
 	}
 
 	/* Header. */
-	draw->AddText(s->font_small, 15.0f, ImVec2(32, 20), rgba(255, 180, 0), "ARCADE");
+	const ImVec2 pcsx = s->font_body->CalcTextSizeA(20.0f, FLT_MAX, 0.0f, "PCSX ");
+	draw->AddText(s->font_body, 20.0f, ImVec2(32, 15), rgba(240, 240, 248), "PCSX ");
+	draw->AddText(s->font_body, 20.0f, ImVec2(32 + pcsx.x, 15), rgba(255, 180, 0), "ReArcade");
+	const ImVec2 brand = s->font_body->CalcTextSizeA(20.0f, FLT_MAX, 0.0f, "PCSX ReArcade");
 	char count[64];
 	snprintf(count, sizeof(count), "%d / %d", s->game + 1, (int)s->games.size());
-	draw->AddText(s->font_small, 15.0f, ImVec2(100, 20), rgba(150, 155, 185), count);
+	draw->AddText(s->font_small, 15.0f, ImVec2(32 + brand.x + 16, 19), rgba(150, 155, 185), count);
 	const ImVec2 chip = s->font_small->CalcTextSizeA(13.0f, FLT_MAX, 0.0f, s->games[s->game].board.c_str());
 	draw->AddRectFilled(ImVec2(W - 32 - chip.x - 20, 16), ImVec2(W - 32, 38), rgba(230, 57, 70, 0.22f), 11.0f);
 	draw->AddText(s->font_small, 13.0f, ImVec2(W - 32 - chip.x - 10, 27 - chip.y * 0.5f), rgba(255, 160, 165),
@@ -628,6 +689,10 @@ void arcade_ui_shutdown(void)
 		ui_gl_free_texture(&art.marquee3d);
 		ui_gl_free_texture(&art.screen3d);
 	}
+	for (auto &entry : s->kick) {
+		UiTexture texture = { entry.second, 0, 0 };
+		ui_gl_free_texture(&texture);
+	}
 	cabinet3d_shutdown();
 	ui_gl_shutdown();
 	ImGui::DestroyContext();
@@ -635,12 +700,13 @@ void arcade_ui_shutdown(void)
 	s = NULL;
 }
 
-int arcade_ui_frame(unsigned buttons, float dt, char *launch_path, size_t launch_size)
+int arcade_ui_frame(unsigned buttons, float stick_x, float stick_y, float dt, char *launch_path, size_t launch_size)
 {
 	int action = ARCADE_UI_NONE;
 	ImGuiIO &io = ImGui::GetIO();
 	s->frame++;
 	io.DeltaTime = dt > 0.0f ? dt : 1.0f / 60.0f;
+	s->time += io.DeltaTime;
 
 	if (pressed(buttons, UI_CIRCLE, dt))
 		action = ARCADE_UI_QUIT;
@@ -663,6 +729,16 @@ int arcade_ui_frame(unsigned buttons, float dt, char *launch_path, size_t launch
 		}
 	}
 	s->previous = buttons;
+	/* The right stick turns the selected cabinet; another game starts from
+	 * its rest pose. */
+	if (s->posed_game != s->game) {
+		s->posed_game = s->game;
+		s->yaw = s->pitch = 0.0f;
+	}
+	if (fabsf(stick_x) > 0.2f)
+		s->yaw = fmodf(s->yaw + stick_x * 150.0f * io.DeltaTime, 360.0f);
+	if (fabsf(stick_y) > 0.2f)
+		s->pitch = std::max(-15.0f, std::min(15.0f, s->pitch + stick_y * 45.0f * io.DeltaTime));
 	/* Ease the carousel toward the selected game. */
 	s->scroll += ((float)s->game - s->scroll) * std::min(1.0f, io.DeltaTime * 12.0f);
 	if (fabsf((float)s->game - s->scroll) < 0.001f)

@@ -69,6 +69,24 @@ void mat4_look_at(float m[16], const float eye[3], const float target[3], const 
 	m[14] = f[0] * eye[0] + f[1] * eye[1] + f[2] * eye[2];
 }
 
+void mat4_place_tilted(float m[16], float x, float y, float z, float yaw_degrees,
+	float pitch_degrees, float pivot_y)
+{
+	/* The tilt is about the world X axis (toward the viewer), after the turn:
+	 * T(x, y + pivot, z) Rx(pitch) T(0, -pivot, 0) Ry(yaw). */
+	const float a = pitch_degrees * (float)M_PI / 180.0f, c = cosf(a), s = sinf(a);
+	float place[16], tilt[16], down[16], turn[16];
+	mat4_place(place, x, y + pivot_y, z, 0.0f);
+	mat4_identity(tilt);
+	tilt[5] = c; tilt[6] = s;
+	tilt[9] = -s; tilt[10] = c;
+	mat4_place(down, 0.0f, -pivot_y, 0.0f, 0.0f);
+	mat4_place(turn, 0.0f, 0.0f, 0.0f, yaw_degrees);
+	mat4_multiply(m, place, tilt);
+	mat4_multiply(m, m, down);
+	mat4_multiply(m, m, turn);
+}
+
 void mat4_place(float m[16], float x, float y, float z, float yaw_degrees)
 {
 	const float a = yaw_degrees * (float)M_PI / 180.0f, c = cosf(a), s = sinf(a);
@@ -105,7 +123,7 @@ const ProfilePoint kProfile[] = {
 	{ 0.40f, 1.15f }, /* E control panel back */
 	{ 0.36f, 1.17f }, /* F screen bottom */
 	{ 0.15f, 1.66f }, /* G screen top (leaning back) */
-	{ 0.34f, 1.68f }, /* H marquee bottom (overhang) */
+	{ 0.34f, 1.73f }, /* H marquee bottom (overhang; the face is 3.5:1, as MAME marquees) */
 	{ 0.34f, 1.92f }, /* I marquee top */
 	{ -0.42f, 1.92f }, /* J top, back */
 	{ -0.42f, 0.00f }, /* K floor, back */
@@ -117,8 +135,8 @@ const Surface kSegment[PROFILE_POINTS - 1] = { KICK, DARK, TRIM, PANEL, DARK, SC
 const float kSide = 0.035f; /* side panel thickness */
 
 std::vector<UiVertex3D> s_surface[SURFACES];
-std::vector<UiVertex3D> s_sides, s_shadow;
-UiTexture s_panel, s_kick, s_shadow_texture;
+std::vector<UiVertex3D> s_sides, s_molding, s_shadow;
+UiTexture s_panel, s_shadow_texture;
 
 void vertex(std::vector<UiVertex3D> &out, float x, float y, float z, const float n[3], float u, float v, ImU32 color)
 {
@@ -184,7 +202,7 @@ ImU32 surface_color(Surface surface)
 	switch (surface) {
 	case DARK: return IM_COL32(18, 18, 24, 255);
 	case TRIM: return IM_COL32(40, 40, 52, 255);
-	case BODY: return IM_COL32(30, 32, 70, 255);
+	case BODY: return IM_COL32(150, 150, 150, 255); /* tinted by the body colour */
 	default: return IM_COL32(255, 255, 255, 255);
 	}
 }
@@ -204,10 +222,11 @@ void build_mesh()
 		for (int side = -1; side <= 1; side += 2) {
 			const float x0 = side * inner, x1 = side * half;
 			const float e[4][3] = { { x0, a.y, a.z }, { x1, a.y, a.z }, { x1, b.y, b.z }, { x0, b.y, b.z } };
-			quad(s_sides, e, n, IM_COL32(230, 70, 60, 255), uv);
+			quad(s_molding, e, n, IM_COL32(255, 255, 255, 255), uv);
 		}
 	}
-	/* Side panels: the profile at x = +-half, shaded darker toward the floor. */
+	/* Side panels: the profile at x = +-half, darker toward the floor; the
+	 * body colour tints them. */
 	const std::vector<int> triangles = triangulate_profile();
 	for (int side = -1; side <= 1; side += 2) {
 		const float n[3] = { (float)side, 0.0f, 0.0f };
@@ -215,9 +234,8 @@ void build_mesh()
 			for (int k = 0; k < 3; k++) {
 				const int index = triangles[t + (side > 0 ? k : 2 - k)];
 				const ProfilePoint &p = kProfile[index];
-				const float shade = 0.55f + 0.45f * (p.y / CABINET3D_HEIGHT);
-				vertex(s_sides, side * half, p.y, p.z, n, 0, 0,
-					IM_COL32((int)(52 * shade), (int)(58 * shade), (int)(128 * shade), 255));
+				const int shade = (int)(255.0f * (0.55f + 0.45f * (p.y / CABINET3D_HEIGHT)));
+				vertex(s_sides, side * half, p.y, p.z, n, 0, 0, IM_COL32(shade, shade, shade, 255));
 			}
 	}
 	/* Floor shadow: a quad under the cabinet with a radial texture. */
@@ -251,11 +269,11 @@ void draw_panel(ImDrawList *draw, void *)
 }
 
 /* Kick panel: body colour, a coin door with two lit slots. */
-void draw_kick(ImDrawList *draw, void *)
+void draw_kick(ImDrawList *draw, void *opaque)
 {
+	const unsigned *body = (const unsigned *)opaque;
 	const float W = 512, H = 512;
-	draw->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(W, H), IM_COL32(44, 48, 104, 255), IM_COL32(44, 48, 104, 255),
-		IM_COL32(24, 26, 60, 255), IM_COL32(24, 26, 60, 255));
+	draw->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(W, H), body[0], body[0], body[1], body[1]);
 	const ImVec2 d0(176, 150), d1(336, 360);
 	draw->AddRectFilled(ImVec2(d0.x - 6, d0.y - 6), ImVec2(d1.x + 6, d1.y + 6), IM_COL32(120, 120, 130, 255), 6);
 	draw->AddRectFilled(d0, d1, IM_COL32(18, 18, 22, 255), 4);
@@ -281,44 +299,55 @@ bool cabinet3d_init(void)
 {
 	build_mesh();
 	return ui_gl_render_to_texture(&s_panel, 512, 160, draw_panel, NULL) &&
-		ui_gl_render_to_texture(&s_kick, 512, 512, draw_kick, NULL) &&
 		ui_gl_render_to_texture(&s_shadow_texture, 128, 128, draw_shadow, NULL);
+}
+
+unsigned cabinet3d_kick_texture(unsigned body_top, unsigned body_bottom)
+{
+	unsigned body[2] = { body_top, body_bottom };
+	UiTexture texture = {};
+	ui_gl_render_to_texture(&texture, 512, 512, draw_kick, body);
+	return texture.id;
 }
 
 void cabinet3d_shutdown(void)
 {
 	ui_gl_free_texture(&s_panel);
-	ui_gl_free_texture(&s_kick);
 	ui_gl_free_texture(&s_shadow_texture);
 	for (auto &surface : s_surface)
 		surface.clear();
 	s_sides.clear();
+	s_molding.clear();
 	s_shadow.clear();
 }
 
 void cabinet3d_draw(const float model[16], const CabinetLook *look)
 {
 	const unsigned white = ui_gl_white_texture();
-	ui_gl3d_draw(s_sides.data(), (int)s_sides.size(), white, model, look->light, 0);
+	const unsigned plain = IM_COL32(255, 255, 255, 255);
+	ui_gl3d_draw(s_sides.data(), (int)s_sides.size(), white, model, look->light, look->body, 0);
+	ui_gl3d_draw(s_molding.data(), (int)s_molding.size(), white, model, look->light, look->molding, 0);
 	for (int surface = 0; surface < SURFACES; surface++) {
 		const std::vector<UiVertex3D> &mesh = s_surface[surface];
-		unsigned texture = white;
+		unsigned texture = white, tint = plain;
+		float light = look->light;
 		int flags = 0;
 		if (mesh.empty())
 			continue;
 		switch (surface) {
 		case PANEL: texture = s_panel.id; break;
-		case KICK: texture = s_kick.id; break;
+		case KICK: texture = look->kick; break;
+		case BODY: tint = look->body; break;
 		case SCREEN: texture = look->screen; flags = UI3D_EMISSIVE; break;
-		case MARQUEE: texture = look->marquee; flags = UI3D_EMISSIVE; break;
+		case MARQUEE: texture = look->marquee; flags = UI3D_EMISSIVE; light *= look->marquee_light; break;
 		default: break;
 		}
-		ui_gl3d_draw(mesh.data(), (int)mesh.size(), texture ? texture : white, model, look->light, flags);
+		ui_gl3d_draw(mesh.data(), (int)mesh.size(), texture ? texture : white, model, light, tint, flags);
 	}
 }
 
 void cabinet3d_shadow(const float model[16], float strength)
 {
 	ui_gl3d_draw(s_shadow.data(), (int)s_shadow.size(), s_shadow_texture.id, model, strength,
-		UI3D_EMISSIVE | UI3D_BLEND);
+		IM_COL32(255, 255, 255, 255), UI3D_EMISSIVE | UI3D_BLEND);
 }

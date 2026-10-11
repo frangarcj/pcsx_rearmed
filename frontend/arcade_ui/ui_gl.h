@@ -39,9 +39,10 @@ enum {
 	UI3D_EMISSIVE = 1, /* not shaded (screen, marquee) */
 	UI3D_BLEND = 2     /* alpha blended, no depth writes (shadows) */
 };
-/* Draws triangles with a model matrix; light scales the colour. */
+/* Draws triangles with a model matrix; the vertex colours are multiplied
+ * by tint (IM_COL32) and light. */
 void ui_gl3d_draw(const UiVertex3D *vertices, int count, unsigned texture, const float model[16],
-	float light, int flags);
+	float light, unsigned tint, int flags);
 void ui_gl3d_end(void);
 /* A 1x1 white texture for untextured surfaces. */
 unsigned ui_gl_white_texture(void);
