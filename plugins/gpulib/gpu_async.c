@@ -41,8 +41,10 @@ int gpu_async_write_last[4];
 unsigned gpu_async_waits_by[4];
 unsigned long long gpu_async_wait_us_by[4];
 unsigned long long gpu_async_words;
-#define BUSY_BEGIN() const SceUInt64 busy_start_ = sceKernelGetProcessTimeWide()
-#define BUSY_END(i) (gpu_async_busy_us[i] += sceKernelGetProcessTimeWide() - busy_start_)
+/* A clock read per command list: only when the frontend asks. */
+int gpu_async_perf_timing;
+#define BUSY_BEGIN() const SceUInt64 busy_start_ = gpu_async_perf_timing ? sceKernelGetProcessTimeWide() : 0
+#define BUSY_END(i) (gpu_async_perf_timing ? (void)(gpu_async_busy_us[i] += sceKernelGetProcessTimeWide() - busy_start_) : (void)0)
 #else
 #define BUSY_BEGIN()
 #define BUSY_END(i)

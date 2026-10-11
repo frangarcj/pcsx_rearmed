@@ -202,6 +202,9 @@ static int sync_systemgnet(u32 cycle) { return systemgnet_sync(cycle); }
 /* --system12 takes a prepared region directory or a MAME zip (<set>.zip). */
 static int load_system12(const char *path)
 {
+  /* The report's H8 perf line: time the board's work. */
+  extern int system12_perf_timing;
+  system12_perf_timing = 1;
   return system12_romset_is_zip(path) ? system12_romset_load(path) : system12_load(path);
 }
 static const HarnessBoard boards[] = {

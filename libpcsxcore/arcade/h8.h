@@ -60,12 +60,17 @@ typedef struct H8Status {
     uint32_t pc, er[8];
     /* Diagnostic counts since the latest cold/soft reset. */
     uint64_t cycles, instructions;
+    /* Instructions the idle-loop skip did not execute, all CPUs since start
+     * (performance: executed = instructions - skipped over an interval). */
+    uint64_t skipped;
     uint32_t illegal_pc;
     uint16_t illegal_opcode;
     uint8_t ccr, sleeping, halted;
     /* Unsupported peripheral accesses: bit 0 DMA, bit 1 watchdog. */
     uint32_t unsupported_peripherals;
 } H8Status;
+/* h8_run_until calls, spin skips, instructions run batched and singly. */
+void h8_perf_counters(uint64_t out[4]);
 H8CPU *h8_create(const H8Config *config);
 void h8_destroy(H8CPU *cpu);
 /* Savestates: registers, internal RAM/IO, peripherals and clocks as an

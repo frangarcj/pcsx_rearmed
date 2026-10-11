@@ -1327,12 +1327,21 @@ static void print_wait_stats(unsigned runs)
         static unsigned long long last_board_busy;
         WAIT_FIELD("b_busy", system12_board_busy_us - last_board_busy, 0);
         last_board_busy = system12_board_busy_us;
+        extern unsigned long long system12_board_cpu_us;
+        static unsigned long long last_board_cpu;
+        WAIT_FIELD("b_cpu", system12_board_cpu_us - last_board_cpu, 0);
+        last_board_cpu = system12_board_cpu_us;
         extern unsigned long long system12_h8_us, system12_pcm_us;
         static unsigned long long last_h8, last_pcm;
         WAIT_FIELD("b_h8", system12_h8_us - last_h8, 0);
         WAIT_FIELD("b_c352", system12_pcm_us - last_pcm, 0);
         last_h8 = system12_h8_us;
         last_pcm = system12_pcm_us;
+        extern unsigned long long system12_c352_access_us, system12_c352_horizon_us, system12_c352_accesses;
+        static unsigned long long last_acc_us, last_hor_us, last_acc;
+        WAIT_FIELD("c_acc", system12_c352_access_us - last_acc_us, system12_c352_accesses - last_acc);
+        WAIT_FIELD("c_hor", system12_c352_horizon_us - last_hor_us, 0);
+        last_acc_us = system12_c352_access_us; last_hor_us = system12_c352_horizon_us; last_acc = system12_c352_accesses;
         extern unsigned long long system12_h8_instructions, system12_h8_shared;
         static unsigned long long last_ins, last_shared;
         at += snprintf(line + at, sizeof(line) - at, " h8_ins=%llu h8_shared=%llu",
@@ -1890,6 +1899,21 @@ int main(int argc, char **argv)
         VitaSettings_Init();
         VitaSaveStates_Init();
 #ifdef VITA_DEBUG_SHOT
+        {
+            /* APP_ROOT/perf.txt: time the board's and GPU thread's work
+             * piece by piece (a clock read per board command, which itself
+             * costs a few ms a frame: off for fps measurements). */
+            SceIoStat stat;
+            if (sceIoGetstat(APP_ROOT "/perf.txt", &stat) >= 0) {
+                extern int system12_perf_timing;
+                system12_perf_timing = 1;
+#ifdef USE_ASYNC_GPU
+                extern int gpu_async_perf_timing;
+                gpu_async_perf_timing = 1;
+#endif
+                sceClibPrintf("pcsx-vita: per-command timing on\n");
+            }
+        }
         {
             /* Measurements: APP_ROOT/gpu_core.txt, "GPU BOARD", picks the
              * cores of the GPU and board threads (-1: the default). */

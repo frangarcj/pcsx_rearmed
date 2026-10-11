@@ -385,6 +385,16 @@ bool H8CPU::peek(u32 a,u8 *v) const {
  * is measured, not modeled: two consecutive equal deltas are required. The
  * skip stays strictly before the next internal event and the run deadline,
  * so the remaining iterations reach them exactly as without the skip. */
+/* Outside H8CPU: savestates copy the whole class, so its layout stays. */
+static u64 h8_skipped_instructions;
+/* Performance counters: h8_run_until calls, spin skips taken, instructions
+ * run by run_batch and by the single-state loop. */
+static u64 h8_perf_calls, h8_perf_skips, h8_perf_batch, h8_perf_single;
+extern "C" void h8_perf_counters(uint64_t out[4])
+{
+    out[0]=h8_perf_calls;out[1]=h8_perf_skips;out[2]=h8_perf_batch;out[3]=h8_perf_single;
+}
+
 bool H8CPU::skip_spin(u64 target) {
     u8 b[8],value;
     // Other instructions leave the detector alone: the instruction count
@@ -419,8 +429,9 @@ bool H8CPU::skip_spin(u64 target) {
             // exactly like the per-instruction ticks it replaces.
             k=std::min<u64>(k,(arcade::H8CycleClock::frequency-1)/delta);
             if(k) {
+                h8_perf_skips++;
                 tick(unsigned(k*delta));
-                instructions+=2*k;
+                instructions+=2*k;h8_skipped_instructions+=2*k;
                 if(config.account_reads)config.account_reads(config.opaque,spin.address,k);
                 spin.cycles=cycles;spin.instructions=instructions;
                 return true;
@@ -449,7 +460,7 @@ int H8CPU::run_batch(u64 target) {
         if(m_inst_state<0x10000) {
             // Possible spin loops take the single-state path and its skip.
             if(spin_candidate()) break;
-            m_PPC=m_NPC;instructions++;
+            m_PPC=m_NPC;instructions++;h8_perf_batch++;
         }
         exec_full();
         if(!next_event_valid) refresh_bcount();
@@ -591,6 +602,7 @@ int h8_run_until(H8CPU *c,uint64_t target) {
     if(!c)return -1;
     if(c->in_run)return -2;
     if(target<c->cycles)return -1;
+    h8_perf_calls++;
     c->in_run=true;c->deadline_run=true;c->run_deadline=target;
     // Inside the loop the IRQ choice stays current: prefetch_done(), tick()
     // events and IRQ/ISR register writes refresh it.
@@ -622,7 +634,7 @@ int h8_run_until(H8CPU *c,uint64_t target) {
         }
         if(c->m_inst_substate==0&&c->m_inst_state<0x10000) {
             if((c->m_PIR&0xfff0)==0x6a20&&c->skip_spin(target)) continue;
-            c->m_PPC=c->m_NPC;c->instructions++;
+            c->m_PPC=c->m_NPC;c->instructions++;h8_perf_single++;
         }
         c->executing_state=true;
         if(c->m_inst_substate)c->do_exec_partial();
@@ -742,7 +754,7 @@ void h8_get_status(const H8CPU *c,H8Status *s) {
     if(!c||!s)return;
     std::memset(s,0,sizeof(*s));s->pc=c->m_NPC;
     for(unsigned i=0;i<8;i++)s->er[i]=c->r32_r(i);
-    s->ccr=c->m_CCR;s->cycles=c->cycles-c->cycle_epoch;s->instructions=c->instructions;
+    s->ccr=c->m_CCR;s->cycles=c->cycles-c->cycle_epoch;s->instructions=c->instructions;s->skipped=h8_skipped_instructions;
     s->sleeping=c->m_sleeping;s->halted=c->halted;
     s->illegal_pc=c->illegal_pc;s->illegal_opcode=c->illegal_opcode;
     s->unsupported_peripherals=c->unsupported;

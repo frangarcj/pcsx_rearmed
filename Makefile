@@ -532,6 +532,9 @@ include/revision.h: FORCE
 %.o: %.cpp
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(AUTODEPFLAGS) -c $< -o $@
 
+# Extra flags for the H8 core alone (measurements: H8_CFLAGS=-Os).
+libpcsxcore/arcade/h8.o: CXXFLAGS += $(H8_CFLAGS)
+
 %.o: %.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(AUTODEPFLAGS) -c $< -o $@
 
