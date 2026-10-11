@@ -82,6 +82,9 @@ static void pause_task(void *arg)
         }
         const int action = shelf_pause_frame(&input, &slot);
         glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)framebuffer);
+#ifdef VITA_DEBUG_SHOT
+        VitaShelf_ShotPoll();
+#endif
         presenter->swap();
         if (slot != VitaSaveStates_GetSlot())
             VitaSaveStates_SetSlot(slot);

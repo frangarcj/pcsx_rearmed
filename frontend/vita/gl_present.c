@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include <psp2/kernel/clib.h>
+#include <psp2/kernel/processmgr.h>
 #include <vitaGL.h>
 
 #include "app_root.h"
@@ -22,13 +23,16 @@
 extern int (*pcsx_raw_frame_cb)(const void *vram, int ofs, int stride, unsigned mask, int w, int h);
 
 static GLuint s_tex[TEX_COUNT], s_program, s_vbo;
+static uint8_t *s_data[TEX_COUNT]; /* the textures' memory, written directly */
 static GLint s_src_loc = -1, s_texsize_loc = -1, s_scale_loc = -1;
-static uint8_t *s_staging;
 static int s_next, s_ready = -1, s_last = -1, s_w, s_h, s_aspect;
+/* Main-thread time in the present (copy, draw and swap). */
+unsigned long long glp_busy_us;
 
-/* The PSX's 15-bit pixels arrive as their two bytes (GL_RG8, red = low
- * byte); the shader decodes them and scales sharply: whole texels by
- * nearest, the fraction of a screen pixel at each texel edge blended. */
+/* The textures hold the PSX's 15-bit pixels as they are (GXM reads that
+ * format, as the vita2d path did). Sharp bilinear: whole texels by nearest,
+ * the fraction of a screen pixel at each texel edge blended by the
+ * texture unit. */
 static const char *k_vertex =
     "attribute vec2 a_pos;\n"
     "uniform vec2 u_src;\n"
@@ -43,19 +47,13 @@ static const char *k_fragment =
     "uniform vec2 u_texsize;\n"
     "uniform vec2 u_scale;\n"
     "varying vec2 v_texel;\n"
-    "vec3 psx(vec2 texel) {\n"
-    "  texel = min(texel, u_src - 1.0);\n"
-    "  vec2 rg = floor(texture2D(u_tex, (texel + 0.5) / u_texsize).rg * 255.0 + 0.5);\n"
-    "  float v = rg.r + rg.g * 256.0;\n"
-    "  return vec3(mod(v, 32.0), mod(floor(v / 32.0), 32.0), mod(floor(v / 1024.0), 32.0)) / 31.0;\n"
-    "}\n"
     "void main() {\n"
-    "  vec2 p = v_texel - 0.5;\n"
-    "  vec2 i = floor(p);\n"
-    "  vec2 f = clamp((p - i - 0.5) * u_scale + 0.5, 0.0, 1.0);\n"
-    "  vec3 top = mix(psx(i), psx(i + vec2(1.0, 0.0)), f.x);\n"
-    "  vec3 bottom = mix(psx(i + vec2(0.0, 1.0)), psx(i + vec2(1.0, 1.0)), f.x);\n"
-    "  gl_FragColor = vec4(mix(top, bottom, f.y), 1.0);\n"
+    "  vec2 i = floor(v_texel);\n"
+    "  vec2 d = v_texel - i - 0.5;\n"
+    "  vec2 range = 0.5 - 0.5 / u_scale;\n"
+    "  vec2 f = (d - clamp(d, -range, range)) * u_scale + 0.5;\n"
+    "  vec2 t = clamp(i + f, vec2(0.5), u_src - 0.5);\n"
+    "  gl_FragColor = vec4(texture2D(u_tex, t / u_texsize).rgb, 1.0);\n"
     "}\n";
 
 static GLuint compile(GLenum type, const char *source)
@@ -83,11 +81,10 @@ static void game_rect(int rect[4])
     rect[3] = DISPLAY_H;
 }
 
-static void upload(int w, int h)
+static void frame_ready(int w, int h, SceGxmTextureFormat format)
 {
     glBindTexture(GL_TEXTURE_2D, s_tex[s_next]);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RG, GL_UNSIGNED_BYTE, s_staging);
+    sceGxmTextureSetFormat(vglGetGxmTexture(GL_TEXTURE_2D), format);
     s_w = w;
     s_h = h;
     s_ready = s_next;
@@ -98,6 +95,8 @@ static void upload(int w, int h)
 static int glp_raw_frame(const void *vram_, int ofs, int stride, unsigned mask, int w, int h)
 {
     const uint8_t *vram = vram_;
+    const SceUInt64 start = sceKernelGetProcessTimeWide();
+    uint8_t *dst = s_data[s_next];
     unsigned r, bytes;
     if (w <= 0 || h <= 0)
         return 0;
@@ -106,7 +105,7 @@ static int glp_raw_frame(const void *vram_, int ofs, int stride, unsigned mask, 
     bytes = (unsigned)w * 2;
     for (r = 0; r < (unsigned)h; r++) {
         const unsigned row = ((unsigned)ofs + r * (unsigned)stride) & mask, col = row & 2047u;
-        uint8_t *out = s_staging + (size_t)r * bytes;
+        uint8_t *out = dst + (size_t)r * TEX_W * 2;
         if (col + bytes <= 2048)
             memcpy(out, vram + row, bytes);
         else {
@@ -114,23 +113,18 @@ static int glp_raw_frame(const void *vram_, int ofs, int stride, unsigned mask, 
             memcpy(out + 2048 - col, vram + (row - col), bytes - (2048 - col));
         }
     }
-    upload(w, h);
+    frame_ready(w, h, SCE_GXM_TEXTURE_FORMAT_X1U5U5U5_1BGR);
+    glp_busy_us += sceKernelGetProcessTimeWide() - start;
     return 1;
 }
 
-/* RGB565 from the core (24-bit modes): back to the PSX's 15 bits. */
+/* RGB565 from the core (24-bit modes, the games' movies). */
 static void rgb565_frame(const void *data, unsigned width, unsigned height, size_t pitch)
 {
     const unsigned w = width > TEX_W ? TEX_W : width, h = height > TEX_H ? TEX_H : height;
-    for (unsigned y = 0; y < h; y++) {
-        const uint16_t *in = (const uint16_t *)((const uint8_t *)data + y * pitch);
-        uint16_t *out = (uint16_t *)(s_staging + (size_t)y * w * 2);
-        for (unsigned x = 0; x < w; x++) {
-            const uint16_t p = in[x];
-            out[x] = (uint16_t)(((p >> 11) & 31) | (((p >> 6) & 31) << 5) | ((p & 31) << 10));
-        }
-    }
-    upload((int)w, (int)h);
+    for (unsigned y = 0; y < h; y++)
+        memcpy(s_data[s_next] + (size_t)y * TEX_W * 2, (const uint8_t *)data + y * pitch, w * 2);
+    frame_ready((int)w, (int)h, SCE_GXM_TEXTURE_FORMAT_U5U6U5_RGB);
 }
 
 static void draw(int texture)
@@ -168,8 +162,10 @@ void glp_video(const void *data, unsigned width, unsigned height, size_t pitch)
         rgb565_frame(data, width, height, pitch);
     if (s_ready < 0)
         return;
+    const SceUInt64 start = sceKernelGetProcessTimeWide();
     draw(s_ready);
     vglSwapBuffers(GL_FALSE);
+    glp_busy_us += sceKernelGetProcessTimeWide() - start;
     s_last = s_ready;
     s_ready = -1;
 }
@@ -194,18 +190,23 @@ int glp_init(void)
     /* vitaGL takes the free memory but this much: the NEON renderer and the
      * game's RAM live in the newlib heap, set before it. */
     vglInitExtended(0, DISPLAY_W, DISPLAY_H, 32 * 1024 * 1024, SCE_GXM_MULTISAMPLE_NONE);
+    /* The emulator paces the frames (pace_frame): the swap must not wait
+     * for a vblank too, as vita2d's did not (gxm_init). */
+    vglWaitVblankStart(GL_FALSE);
 
-    s_staging = malloc((size_t)TEX_W * TEX_H * 2);
-    if (!s_staging)
-        return -1;
     glGenTextures(TEX_COUNT, s_tex);
     for (int i = 0; i < TEX_COUNT; i++) {
+        s_data[i] = vglAlloc(TEX_W * TEX_H * 2, VGL_MEM_RAM);
+        if (!s_data[i])
+            return -1;
+        memset(s_data[i], 0, TEX_W * TEX_H * 2);
         glBindTexture(GL_TEXTURE_2D, s_tex[i]);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, TEX_W, TEX_H, 0, GL_RG, GL_UNSIGNED_BYTE, NULL);
+        vglSetupTexture(GL_TEXTURE_2D, s_data[i], SCE_GXM_TEXTURE_FORMAT_X1U5U5U5_1BGR,
+            SCE_GXM_TEXTURE_LINEAR, TEX_W, TEX_H, 1);
     }
     vs = compile(GL_VERTEX_SHADER, k_vertex);
     fs = compile(GL_FRAGMENT_SHADER, k_fragment);
@@ -244,8 +245,8 @@ void glp_finish(void)
     glDeleteTextures(TEX_COUNT, s_tex);
     glDeleteBuffers(1, &s_vbo);
     glDeleteProgram(s_program);
-    free(s_staging);
-    s_staging = NULL;
+    /* The textures' memory went with them. */
+    memset(s_data, 0, sizeof(s_data));
     s_ready = s_last = -1;
     vglShutdown();
 }

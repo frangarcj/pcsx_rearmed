@@ -5,6 +5,12 @@
 #include <string>
 
 #include <psp2/ctrl.h>
+#ifdef VITA_DEBUG_SHOT
+#include <psp2/io/fcntl.h>
+#include <psp2/io/stat.h>
+#include <psp2/kernel/clib.h>
+#include <vitaGL.h>
+#endif
 
 #include "arcade_shelf.h"
 #include "../arcade_catalog.h"
@@ -28,6 +34,64 @@ extern "C" const VitaShelfPresenter *VitaShelf_Presenter(void)
 {
     return g_presenter;
 }
+
+#ifdef VITA_DEBUG_SHOT
+extern "C" int VitaShelf_ShotRequested(void)
+{
+    static unsigned calls;
+    SceIoStat stat;
+    return ++calls % 30 == 0 && sceIoGetstat(APP_ROOT "/shot.req", &stat) >= 0;
+}
+
+/* The window as drawn so far, top row first. */
+static void write_shot(void)
+{
+    static uint8_t rgba[MENU_W * MENU_H * 4];
+    static uint8_t rgb[MENU_W * MENU_H * 3];
+    GLint framebuffer = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glReadPixels(0, 0, MENU_W, MENU_H, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)framebuffer);
+    for (int y = 0; y < MENU_H; y++) {
+        const uint8_t *src = rgba + (size_t)(MENU_H - 1 - y) * MENU_W * 4;
+        uint8_t *dst = rgb + (size_t)y * MENU_W * 3;
+        for (int x = 0; x < MENU_W; x++) {
+            dst[x * 3 + 0] = src[x * 4 + 0];
+            dst[x * 3 + 1] = src[x * 4 + 1];
+            dst[x * 3 + 2] = src[x * 4 + 2];
+        }
+    }
+    const SceUID fd = sceIoOpen(APP_ROOT "/shot.ppm", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
+    if (fd >= 0) {
+        char header[32];
+        const int length = snprintf(header, sizeof(header), "P6\n%d %d\n255\n", MENU_W, MENU_H);
+        sceIoWrite(fd, header, length);
+        sceIoWrite(fd, rgb, sizeof(rgb));
+        sceIoClose(fd);
+    }
+    sceIoRemove(APP_ROOT "/shot.req");
+    sceClibPrintf("pcsx-vita: shot %s\n", fd >= 0 ? "written" : "failed");
+}
+
+extern "C" void VitaShelf_ShotPoll(void)
+{
+    if (VitaShelf_ShotRequested())
+        write_shot();
+}
+
+static void shot_game_task(void *)
+{
+    g_presenter->present_frame();
+    write_shot();
+    g_presenter->swap();
+}
+
+extern "C" void VitaShelf_ShotGame(void)
+{
+    g_presenter->run_task(shot_game_task, NULL);
+}
+#endif
 
 extern "C" int VitaShelf_AspectMode(void)
 {

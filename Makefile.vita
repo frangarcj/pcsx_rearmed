@@ -2,9 +2,6 @@ VITA_GPU ?= vitagl
 ARCADE_SYSTEM12 ?= 0
 SYSTEM12_PROFILE ?= 0
 VITA_CTR_GPU_TRACE ?= 0
-# gpulib's GPU worker thread (--gpu-thread): with NEON it rasterizes, with
-# vitaGL it builds the frame packets (the renderer thread draws them).
-VITA_GPU_THREAD ?= 0
 # The NEON renderer uses its ARMv7 assembly (console and arcade VRAM);
 # VITA_GPU_NEON_C=1 selects the C renderer for comparisons.
 VITA_GPU_NEON_C ?= 0
@@ -34,6 +31,10 @@ ARCADE_SHELF ?= $(if $(filter vitagl,$(VITA_GPU)),$(ARCADE_SYSTEM12),0)
 # menu, presented through vitaGL. The app's VPK builds and packs it.
 REARCADE_NEON ?= 0
 REARCADE := $(if $(filter 1,$(ARCADE_SHELF) $(REARCADE_NEON)),1,0)
+# gpulib's GPU worker thread (--gpu-thread): with NEON it rasterizes, with
+# vitaGL it builds the frame packets (the renderer thread draws them). The
+# app's menu mode turns it on.
+VITA_GPU_THREAD ?= $(REARCADE)
 ifeq ($(REARCADE_NEON),1)
 ifneq ($(VITA_GPU)$(ARCADE_SYSTEM12)$(ARCADE_SHELF),neon10)
 $(error REARCADE_NEON=1 requires VITA_GPU=neon and ARCADE_SYSTEM12=1)
@@ -132,6 +133,11 @@ ifeq ($(REARCADE_NEON),1)
 CFLAGS += -DREARCADE_NEON
 UI_OBJS := $(BUILD_DIR)/settings.o $(BUILD_DIR)/savestates.o $(BUILD_DIR)/gl_present.o
 UI_LIBS := -limgui
+endif
+# Screenshots on request for hardware debugging (frontend/vita/shelf_common.h).
+VITA_DEBUG_SHOT ?= 0
+ifeq ($(REARCADE)$(VITA_DEBUG_SHOT),11)
+CFLAGS += -DVITA_DEBUG_SHOT
 endif
 ifeq ($(REARCADE),1)
 CFLAGS += -DPCSX_REARCADE -DPCSX_GIT_VERSION='"$(GIT_VERSION)"' -I$(SHELF_DIR)/include

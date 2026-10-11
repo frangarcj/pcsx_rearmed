@@ -1005,7 +1005,8 @@ static int display_init(void)
     int i;
 
 #ifdef REARCADE_NEON
-    return glp_init();
+    /* vitaGL starts after retro_init (glp_init in main). */
+    return 0;
 #endif
     if (g_gxm)
         return gxm_init();
@@ -1284,6 +1285,14 @@ static void print_wait_stats(unsigned runs)
         last_n[i] = pcsx_vita_ctr_wait_n[i];
     }
 #endif
+#ifdef REARCADE_NEON
+    {
+        extern unsigned long long glp_busy_us;
+        static unsigned long long last_glp_us;
+        WAIT_FIELD("present", glp_busy_us - last_glp_us, frames);
+        last_glp_us = glp_busy_us;
+    }
+#endif
 #ifdef ARCADE_SYSTEM12
     WAIT_FIELD("board", system12_board_wait_us - last_board_us, system12_board_wait_n - last_board_n);
     last_board_us = system12_board_wait_us;
@@ -1452,10 +1461,36 @@ static int run_ui_game(const char *game_path)
         g_pause_combo_down = false;
         ret = VITA_PAUSE_CLOSE_GAME;
         while (!g_exit_requested) {
+#ifdef VITA_DEBUG_SHOT
+            const bool shot = VitaShelf_ShotRequested();
+#ifdef STANDALONE_VITAGL
+            /* The frame this run presents is kept for the shot. */
+            if (shot)
+                pcsx_menu_backdrop_request = 1;
+#endif
+#endif
             retro_run();
+#ifdef VITA_DEBUG_SHOT
+            if (shot) {
+#ifdef STANDALONE_VITAGL
+                gpu_sync_renderer();
+#endif
+                VitaShelf_ShotGame();
+            }
+#endif
             pace_frame();
             if (++runs % 60 == 0)
                 sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
+#ifdef VITA_DEBUG_SHOT
+            if (runs % 300 == 0) {
+                static SceUInt64 last;
+                const SceUInt64 now = sceKernelGetProcessTimeWide();
+                if (last && runs > 300)
+                    sceClibPrintf("pcsx-vita: frame %u: %.2f fps\n", runs, 300e6 / (double)(now - last));
+                last = now;
+                print_wait_stats(runs);
+            }
+#endif
             if (!g_pause_requested)
                 continue;
             ret = run_pause_menu(game_path);
@@ -1519,6 +1554,8 @@ static int run_ui(void)
                 sceAppMgrLoadExec("app0:eboot_neon.bin", args, NULL);
                 sceClibPrintf("pcsx-vita: eboot_neon.bin did not start\n");
             }
+            /* The renderer starts with the aspect in settings.cfg. */
+            VitaShelf_Presenter()->set_aspect(VitaShelf_AspectMode());
         }
 #endif
         ret = run_ui_game(game_path);
@@ -1553,7 +1590,12 @@ int main(int argc, char **argv)
     /* Main CPU on core 0; the GPU and board threads take cores 1 and 2. */
     sceKernelChangeThreadCpuAffinityMask(sceKernelGetThreadId(), SCE_KERNEL_CPU_MASK_USER_0);
     make_dirs();
+#ifdef REARCADE_NEON
+    /* Started by eboot.bin: its log goes on. */
+    g_log_fd = sceIoOpen(APP_ROOT "/log.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0666);
+#else
     g_log_fd = sceIoOpen(APP_ROOT "/log.txt", SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0666);
+#endif
 #ifdef PCSX_SYSTEM12_PROFILE
     pcsx_profile_log = log_text;
 #endif
@@ -1766,6 +1808,14 @@ int main(int argc, char **argv)
         g_ui_mode = true;
         VitaSettings_Init();
         VitaSaveStates_Init();
+#ifdef PCSX_REARCADE
+        /* The app runs as fast as the measurements do: System 12's board
+         * on its own thread, and gpulib's GPU thread. */
+        g_board_thread = true;
+#ifdef USE_ASYNC_GPU
+        g_gpu_thread = true;
+#endif
+#endif
     }
 #endif
     sceClibPrintf("pcsx-vita: main entered\n");
@@ -1806,6 +1856,14 @@ int main(int argc, char **argv)
 #endif
     retro_init();
     sceClibPrintf("pcsx-vita: retro_init complete\n");
+#ifdef REARCADE_NEON
+    /* vitaGL takes all the free memory but a threshold: the core's memory
+     * blocks (retro_init) come first. */
+    if (glp_init() < 0) {
+        sceClibPrintf("pcsx-vita: vitaGL init failed\n");
+        return 2;
+    }
+#endif
 
 #ifdef STANDALONE_UI
     if (g_ui_mode) {

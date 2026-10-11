@@ -118,6 +118,9 @@ static void draw_shelf_frame(const ShelfInput *input, char *launch, size_t launc
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     *action = shelf_frame(input, launch, launch_size);
+#ifdef VITA_DEBUG_SHOT
+    VitaShelf_ShotPoll();
+#endif
     vglSwapBuffers(GL_FALSE);
 }
 

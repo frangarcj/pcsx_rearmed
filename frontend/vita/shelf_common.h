@@ -35,6 +35,16 @@ void VitaShelf_SetGame(const char *path, const char *title);
 /* That title (or the file's name) into out. */
 void VitaShelf_GetGameTitle(const char *path, char *out, size_t size);
 
+#ifdef VITA_DEBUG_SHOT
+/* Hardware debugging (VITA_DEBUG_SHOT=1 builds): creating APP_ROOT/shot.req
+ * makes a screenshot, APP_ROOT/shot.ppm, and removes the request. The menus
+ * call ShotPoll before each swap, on the GL thread; the game loop calls
+ * ShotRequested, then ShotGame. Requests are checked every 30th call. */
+int VitaShelf_ShotRequested(void);
+void VitaShelf_ShotPoll(void);
+void VitaShelf_ShotGame(void);
+#endif
+
 #ifdef __cplusplus
 }
 
