@@ -721,21 +721,40 @@ static int do_vram_io(struct psx_gpu *gpu, uint32_t *data, int count, int is_rea
   int o = gpu->dma.offset;
   int l, async_queued = 0;
 
+#if defined(GPU_VITA_CTR) && !defined(__vita__)
+  if (!is_read && o == 0 && getenv("PCSX_TRACE_WRITES"))
+    fprintf(stderr, "vram-write %d,%d %dx%d words=%d\n", x, y, w, h, count);
+#endif
+  /* A whole transfer in this call goes to the GPU thread with the commands.
+   * Command lists carry the next command after the data: take only the
+   * transfer's words (Soul Calibur's palette uploads, 16x1 in 9 words,
+   * each synced with the GPU thread before). */
+  const int words = (w * h + 1) / 2;
   if (gpu_async_enabled(gpu) && !is_read && o == 0 &&
-      count <= AGPU_DMA_MAX && w * h == count * 2)
-    async_queued = gpu_async_try_dma(gpu, data, count);
+      words <= AGPU_DMA_MAX && count >= words)
+    async_queued = gpu_async_try_dma(gpu, data, words);
   if (async_queued) {
     gpu->dma.h = 0;
     finish_vram_transfer(gpu, 0, 1);
-    return count;
+    return words;
   }
 #ifndef GPU_VITA_CTR
   if (o == 0)
     sync_renderer(gpu);
 #else
   // The GPU thread may still read or write the guest VRAM written here.
-  if (o == 0 && gpu_async_enabled(gpu))
+  if (o == 0 && gpu_async_enabled(gpu)) {
+#ifdef __vita__
+    extern int gpu_async_sync_reason;
+    extern int gpu_async_write_last[4];
+    gpu_async_sync_reason = 1;
+    gpu_async_write_last[0] = w;
+    gpu_async_write_last[1] = h;
+    gpu_async_write_last[2] = count;
+    gpu_async_write_last[3] = x | (y << 16);
+#endif
     gpu_async_sync(gpu);
+  }
 #endif
   /* GPU_VITA_CTR keeps its own VRAM: these writes reach it only through
    * renderer_update_caches, which orders them after earlier draws, and a
@@ -803,8 +822,13 @@ static noinline void start_vram_transfer(struct psx_gpu *gpu, uint32_t pos_word,
   if (is_read) {
 #ifdef GPU_VITA_CTR
     // The renderer's frontend belongs to the GPU thread while it runs.
-    if (gpu_async_enabled(gpu))
+    if (gpu_async_enabled(gpu)) {
+#ifdef __vita__
+      extern int gpu_async_sync_reason;
+      gpu_async_sync_reason = 2;
+#endif
       gpu_async_sync(gpu);
+    }
     renderer_sync_vram_to_cpu(gpu->dma.x, gpu->dma.y, gpu->dma.w, gpu->dma.h);
 #endif
     const uint16_t *mem = VRAM_MEM_XY(gpu->vram, gpu->dma.x, gpu->dma.y);
