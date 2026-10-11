@@ -1112,7 +1112,8 @@ static bool has_ext(const char *name, const char *ext)
 
 static int extension_rank(const char *name)
 {
-    static const char *exts[] = { ".cue", ".chd", ".pbp", ".m3u", ".iso", ".img", ".bin", ".exe" };
+    /* .zip: a System 12 MAME romset; the core checks the set name. */
+    static const char *exts[] = { ".cue", ".chd", ".pbp", ".m3u", ".iso", ".img", ".bin", ".exe", ".zip" };
     int i;
     for (i = 0; i < (int)(sizeof(exts) / sizeof(exts[0])); i++)
         if (has_ext(name, exts[i]))

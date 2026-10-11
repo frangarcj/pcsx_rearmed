@@ -731,6 +731,7 @@ $(info )
 
 ifeq ($(ARCADE_SYSTEM12),1)
 OBJS += libpcsxcore/system12.o libpcsxcore/system11.o libpcsxcore/system10.o \
+	libpcsxcore/arcade/mame_zip.o libpcsxcore/arcade/system12_romset.o \
 	libpcsxcore/systemzn.o libpcsxcore/systemtaito.o \
 	libpcsxcore/arcade/c352.o libpcsxcore/arcade/psx_screen_clock.o libpcsxcore/arcade/serial_nvram.o \
 	libpcsxcore/arcade/namcos11_board.o libpcsxcore/arcade/at28c16.o \

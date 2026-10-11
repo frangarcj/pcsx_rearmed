@@ -1,0 +1,267 @@
+#include "system12_romset.h"
+
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+
+#include "mame_zip.h"
+#include "../system12.h"
+
+enum { S12_LOAD, S12_FILL };
+enum { S12_MAIN, S12_BANKED, S12_SUB, S12_WAVE, S12_REGIONS };
+
+typedef struct {
+	const char *name;
+	uint32_t size, crc32;
+} s12_rom_file;
+
+/* A MAME ROM_LOAD: for each unit u of `group` bytes and lane l,
+ * region[offset + u * stride + l] = file[source_offset + u * group +
+ * (swap ? group - 1 - l : l)]. A ROM_FILL writes `value` instead. */
+typedef struct {
+	uint8_t region, kind;
+	uint16_t file;
+	uint32_t source_offset, offset, length;
+	uint8_t group, stride, swap, value;
+} s12_rom_op;
+
+typedef struct {
+	system12_romset_info info;
+	const char *machine, *state;
+	uint32_t ram_size;
+	uint8_t boot_hack, alt_bank, tektagt_dma;
+	uint32_t region_size[S12_REGIONS];
+	uint16_t first_file, file_count, first_op, op_count;
+} s12_romset;
+
+#include "system12_romsets.inc"
+
+#define SET_COUNT (sizeof(s12_sets) / sizeof(s12_sets[0]))
+
+unsigned system12_romset_count(void)
+{
+	return SET_COUNT;
+}
+
+const system12_romset_info *system12_romset_at(unsigned index)
+{
+	return index < SET_COUNT ? &s12_sets[index].info : NULL;
+}
+
+static const s12_romset *find_set(const char *name, size_t length)
+{
+	unsigned i;
+	for (i = 0; i < SET_COUNT; i++)
+		if (strlen(s12_sets[i].info.name) == length && !strncasecmp(s12_sets[i].info.name, name, length))
+			return &s12_sets[i];
+	return NULL;
+}
+
+static const char *base_name(const char *path)
+{
+	const char *slash = strrchr(path, '/'), *backslash = strrchr(path, '\\'), *colon = strrchr(path, ':');
+	const char *base = path;
+	if (slash && slash + 1 > base) base = slash + 1;
+	if (backslash && backslash + 1 > base) base = backslash + 1;
+	if (colon && colon + 1 > base) base = colon + 1;
+	return base;
+}
+
+const system12_romset_info *system12_romset_for_path(const char *zip_path)
+{
+	const char *base = base_name(zip_path);
+	size_t length = strlen(base);
+	const s12_romset *set;
+	if (length <= 4 || strcasecmp(base + length - 4, ".zip"))
+		return NULL;
+	set = find_set(base, length - 4);
+	return set ? &set->info : NULL;
+}
+
+/* The zips MAME would search for a set: its own, then its parent's. */
+typedef struct {
+	mame_zip *zip[2];
+} s12_zips;
+
+static void open_zips(s12_zips *zips, const char *rompath, const s12_romset *set)
+{
+	const char *names[2] = { set->info.name, set->info.parent };
+	char path[4096];
+	unsigned i;
+	for (i = 0; i < 2; i++) {
+		zips->zip[i] = NULL;
+		if (names[i][0] && snprintf(path, sizeof(path), "%s/%s.zip", rompath, names[i]) < (int)sizeof(path))
+			zips->zip[i] = mame_zip_open(path);
+	}
+}
+
+static void close_zips(s12_zips *zips)
+{
+	mame_zip_close(zips->zip[0]);
+	mame_zip_close(zips->zip[1]);
+}
+
+static const mame_zip_entry *find_file(const s12_zips *zips, const s12_rom_file *file, mame_zip **owner)
+{
+	unsigned i;
+	for (i = 0; i < 2; i++) {
+		const mame_zip_entry *entry = mame_zip_find(zips->zip[i], file->crc32, file->size);
+		if (entry) {
+			*owner = zips->zip[i];
+			return entry;
+		}
+	}
+	return NULL;
+}
+
+/* rompath is the directory of a path ("ux0:data/x/roms/a.zip" -> "...roms"). */
+static void directory_of(const char *path, char *out, size_t size)
+{
+	const char *base = base_name(path);
+	size_t length = (size_t)(base - path);
+	if (length && (path[length - 1] == '/' || path[length - 1] == '\\'))
+		length--;
+	if (length >= size)
+		length = size - 1;
+	memcpy(out, path, length);
+	out[length] = 0;
+	if (!length && size > 1)
+		strcpy(out, ".");
+}
+
+int system12_romset_verify(const char *rompath, const char *set_name, char *missing, size_t missing_size)
+{
+	const s12_romset *set = find_set(set_name, strlen(set_name));
+	s12_zips zips;
+	unsigned i;
+	int result = 0;
+	if (missing_size)
+		missing[0] = 0;
+	if (!set)
+		return -1;
+	open_zips(&zips, rompath, set);
+	for (i = 0; i < set->file_count; i++) {
+		const s12_rom_file *file = &s12_files[set->first_file + i];
+		mame_zip *owner;
+		if (!find_file(&zips, file, &owner)) {
+			if (missing_size)
+				snprintf(missing, missing_size, "%s (crc %08x)", file->name, (unsigned)file->crc32);
+			result = -1;
+			break;
+		}
+	}
+	close_zips(&zips);
+	return result;
+}
+
+static int apply_load(uint8_t *region, uint32_t region_size, const s12_rom_op *op, const uint8_t *file, uint32_t file_size)
+{
+	uint32_t units, u, lane;
+	if (!op->group || !op->stride || op->length % op->group ||
+	    op->source_offset > file_size || op->length > file_size - op->source_offset)
+		return -1;
+	units = op->length / op->group;
+	if (!units)
+		return 0;
+	if (op->offset > region_size || (uint64_t)(units - 1) * op->stride + op->group > region_size - op->offset)
+		return -1;
+	if (op->group == 1 && op->stride == 1) {
+		memcpy(region + op->offset, file + op->source_offset, op->length);
+		return 0;
+	}
+	for (u = 0; u < units; u++)
+		for (lane = 0; lane < op->group; lane++)
+			region[op->offset + u * op->stride + lane] =
+				file[op->source_offset + u * op->group + (op->swap ? op->group - 1 - lane : lane)];
+	return 0;
+}
+
+static int build_regions(const s12_romset *set, const char *rompath, uint8_t *regions[S12_REGIONS])
+{
+	s12_zips zips;
+	uint8_t *file_data = NULL;
+	int loaded_file = -1;
+	unsigned i;
+	int result = 0;
+	open_zips(&zips, rompath, set);
+	for (i = 0; i < S12_REGIONS; i++)
+		if (!(regions[i] = calloc(1, set->region_size[i])))
+			result = -1;
+	for (i = 0; !result && i < set->op_count; i++) {
+		const s12_rom_op *op = &s12_ops[set->first_op + i];
+		const s12_rom_file *file;
+		if (op->kind == S12_FILL) {
+			if (op->offset > set->region_size[op->region] ||
+			    op->length > set->region_size[op->region] - op->offset)
+				result = -1;
+			else
+				memset(regions[op->region] + op->offset, op->value, op->length);
+			continue;
+		}
+		file = &s12_files[set->first_file + op->file];
+		if (loaded_file != op->file) {
+			mame_zip *owner;
+			const mame_zip_entry *entry = find_file(&zips, file, &owner);
+			free(file_data);
+			loaded_file = -1;
+			if (!entry) {
+				SysPrintf("System12: %s needs %s (crc %08x) in %s/%s.zip%s%s%s\n", set->info.name,
+					file->name, (unsigned)file->crc32, rompath, set->info.name,
+					set->info.parent[0] ? " or " : "", set->info.parent, set->info.parent[0] ? ".zip" : "");
+				result = -1;
+				break;
+			}
+			if (!(file_data = malloc(file->size)) || mame_zip_read(owner, entry, file_data)) {
+				SysPrintf("System12: cannot read %s from its zip (CRC32 or format error)\n", file->name);
+				result = -1;
+				break;
+			}
+			loaded_file = op->file;
+		}
+		if (apply_load(regions[op->region], set->region_size[op->region], op, file_data, file->size))
+			result = -1;
+	}
+	free(file_data);
+	close_zips(&zips);
+	if (result)
+		for (i = 0; i < S12_REGIONS; i++) {
+			free(regions[i]);
+			regions[i] = NULL;
+		}
+	return result;
+}
+
+int system12_romset_load(const char *zip_path)
+{
+	const system12_romset_info *info = system12_romset_for_path(zip_path);
+	const s12_romset *set = info ? (const s12_romset *)info : NULL;
+	uint8_t *regions[S12_REGIONS] = { NULL };
+	char rompath[4096];
+	system12_desc desc;
+	if (!set)
+		return -1;
+	if (strcmp(set->info.unsupported, "none")) {
+		SysPrintf("System12: %s requires unimplemented board device(s): %s\n",
+			set->info.name, set->info.unsupported);
+		return -2;
+	}
+	directory_of(zip_path, rompath, sizeof(rompath));
+	if (build_regions(set, rompath, regions))
+		return -1;
+	desc.mame_set = set->info.name;
+	desc.machine = set->machine;
+	desc.state = set->state;
+	desc.unsupported = set->info.unsupported;
+	desc.ram_size = set->ram_size;
+	desc.main_size = set->region_size[S12_MAIN];
+	desc.bank_size = set->region_size[S12_BANKED];
+	desc.sub_size = set->region_size[S12_SUB];
+	desc.wave_size = set->region_size[S12_WAVE];
+	desc.boot_hack = set->boot_hack;
+	desc.alt_bank = set->alt_bank;
+	desc.tektagt_dma = set->tektagt_dma;
+	return system12_load_regions(&desc, regions[S12_MAIN], regions[S12_BANKED],
+		regions[S12_SUB], regions[S12_WAVE]);
+}

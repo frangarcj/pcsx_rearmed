@@ -23,6 +23,7 @@
 #include "../libpcsxcore/psxmem.h"
 #ifdef PCSX_SYSTEM12
 #include "../libpcsxcore/system12.h"
+#include "../libpcsxcore/arcade/system12_romset.h"
 #include "../libpcsxcore/system11.h"
 #include "../libpcsxcore/system10.h"
 #include "../libpcsxcore/systemzn.h"
@@ -196,6 +197,11 @@ static int sync_systemgv(u32 cycle) { return systemgv_sync(cycle); }
 #ifdef PCSX_SYSTEM_GNET
 static int sync_systemgnet(u32 cycle) { return systemgnet_sync(cycle); }
 #endif
+/* --system12 takes a prepared region directory or a MAME zip (<set>.zip). */
+static int load_system12(const char *path)
+{
+  return system12_romset_for_path(path) ? system12_romset_load(path) : system12_load(path);
+}
 static const HarnessBoard boards[] = {
   {101, "TaitoFX1S", systemtaito_load, systemtaito_unload, systemtaito_sync,
     systemtaito_set_input, systemtaito_selftest, systemtaito_report,
@@ -218,7 +224,7 @@ static const HarnessBoard boards[] = {
   {11, "System11", system11_load, system11_unload, system11_sync,
     system11_set_input, system11_selftest, system11_report,
     system11_open_audio, system11_close_audio, system11_eeprom_import, system11_eeprom_export},
-  {12, "System12", system12_load, system12_unload, sync_system12,
+  {12, "System12", load_system12, system12_unload, sync_system12,
     system12_set_input, system12_selftest, system12_report,
     system12_open_audio, system12_close_audio, system12_eeprom_import, system12_eeprom_export},
 };

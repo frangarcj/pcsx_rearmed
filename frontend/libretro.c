@@ -42,6 +42,7 @@
 #ifdef ARCADE_SYSTEM12
 #include "../libpcsxcore/psxmem.h"
 #include "../libpcsxcore/system12.h"
+#include "../libpcsxcore/arcade/system12_romset.h"
 #include <sys/stat.h>
 #endif
 #ifdef PCSX_SYSTEM_GNET
@@ -1302,7 +1303,12 @@ void retro_get_system_info(struct retro_system_info *info)
    info->library_name     = "PCSX-ReARMed";
 #endif
    info->library_version  = "r26" GIT_VERSION;
+#ifdef ARCADE_SYSTEM12
+   /* zip: a System 12 MAME romset (roms/<set>.zip). */
+   info->valid_extensions = "bin|cue|img|mdf|pbp|toc|cbn|m3u|chd|iso|exe|zip";
+#else
    info->valid_extensions = "bin|cue|img|mdf|pbp|toc|cbn|m3u|chd|iso|exe";
+#endif
    info->need_fullpath    = true;
 }
 
@@ -2146,6 +2152,7 @@ static void retro_system12_restore_console(void)
    retro_update_system_av_info();
 }
 
+/* A prepared profile directory, or a MAME romset zip (roms/<set>.zip). */
 static bool retro_load_system12_profile(const char *directory)
 {
    int load_result;
@@ -2167,10 +2174,11 @@ static bool retro_load_system12_profile(const char *directory)
    set_cd_image(NULL);
    retro_system12_saved_cycle_multiplier = Config.cycle_multiplier;
    psxShutdown();
-   load_result = system12_load(directory);
+   load_result = system12_romset_for_path(directory)
+      ? system12_romset_load(directory) : system12_load(directory);
    if (load_result != 0)
    {
-      LogErr("could not load System12 profile directory: %s (%d)\n",
+      LogErr("could not load System12 profile: %s (%d)\n",
             directory, load_result);
       Config.cycle_multiplier = retro_system12_saved_cycle_multiplier;
       if (psxInit() == -1)
@@ -2391,7 +2399,7 @@ bool retro_load_game(const struct retro_game_info *info)
       retro_systemgnet_restore_console();
 #endif
 #ifdef ARCADE_SYSTEM12
-   if (retro_path_is_system12_profile(info->path))
+   if (system12_romset_for_path(info->path) || retro_path_is_system12_profile(info->path))
       return retro_load_system12_profile(info->path);
    if (system12_active())
       retro_system12_restore_console();
