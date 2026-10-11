@@ -253,11 +253,13 @@ int main(int argc, char **argv)
 		title = title.substr(0, title.find_last_of('.'));
 		catalogue.add_disc(disc, title, title);
 	}
-	for (int i = 0; i < pcsx_shelf_option_count; i++) {
-		const ShelfOption &option = pcsx_shelf_options[i];
+	int option_count;
+	const ShelfOption *options = pcsx_shelf_options(PCSX_OPTIONS_SELECTOR, &option_count);
+	for (int i = 0; i < option_count; i++) {
+		const ShelfOption &option = options[i];
 		settings.push_back(std::make_pair(option.key, option.choices[0].value));
 	}
-	const ShelfMenus menus = { pcsx_shelf_options, pcsx_shelf_option_count, NULL, get_option, set_option, 10,
+	const ShelfMenus menus = { options, option_count, NULL, get_option, set_option, 10,
 		state_exists };
 	const std::string about = pcsx_shelf_about("");
 	ShelfConfig config = { "PCSX", "ReArcade", data, hint.c_str(), WIDTH, HEIGHT,

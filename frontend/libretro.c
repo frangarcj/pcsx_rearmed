@@ -2681,6 +2681,79 @@ static int GunconAdjustY = 0;
 static float GunconAdjustRatioX = 1;
 static float GunconAdjustRatioY = 1;
 
+#ifdef ARCADE_SYSTEM12
+/* What each pad button does on a System 12 board, when the frontend gives
+ * the arcade options (pcsx_rearmed_arcade_<button> = button1..button8,
+ * start, coin, service or none). Without them the original fixed layout
+ * stays, which replays and validation runs rely on. */
+static const char *const system12_functions[] = {
+   "button1", "button2", "button3", "button4", "button5", "button6", "button7", "button8",
+   "start", "coin", "service"
+};
+#define SYSTEM12_FUNCTIONS (sizeof(system12_functions) / sizeof(system12_functions[0]))
+static const struct { unsigned id; const char *key; } system12_pad[] = {
+   { RETRO_DEVICE_ID_JOYPAD_B, "pcsx_rearmed_arcade_cross" },
+   { RETRO_DEVICE_ID_JOYPAD_A, "pcsx_rearmed_arcade_circle" },
+   { RETRO_DEVICE_ID_JOYPAD_Y, "pcsx_rearmed_arcade_square" },
+   { RETRO_DEVICE_ID_JOYPAD_X, "pcsx_rearmed_arcade_triangle" },
+   { RETRO_DEVICE_ID_JOYPAD_L, "pcsx_rearmed_arcade_l1" },
+   { RETRO_DEVICE_ID_JOYPAD_R, "pcsx_rearmed_arcade_r1" },
+   { RETRO_DEVICE_ID_JOYPAD_L2, "pcsx_rearmed_arcade_l2" },
+   { RETRO_DEVICE_ID_JOYPAD_R2, "pcsx_rearmed_arcade_r2" },
+   { RETRO_DEVICE_ID_JOYPAD_SELECT, "pcsx_rearmed_arcade_select" },
+   { RETRO_DEVICE_ID_JOYPAD_START, "pcsx_rearmed_arcade_start" },
+};
+#define SYSTEM12_PAD (sizeof(system12_pad) / sizeof(system12_pad[0]))
+static int system12_mapped;                    /* the options were given */
+static signed char system12_map[SYSTEM12_PAD]; /* function index, or -1 */
+static int system12_test;                      /* the board's test switch */
+
+static void system12_update_mapping(void)
+{
+   struct retro_variable var;
+   size_t i, f;
+
+   system12_mapped = 0;
+   for (i = 0; i < SYSTEM12_PAD; i++) {
+      system12_map[i] = -1;
+      var.key = system12_pad[i].key;
+      var.value = NULL;
+      if (!environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) || !var.value)
+         continue;
+      system12_mapped = 1;
+      for (f = 0; f < SYSTEM12_FUNCTIONS; f++)
+         if (!strcmp(var.value, system12_functions[f]))
+            system12_map[i] = (signed char)f;
+   }
+   var.key = "pcsx_rearmed_arcade_test";
+   var.value = NULL;
+   system12_test = environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value &&
+      !strcmp(var.value, "enabled");
+}
+
+/* One player's pad through the arcade options' layout. */
+static void system12_mapped_input(unsigned port)
+{
+   int pressed[SYSTEM12_FUNCTIONS] = { 0 };
+   char name[16];
+   size_t i;
+
+   for (i = 0; i < SYSTEM12_PAD; i++)
+      if (system12_map[i] >= 0 && input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, system12_pad[i].id))
+         pressed[(int)system12_map[i]] = 1;
+   for (i = 0; i < 8; i++) {
+      snprintf(name, sizeof(name), "p%ubutton%u", port + 1, (unsigned)i + 1);
+      system12_set_input(name, pressed[i]);
+   }
+   snprintf(name, sizeof(name), "p%ustart", port + 1);
+   system12_set_input(name, pressed[8]);
+   snprintf(name, sizeof(name), "coin%u", port + 1);
+   system12_set_input(name, pressed[9]);
+   if (port == 0)
+      system12_set_input("service", pressed[10]);
+}
+#endif
+
 static void update_variables(bool in_flight)
 {
    struct retro_variable var;
@@ -2696,6 +2769,9 @@ static void update_variables(bool in_flight)
    frameskip_type_t prev_frameskip_type;
    double old_fps = psxGetFps();
 
+#ifdef ARCADE_SYSTEM12
+   system12_update_mapping();
+#endif
    var.value = NULL;
    var.key = "pcsx_rearmed_frameskip_type";
 
@@ -4013,6 +4089,21 @@ void retro_run(void)
    {
 #define SYSTEM12_PAD_INPUT(name, port, id) \
       system12_set_input(name, input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, id) != 0)
+      if (system12_mapped) {
+         /* The arcade options' layout; directions stay on the d-pad. */
+         SYSTEM12_PAD_INPUT("p1up", 0, RETRO_DEVICE_ID_JOYPAD_UP);
+         SYSTEM12_PAD_INPUT("p1down", 0, RETRO_DEVICE_ID_JOYPAD_DOWN);
+         SYSTEM12_PAD_INPUT("p1left", 0, RETRO_DEVICE_ID_JOYPAD_LEFT);
+         SYSTEM12_PAD_INPUT("p1right", 0, RETRO_DEVICE_ID_JOYPAD_RIGHT);
+         SYSTEM12_PAD_INPUT("p2up", 1, RETRO_DEVICE_ID_JOYPAD_UP);
+         SYSTEM12_PAD_INPUT("p2down", 1, RETRO_DEVICE_ID_JOYPAD_DOWN);
+         SYSTEM12_PAD_INPUT("p2left", 1, RETRO_DEVICE_ID_JOYPAD_LEFT);
+         SYSTEM12_PAD_INPUT("p2right", 1, RETRO_DEVICE_ID_JOYPAD_RIGHT);
+         system12_mapped_input(0);
+         system12_mapped_input(1);
+         system12_set_input("test", system12_test);
+         goto system12_input_done;
+      }
       SYSTEM12_PAD_INPUT("p1up", 0, RETRO_DEVICE_ID_JOYPAD_UP);
       SYSTEM12_PAD_INPUT("p1down", 0, RETRO_DEVICE_ID_JOYPAD_DOWN);
       SYSTEM12_PAD_INPUT("p1left", 0, RETRO_DEVICE_ID_JOYPAD_LEFT);
@@ -4043,6 +4134,7 @@ void retro_run(void)
       SYSTEM12_PAD_INPUT("coin2", 1, RETRO_DEVICE_ID_JOYPAD_L3);
       SYSTEM12_PAD_INPUT("service", 0, RETRO_DEVICE_ID_JOYPAD_SELECT);
       SYSTEM12_PAD_INPUT("test", 1, RETRO_DEVICE_ID_JOYPAD_SELECT);
+system12_input_done:;
 #undef SYSTEM12_PAD_INPUT
    }
 #endif

@@ -1416,6 +1416,8 @@ static int run_ui(void)
             unsigned runs = 0;
 
             sceClibPrintf("pcsx-vita: booting %s\n", game_path);
+            /* The test switch is for one visit to a game's test menu. */
+            VitaSettings_SetOption("pcsx_rearmed_arcade_test", "disabled");
             memset(&game, 0, sizeof(game));
             game.path = game_path;
             if (!retro_load_game(&game)) {

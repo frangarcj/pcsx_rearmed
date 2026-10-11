@@ -17,6 +17,7 @@ extern "C" void VitaCtrNativeRenderer_PresentCurrentFrame(void);
 extern "C" void VitaCtrNativeRenderer_SetAspectMode(int mode);
 extern "C" void NativeRenderer_SwapWindow(void);
 extern "C" void gteSetWidescreenHack(int enabled);
+extern "C" int system12_set_input(const char *control, int pressed);
 extern "C" int PCSXMacVitaGL_CaptureCurrentFrame(void);
 extern "C" int PCSXMacVitaGL_WriteCapturePpm(const char *path);
 
@@ -30,6 +31,11 @@ static std::vector<std::pair<std::string, std::string> > settings = {
 	{ "pcsx_rearmed_fractional_framerate", "auto" }, { "pcsx_rearmed_alt_flip", "auto" },
 	{ "pcsx_rearmed_spu_reverb", "enabled" }, { "pcsx_rearmed_spu_interpolation", "gaussian" },
 	{ "pcsx_rearmed_nocdaudio", "enabled" }, { "pcsx_rearmed_noxadecoding", "enabled" },
+	{ "pcsx_rearmed_arcade_square", "button1" }, { "pcsx_rearmed_arcade_triangle", "button2" },
+	{ "pcsx_rearmed_arcade_cross", "button3" }, { "pcsx_rearmed_arcade_circle", "button4" },
+	{ "pcsx_rearmed_arcade_l1", "button5" }, { "pcsx_rearmed_arcade_r1", "button6" },
+	{ "pcsx_rearmed_arcade_l2", "button7" }, { "pcsx_rearmed_arcade_r2", "button8" },
+	{ "pcsx_rearmed_arcade_select", "coin" }, { "pcsx_rearmed_arcade_test", "disabled" },
 };
 
 static const char *get_option(void *, const char *key)
@@ -45,6 +51,9 @@ static void set_option(void *, const char *key, const char *value)
 	for (auto &entry : settings)
 		if (entry.first == key)
 			entry.second = value;
+	/* The harness's keyboard has its own layout; the test switch acts. */
+	if (!strcmp(key, "pcsx_rearmed_arcade_test"))
+		system12_set_input("test", !strcmp(value, "enabled"));
 	if (!strcmp(key, "vita_aspect_ratio")) {
 		/* 16:9 Unstretched also squeezes the GTE's projection (the harness
 		 * interprets: no recompiled code to flush). */
@@ -99,9 +108,13 @@ static std::vector<unsigned> parse_script(const char *script)
 extern "C" int mac_pause_run(const char *game, const char *script, const char *shot)
 {
 	const std::vector<unsigned> steps = parse_script(script);
-	const bool scripted = shot != NULL;
+	/* "G" in the script: the shot is the game's frame, without the menu. */
+	const bool game_shot = script && strchr(script, 'G');
+	const bool scripted = shot != NULL || (script && *script);
 	unsigned frame = 0;
-	const ShelfMenus menus = { pcsx_shelf_options, pcsx_shelf_option_count, NULL, get_option, set_option, 0, NULL };
+	int option_count;
+	const ShelfOption *options = pcsx_shelf_options(PCSX_OPTIONS_ARCADE, &option_count);
+	const ShelfMenus menus = { options, option_count, NULL, get_option, set_option, 0, NULL };
 	int fb_width = 960, fb_height = 544;
 	SDL_GetWindowSizeInPixels(g_window, &fb_width, &fb_height);
 	const ShelfConfig config = { "PCSX", "ReArcade", ".", "", 960, 544, NULL, 0, &menus, NULL, fb_width, fb_height };
@@ -123,6 +136,8 @@ extern "C" int mac_pause_run(const char *game, const char *script, const char *s
 		while (SDL_PollEvent(&event))
 			if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
 				quit = true;
+		/* SIGINT/SIGTERM (the harness's interrupted flag) end the game too. */
+		quit = quit || mac_pause_interrupted();
 		if (quit) {
 			result = MAC_PAUSE_CLOSE;
 			break;
@@ -142,11 +157,20 @@ extern "C" int mac_pause_run(const char *game, const char *script, const char *s
 		int slot = 0;
 		GLint framebuffer = 0;
 		VitaCtrNativeRenderer_PresentCurrentFrame();
+		if (game_shot && scripted && frame + 1 >= (steps.size() + 2) * 10) {
+			if (!PCSXMacVitaGL_CaptureCurrentFrame() || PCSXMacVitaGL_WriteCapturePpm(shot) <= 0)
+				fprintf(stderr, "Pause menu: cannot write %s\n", shot);
+			result = MAC_PAUSE_CLOSE;
+			break;
+		}
 		glGetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer);
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		const int action = shelf_pause_frame(&input, &slot);
 		glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)framebuffer);
 		if (scripted && ++frame >= (steps.size() + 2) * 10) {
+			/* With a shot: save it and close. Without: the script's choices stay, play on. */
+			if (!shot)
+				break;
 			if (!PCSXMacVitaGL_CaptureCurrentFrame() || PCSXMacVitaGL_WriteCapturePpm(shot) <= 0)
 				fprintf(stderr, "Pause menu: cannot write %s\n", shot);
 			result = MAC_PAUSE_CLOSE;

@@ -228,7 +228,9 @@ static void shelf_task(void *arg)
 {
     ShelfTask *task = (ShelfTask *)arg;
     ArcadeCatalog catalog;
-    const ShelfMenus menus = { pcsx_shelf_options, pcsx_shelf_option_count, NULL, get_option, set_option, 0, NULL };
+    int option_count;
+    const ShelfOption *options = pcsx_shelf_options(PCSX_OPTIONS_SELECTOR, &option_count);
+    const ShelfMenus menus = { options, option_count, NULL, get_option, set_option, 0, NULL };
     const ShelfConfig config = shelf_config(&menus);
     uint64_t signature = 0;
 
@@ -291,7 +293,9 @@ static void pause_task(void *arg)
      * MAME sets get no save-state page. */
     const size_t length = strlen(task->game_path);
     const bool arcade = length > 4 && !strcasecmp(task->game_path + length - 4, ".zip");
-    const ShelfMenus menus = { pcsx_shelf_options, pcsx_shelf_option_count, (void *)task->game_path,
+    int option_count;
+    const ShelfOption *options = pcsx_shelf_options(arcade ? PCSX_OPTIONS_ARCADE : PCSX_OPTIONS_DISC, &option_count);
+    const ShelfMenus menus = { options, option_count, (void *)task->game_path,
         get_option, set_option, arcade ? 0 : 10, state_exists };
     const ShelfConfig config = shelf_config(&menus);
     std::string title = g_game_path == task->game_path ? g_game_title : std::string();

@@ -1,5 +1,7 @@
 #include "shelf_options.h"
 
+#include <vector>
+
 /* Values and texts as in the PCSX AwO ROM selector, by Rinnegatamante. */
 static const ShelfChoice k_auto_choice[] = { { "auto", "Auto" } };
 static const ShelfChoice k_region_choices[] = {
@@ -38,37 +40,89 @@ static const ShelfChoice k_aspect_choices[] = {
 	{ "16:9_unstretched", "16:9 Unstretched" }
 };
 
-const ShelfOption pcsx_shelf_options[] = {
-	{ "SYSTEM", "Region", "Select the console video region. Auto detects it from the game; forcing NTSC/PAL changes timing and refresh rate.",
-	  "pcsx_rearmed_region", k_region_choices, 3, 0, 0, NULL },
-	{ "SYSTEM", "BIOS", "Choose automatic BIOS selection or the built-in HLE BIOS. Auto uses a real BIOS when available. Takes effect on the next game start/restart.",
-	  "pcsx_rearmed_bios", k_bios_choices, 2, 0, 0, NULL },
-	{ "SYSTEM", "BIOS Boot Logo", "Controls whether the PlayStation BIOS boot animation is shown. Takes effect on the next game start/restart.",
-	  "pcsx_rearmed_show_bios_bootlogo", k_bios_logo_choices, 3, 0, 0, NULL },
-	{ "SYSTEM", "PSX CPU Clock", "Changes the emulated PlayStation CPU clock. Leave on Auto unless a game needs different CPU timing.",
-	  "pcsx_rearmed_psxclock", k_auto_choice, 1, 30, 100, "%" },
-	{ "SYSTEM", "Turbo CD", "Accelerates the emulated CD-ROM timing to reduce loading times. Some games rely on original drive timing and may misbehave, so disable it if a title has loading or streaming problems.",
-	  "pcsx_rearmed_cd_turbo", k_toggle_choices, 2, 0, 0, NULL },
-	{ "SYSTEM", "CD Read-Ahead", "Caches upcoming sectors on a background thread. This reduces storage stalls without changing PlayStation CD-ROM timing.",
-	  "pcsx_rearmed_cd_readahead", k_cd_readahead_choices, 6, 0, 0, NULL },
-	{ "VIDEO", "Aspect Ratio", "4:3 is the original output. 16:9 Stretched fills the screen by stretching 4:3. 16:9 Unstretched uses an experimental widescreen projection that preserves geometry proportions and can reveal extra horizontal content, but some games may show culling or background artifacts.",
-	  "vita_aspect_ratio", k_aspect_choices, 3, 0, 0, NULL },
-	{ "VIDEO", "Screen Borders", "Borderless removes vertical blanking outside the game's active display range. Auto and Game preserve the console timing canvas when a title intentionally uses it.",
-	  "pcsx_rearmed_screen_centering", k_centering_choices, 3, 0, 0, NULL },
-	{ "VIDEO", "Fractional Frame Rate", "Uses the console's fractional video timing when appropriate, such as 59.94 Hz instead of exactly 60 Hz.",
-	  "pcsx_rearmed_fractional_framerate", k_fractional_choices, 3, 0, 0, NULL },
-	{ "VIDEO", "Framebuffer Readout", "Changes when the displayed framebuffer is read. Early/Late can fix games with unusual framebuffer timing.",
-	  "pcsx_rearmed_alt_flip", k_flip_choices, 3, 0, 0, NULL },
-	{ "AUDIO", "Reverb", "Enables PlayStation SPU reverb effects.",
-	  "pcsx_rearmed_spu_reverb", k_toggle_choices, 2, 0, 0, NULL },
-	{ "AUDIO", "Interpolation", "Selects the SPU sample interpolation method. Higher-quality modes can slightly increase CPU cost.",
-	  "pcsx_rearmed_spu_interpolation", k_interp_choices, 4, 0, 0, NULL },
-	{ "AUDIO", "CD Audio", "Enables CD-DA audio tracks used by games that stream music directly from the disc.",
-	  "pcsx_rearmed_nocdaudio", k_toggle_choices, 2, 0, 0, NULL },
-	{ "AUDIO", "XA Decoding", "Enables XA audio decoding for streamed voices, music and sound effects stored on the disc.",
-	  "pcsx_rearmed_noxadecoding", k_toggle_choices, 2, 0, 0, NULL },
+/* Where an option shows: the selector shows them all but the pause-only
+ * ones; a game's pause menu, those that apply to it. */
+enum { SCOPE_DISC = 1, SCOPE_ARCADE = 2, SCOPE_ALL = 3, SCOPE_ARCADE_PAUSE = 4 };
+
+static const ShelfChoice k_arcade_functions[] = {
+	{ "button1", "Button 1" }, { "button2", "Button 2" }, { "button3", "Button 3" }, { "button4", "Button 4" },
+	{ "button5", "Button 5" }, { "button6", "Button 6" }, { "button7", "Button 7" }, { "button8", "Button 8" },
+	{ "coin", "Coin" }, { "start", "Start" }, { "service", "Service" }, { "none", "None" }
 };
-const int pcsx_shelf_option_count = sizeof(pcsx_shelf_options) / sizeof(pcsx_shelf_options[0]);
+static const int k_arcade_function_count = sizeof(k_arcade_functions) / sizeof(k_arcade_functions[0]);
+
+static const struct
+{
+	int scope;
+	ShelfOption option;
+} k_options[] = {
+	{ SCOPE_DISC, { "PLAYSTATION", "Region", "Select the console video region. Auto detects it from the game; forcing NTSC/PAL changes timing and refresh rate.",
+	  "pcsx_rearmed_region", k_region_choices, 3, 0, 0, NULL } },
+	{ SCOPE_DISC, { "PLAYSTATION", "BIOS", "Choose automatic BIOS selection or the built-in HLE BIOS. Auto uses a real BIOS when available. Takes effect on the next game start/restart.",
+	  "pcsx_rearmed_bios", k_bios_choices, 2, 0, 0, NULL } },
+	{ SCOPE_DISC, { "PLAYSTATION", "BIOS Boot Logo", "Controls whether the PlayStation BIOS boot animation is shown. Takes effect on the next game start/restart.",
+	  "pcsx_rearmed_show_bios_bootlogo", k_bios_logo_choices, 3, 0, 0, NULL } },
+	{ SCOPE_DISC, { "PLAYSTATION", "PSX CPU Clock", "Changes the emulated PlayStation CPU clock. Leave on Auto unless a game needs different CPU timing.",
+	  "pcsx_rearmed_psxclock", k_auto_choice, 1, 30, 100, "%" } },
+	{ SCOPE_DISC, { "PLAYSTATION", "Turbo CD", "Accelerates the emulated CD-ROM timing to reduce loading times. Some games rely on original drive timing and may misbehave, so disable it if a title has loading or streaming problems.",
+	  "pcsx_rearmed_cd_turbo", k_toggle_choices, 2, 0, 0, NULL } },
+	{ SCOPE_DISC, { "PLAYSTATION", "CD Read-Ahead", "Caches upcoming sectors on a background thread. This reduces storage stalls without changing PlayStation CD-ROM timing.",
+	  "pcsx_rearmed_cd_readahead", k_cd_readahead_choices, 6, 0, 0, NULL } },
+	{ SCOPE_ALL, { "VIDEO", "Aspect Ratio", "4:3 is the original output. 16:9 Stretched fills the screen by stretching 4:3. 16:9 Unstretched uses an experimental widescreen projection that preserves geometry proportions and can reveal extra horizontal content, but some games may show culling or background artifacts.",
+	  "vita_aspect_ratio", k_aspect_choices, 3, 0, 0, NULL } },
+	{ SCOPE_ALL, { "VIDEO", "Screen Borders", "Borderless removes vertical blanking outside the game's active display range. Auto and Game preserve the console timing canvas when a title intentionally uses it.",
+	  "pcsx_rearmed_screen_centering", k_centering_choices, 3, 0, 0, NULL } },
+	{ SCOPE_ALL, { "VIDEO", "Fractional Frame Rate", "Uses the console's fractional video timing when appropriate, such as 59.94 Hz instead of exactly 60 Hz.",
+	  "pcsx_rearmed_fractional_framerate", k_fractional_choices, 3, 0, 0, NULL } },
+	{ SCOPE_ALL, { "VIDEO", "Framebuffer Readout", "Changes when the displayed framebuffer is read. Early/Late can fix games with unusual framebuffer timing.",
+	  "pcsx_rearmed_alt_flip", k_flip_choices, 3, 0, 0, NULL } },
+	{ SCOPE_DISC, { "PLAYSTATION AUDIO", "Reverb", "Enables PlayStation SPU reverb effects.",
+	  "pcsx_rearmed_spu_reverb", k_toggle_choices, 2, 0, 0, NULL } },
+	{ SCOPE_DISC, { "PLAYSTATION AUDIO", "Interpolation", "Selects the SPU sample interpolation method. Higher-quality modes can slightly increase CPU cost.",
+	  "pcsx_rearmed_spu_interpolation", k_interp_choices, 4, 0, 0, NULL } },
+	{ SCOPE_DISC, { "PLAYSTATION AUDIO", "CD Audio", "Enables CD-DA audio tracks used by games that stream music directly from the disc.",
+	  "pcsx_rearmed_nocdaudio", k_toggle_choices, 2, 0, 0, NULL } },
+	{ SCOPE_DISC, { "PLAYSTATION AUDIO", "XA Decoding", "Enables XA audio decoding for streamed voices, music and sound effects stored on the disc.",
+	  "pcsx_rearmed_noxadecoding", k_toggle_choices, 2, 0, 0, NULL } },
+	/* System 12 controls: what each pad button does (libretro.c). */
+	{ SCOPE_ARCADE, { "ARCADE CONTROLS", "Square", "What the Square button does on an arcade board. Buttons 1-4 are the four attack buttons (Tekken: left punch, right punch, left kick, right kick).",
+	  "pcsx_rearmed_arcade_square", k_arcade_functions, k_arcade_function_count, 0, 0, NULL } },
+	{ SCOPE_ARCADE, { "ARCADE CONTROLS", "Triangle", "What the Triangle button does on an arcade board.",
+	  "pcsx_rearmed_arcade_triangle", k_arcade_functions, k_arcade_function_count, 0, 0, NULL } },
+	{ SCOPE_ARCADE, { "ARCADE CONTROLS", "Cross", "What the Cross button does on an arcade board.",
+	  "pcsx_rearmed_arcade_cross", k_arcade_functions, k_arcade_function_count, 0, 0, NULL } },
+	{ SCOPE_ARCADE, { "ARCADE CONTROLS", "Circle", "What the Circle button does on an arcade board.",
+	  "pcsx_rearmed_arcade_circle", k_arcade_functions, k_arcade_function_count, 0, 0, NULL } },
+	{ SCOPE_ARCADE, { "ARCADE CONTROLS", "L", "What the L button does on an arcade board.",
+	  "pcsx_rearmed_arcade_l1", k_arcade_functions, k_arcade_function_count, 0, 0, NULL } },
+	{ SCOPE_ARCADE, { "ARCADE CONTROLS", "R", "What the R button does on an arcade board.",
+	  "pcsx_rearmed_arcade_r1", k_arcade_functions, k_arcade_function_count, 0, 0, NULL } },
+	{ SCOPE_ARCADE, { "ARCADE CONTROLS", "Select", "What the Select button does on an arcade board: Coin inserts a credit. Start + Select still opens the pause menu.",
+	  "pcsx_rearmed_arcade_select", k_arcade_functions, k_arcade_function_count, 0, 0, NULL } },
+	{ SCOPE_ARCADE, { "ARCADE CONTROLS", "L2 (PS TV)", "What L2 does on an arcade board, on a PS TV or a Vita with rear touch mapped to it.",
+	  "pcsx_rearmed_arcade_l2", k_arcade_functions, k_arcade_function_count, 0, 0, NULL } },
+	{ SCOPE_ARCADE, { "ARCADE CONTROLS", "R2 (PS TV)", "What R2 does on an arcade board, on a PS TV or a Vita with rear touch mapped to it.",
+	  "pcsx_rearmed_arcade_r2", k_arcade_functions, k_arcade_function_count, 0, 0, NULL } },
+	{ SCOPE_ARCADE_PAUSE, { "ARCADE", "Test Switch", "The board's test switch: On opens the game's test menu (input and sound tests, settings, bookkeeping). Turn it Off and leave the menu to play. Off again for every new game.",
+	  "pcsx_rearmed_arcade_test", k_toggle_choices, 2, 0, 0, NULL } },
+};
+
+const ShelfOption *pcsx_shelf_options(int context, int *count)
+{
+	static std::vector<ShelfOption> tables[3];
+	std::vector<ShelfOption> &table = tables[context];
+	if (table.empty())
+		for (const auto &entry : k_options)
+		{
+			const bool shown = context == PCSX_OPTIONS_SELECTOR ? !(entry.scope & SCOPE_ARCADE_PAUSE)
+			                 : context == PCSX_OPTIONS_DISC     ? (entry.scope & SCOPE_DISC) != 0
+			                                                    : (entry.scope & (SCOPE_ARCADE | SCOPE_ARCADE_PAUSE)) != 0;
+			if (shown)
+				table.push_back(entry.option);
+		}
+	*count = (int)table.size();
+	return table.data();
+}
 
 std::string pcsx_shelf_about(const char *version)
 {

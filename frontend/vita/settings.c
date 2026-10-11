@@ -41,6 +41,19 @@ static VitaOptionEntry g_options[] = {
     { "pcsx_rearmed_alt_flip", "auto", {0} },
     { "pcsx_rearmed_screen_centering", "borderless", {0} },
     { "vita_aspect_ratio", "4:3", {0} },
+    /* PCSX ReArcade: System 12 controls, PlayStation style (Tekken: square
+     * left punch, triangle right punch, cross left kick, circle right kick). */
+    { "pcsx_rearmed_arcade_square", "button1", {0} },
+    { "pcsx_rearmed_arcade_triangle", "button2", {0} },
+    { "pcsx_rearmed_arcade_cross", "button3", {0} },
+    { "pcsx_rearmed_arcade_circle", "button4", {0} },
+    { "pcsx_rearmed_arcade_l1", "button5", {0} },
+    { "pcsx_rearmed_arcade_r1", "button6", {0} },
+    { "pcsx_rearmed_arcade_l2", "button7", {0} },
+    { "pcsx_rearmed_arcade_r2", "button8", {0} },
+    { "pcsx_rearmed_arcade_select", "coin", {0} },
+    { "pcsx_rearmed_arcade_start", "start", {0} },
+    { "pcsx_rearmed_arcade_test", "disabled", {0} },
 };
 
 static bool g_dirty;
