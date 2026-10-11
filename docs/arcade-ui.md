@@ -28,6 +28,31 @@ whatever its pixel size. Without art, the marquee shows the game title and
 the screen shows the set name. The control panel, the coin door and the
 cabinet are drawn by the UI. The build ships no game art.
 
+## Artwork download (build flag, off by default)
+
+With `ARCADE_UI_ADB` (`make -f Makefile.arcade-ui ADB=1`), triangle opens
+a panel that downloads the missing art from
+[Arcade Database](https://adb.arcadeitalia.net) by motoschifo. Most of its
+images come from ProgettoSnaps.
+
+The panel downloads, for every listed set and its parent:
+
+- the in-game snap, the title screen and the marquee, into `snap/`,
+  `titles/` and `marquees/`;
+- the control data (buttons, colours, players), into `adb/<set>.json`.
+
+It follows the service's rules:
+
+- one connection at a time, on a background thread;
+- romsets queried in batches, with URLs of at most 800 characters;
+- the source credited on the panel and in each JSON file;
+- a User-Agent that names the app;
+- only missing files are downloaded, and only when the user asks.
+
+The flag stays off in releases until the site's author has agreed to this
+use. For tests, `ARCADE_UI_ADB_QUERY` points the queries at a local
+stand-in instead of the site.
+
 ## Cabinets
 
 `cabinet3d.cpp` builds an upright cabinet from its side profile. The side

@@ -12,6 +12,10 @@
 
 #include "ui_gl.h"
 #include "cabinet3d.h"
+#ifdef ARCADE_UI_ADB
+#include <sys/stat.h>
+#include "adb_scraper.h"
+#endif
 #include "../../libpcsxcore/arcade/system12_romset.h"
 #include "roboto_medium.inc" /* Roboto_Medium_ttf, from deps/imgui/misc/fonts */
 
@@ -53,6 +57,7 @@ struct State {
 	float time;               /* seconds, for the idle animation */
 	float yaw, pitch;         /* right stick turn of the selected cabinet */
 	int posed_game;           /* the game yaw/pitch belong to */
+	bool adb_open;            /* the artwork download panel is shown */
 	ImFont *font_small, *font_body, *font_title, *font_marquee;
 };
 
@@ -636,8 +641,93 @@ void draw_frame(ImDrawList *draw)
 	x = text_hint(draw, x, fy, "< >", "Game");
 	if (game.versions.size() > 1)
 		x = text_hint(draw, x, fy, "^ v", "Version");
+#ifdef ARCADE_UI_ADB
+	x = hint(draw, x, fy, UI_TRIANGLE, "Artwork");
+#endif
 	hint(draw, W - 110, fy, UI_CIRCLE, "Exit");
 }
+
+#ifdef ARCADE_UI_ADB
+/* ---- artwork download (Arcade Database) ---- */
+
+bool pressed(unsigned buttons, unsigned button, float dt);
+
+std::vector<std::string> adb_sets()
+{
+	std::vector<std::string> sets;
+	for (const Game &game : s->games) {
+		sets.push_back(game.key);
+		for (const Version &version : game.versions)
+			if (version.set != game.key)
+				sets.push_back(version.set);
+	}
+	return sets;
+}
+
+void free_art()
+{
+	for (Art &art : s->art) {
+		ui_gl_free_texture(&art.snap);
+		ui_gl_free_texture(&art.marquee);
+		ui_gl_free_texture(&art.marquee3d);
+		ui_gl_free_texture(&art.screen3d);
+	}
+	s->art.clear();
+}
+
+void draw_adb_panel(ImDrawList *draw)
+{
+	const float W = (float)s->config.width, H = (float)s->config.height;
+	const AdbProgress progress = adb_scraper_progress();
+	const ImVec2 p0(W * 0.5f - 300, H * 0.5f - 140), p1(W * 0.5f + 300, H * 0.5f + 140);
+	char line[256];
+	draw->AddRectFilled(ImVec2(0, 0), ImVec2(W, H), rgba(5, 7, 16, 0.72f));
+	draw->AddRectFilled(p0, p1, rgba(24, 29, 54), 12.0f);
+	draw->AddRect(p0, p1, rgba(255, 180, 0, 0.5f), 12.0f);
+	draw->AddText(s->font_title, 26.0f, ImVec2(p0.x + 28, p0.y + 22), rgba(245, 245, 250), "Download artwork");
+	snprintf(line, sizeof(line), "Snapshots, titles and marquees for %d sets.", (int)adb_sets().size());
+	draw->AddText(s->font_body, 17.0f, ImVec2(p0.x + 28, p0.y + 66), rgba(200, 204, 225), line);
+	draw->AddText(s->font_body, 17.0f, ImVec2(p0.x + 28, p0.y + 88), rgba(200, 204, 225),
+		"Only missing files are downloaded.");
+	draw->AddText(s->font_small, 13.0f, ImVec2(p0.x + 28, p0.y + 122), rgba(255, 180, 0), "SOURCE");
+	draw->AddText(s->font_small, 15.0f, ImVec2(p0.x + 28, p0.y + 140), rgba(160, 165, 195), ADB_CREDIT, NULL, 540);
+	if (progress.running || progress.finished) {
+		const float fraction = progress.sets_total ? (float)progress.sets_done / progress.sets_total : 0.0f;
+		const ImVec2 b0(p0.x + 28, p0.y + 182), b1(p1.x - 28, p0.y + 194);
+		draw->AddRectFilled(b0, b1, rgba(255, 255, 255, 0.08f), 6.0f);
+		draw->AddRectFilled(b0, ImVec2(b0.x + (b1.x - b0.x) * fraction, b1.y), rgba(255, 180, 0), 6.0f);
+		if (progress.running)
+			snprintf(line, sizeof(line), "%s  -  %d images", progress.current.c_str(), progress.images);
+		else
+			snprintf(line, sizeof(line), "%s: %d images downloaded", progress.cancelled ? "Stopped" : "Done",
+				progress.images);
+		draw->AddText(s->font_small, 15.0f, ImVec2(b0.x, b1.y + 10), rgba(200, 204, 225), line);
+		if (!progress.error.empty())
+			draw->AddText(s->font_small, 13.0f, ImVec2(b0.x, b1.y + 30), rgba(255, 120, 120), progress.error.c_str());
+	}
+	float x = p0.x + 28;
+	if (!progress.running)
+		x = hint(draw, x, p1.y - 26, UI_CROSS, progress.finished ? "Again" : "Download");
+	hint(draw, x, p1.y - 26, UI_CIRCLE, progress.running ? "Stop" : "Close");
+}
+
+/* The panel takes the input while it is open. */
+void adb_input(unsigned buttons, float dt)
+{
+	const AdbProgress progress = adb_scraper_progress();
+	if (pressed(buttons, UI_CROSS, dt) && !progress.running) {
+		const std::string ca = s->data_root + "/cacert.pem";
+		struct stat st;
+		adb_scraper_start(s->data_root, adb_sets(), stat(ca.c_str(), &st) == 0 ? ca : std::string());
+	}
+	if (pressed(buttons, UI_CIRCLE, dt)) {
+		if (progress.running)
+			adb_scraper_cancel();
+		else
+			s->adb_open = false;
+	}
+}
+#endif
 
 bool pressed(unsigned buttons, unsigned button, float dt)
 {
@@ -686,6 +776,10 @@ void arcade_ui_shutdown(void)
 {
 	if (!s)
 		return;
+#ifdef ARCADE_UI_ADB
+	adb_scraper_cancel();
+	adb_scraper_join();
+#endif
 	save_config();
 	for (Art &art : s->art) {
 		ui_gl_free_texture(&art.snap);
@@ -712,6 +806,23 @@ int arcade_ui_frame(unsigned buttons, float stick_x, float stick_y, float dt, ch
 	io.DeltaTime = dt > 0.0f ? dt : 1.0f / 60.0f;
 	s->time += io.DeltaTime;
 
+#ifdef ARCADE_UI_ADB
+	{
+		/* New files on disk: reload the art once a download ends. */
+		static bool was_running;
+		const bool running = adb_scraper_progress().running;
+		if (was_running && !running)
+			free_art();
+		was_running = running;
+	}
+	if (s->adb_open) {
+		adb_input(buttons, dt);
+		buttons = 0;
+	} else if (pressed(buttons, UI_TRIANGLE, dt) && !s->games.empty()) {
+		s->adb_open = true;
+		buttons = 0;
+	}
+#endif
 	if (pressed(buttons, UI_CIRCLE, dt))
 		action = ARCADE_UI_QUIT;
 	if (!s->games.empty()) {
@@ -769,6 +880,10 @@ int arcade_ui_frame(unsigned buttons, float stick_x, float stick_y, float dt, ch
 	ImGui::Begin("##arcade", NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
 		ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoInputs);
 	draw_frame(ImGui::GetWindowDrawList());
+#ifdef ARCADE_UI_ADB
+	if (s->adb_open)
+		draw_adb_panel(ImGui::GetWindowDrawList());
+#endif
 	ImGui::End();
 	ImGui::PopStyleVar(2);
 	ImGui::Render();

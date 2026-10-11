@@ -5,7 +5,14 @@
 #   build/arcade-ui/arcade-ui --demo
 CC := xcrun clang
 CXX := xcrun clang++
+# ADB=1 adds the artwork download from Arcade Database (needs the site
+# author's agreement before release; see frontend/arcade_ui/adb_scraper.h).
+ADB ?= 0
+ifeq ($(ADB),1)
+BUILD := build/arcade-ui-adb
+else
 BUILD := build/arcade-ui
+endif
 TARGET := $(BUILD)/arcade-ui
 SDL3_CFLAGS := $(shell pkg-config --cflags sdl3)
 SDL3_LIBS := $(shell pkg-config --libs sdl3)
@@ -16,6 +23,14 @@ CXXFLAGS := $(CFLAGS) -std=c++17
 SOURCES_CXX := deps/imgui/imgui.cpp deps/imgui/imgui_draw.cpp \
 	frontend/arcade_ui/arcade_ui.cpp frontend/arcade_ui/ui_gl.cpp frontend/arcade_ui/cabinet3d.cpp tools/arcade-ui/arcade_ui_mac.cpp
 SOURCES_C := libpcsxcore/arcade/system12_romset.c libpcsxcore/arcade/mame_zip.c
+EXTRA_LIBS :=
+ifeq ($(ADB),1)
+CFLAGS += -DARCADE_UI_ADB -Ideps/libretro-common/include
+CXXFLAGS += -DARCADE_UI_ADB -Ideps/libretro-common/include
+SOURCES_CXX += frontend/arcade_ui/adb_scraper.cpp
+SOURCES_C += deps/libretro-common/formats/json/rjson.c deps/libretro-common/string/rstrtod.c
+EXTRA_LIBS += -lcurl
+endif
 OBJECTS := $(addprefix $(BUILD)/,$(SOURCES_CXX:.cpp=.o) $(SOURCES_C:.c=.o))
 FONT := $(BUILD)/roboto_medium.inc
 
@@ -23,7 +38,7 @@ FONT := $(BUILD)/roboto_medium.inc
 all: $(TARGET)
 
 $(TARGET): $(OBJECTS)
-	$(CXX) -arch arm64 -o $@ $^ $(SDL3_LIBS) $(LIBPNG_LIBS) -lz -framework OpenGL
+	$(CXX) -arch arm64 -o $@ $^ $(SDL3_LIBS) $(LIBPNG_LIBS) $(EXTRA_LIBS) -lz -framework OpenGL
 
 # Roboto Medium (Apache License 2.0) from deps/imgui/misc/fonts, as a C array.
 $(FONT): deps/imgui/misc/fonts/Roboto-Medium.ttf
