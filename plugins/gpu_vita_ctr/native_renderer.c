@@ -922,6 +922,25 @@ internal void NativeRenderer_UpdatePresentationViewport(void)
 	s_presentViewport.y = (g_windowHeight - viewportH) / 2;
 }
 
+/* 0 = 4:3, 1 = 16:9 stretched, 2 = 16:9 with the GTE widescreen hook: both
+ * 16:9 modes widen the presented view. Kept across renderer restarts. */
+global_variable int s_presentAspectMode;
+
+void VitaCtrNativeRenderer_SetAspectMode(int mode)
+{
+	s_presentAspectMode = (mode < 0 || mode > 2) ? 0 : mode;
+	if (s_presentAspectMode == 0)
+		NativeRenderer_SetPresentationAspect(4, 3);
+	else
+		NativeRenderer_SetPresentationAspect(16, 9);
+	NativeRenderer_UpdatePresentationViewport();
+}
+
+int VitaCtrNativeRenderer_GetAspectMode(void)
+{
+	return s_presentAspectMode;
+}
+
 internal void NativeRenderer_InitRenderTarget(struct NativeRenderTarget *target)
 {
 	target->texture = (TextureID)-1;

@@ -27,6 +27,13 @@
 #include "../../libpcsxcore/system12_profile.h"
 #include "input_csv_reader.h"
 #include "vita_gpuprof.h"
+#ifdef STANDALONE_VITAGL
+#include "rom_selector.h"
+#include "settings.h"
+#include "savestates.h"
+/* gpulib: drains the GPU thread and the renderer (plugins/gpulib/gpu.c). */
+void gpu_sync_renderer(void);
+#endif
 
 #define APP_ROOT "ux0:data/pcsx-rearmed"
 #define BIOS_DIR APP_ROOT "/bios"
@@ -95,6 +102,13 @@ static bool g_replay_active;
 static SceCtrlData g_pad;
 static int g_exit_hold;
 static bool g_exit_requested;
+/* Menu mode (vitaGL builds started without a game): the ROM selector picks
+ * the game, Select+Start opens the pause menu, and core options come from
+ * settings.cfg. A game named on the command line or in args.txt runs as
+ * before, with the fixed options below, so validation runs do not change. */
+static bool g_ui_mode;
+static bool g_pause_requested;
+static bool g_pause_combo_down;
 
 static SDL_AudioStream *g_audio_stream;
 static uint32_t g_audio_put_errors;
@@ -188,6 +202,13 @@ static const char *option_value(const char *key)
         return g_board_thread ? "enabled" : "disabled";
     if (strcmp(key, "pcsx_rearmed_neon_two_stage") == 0)
         return g_gpu2 ? "enabled" : "disabled";
+#ifdef STANDALONE_VITAGL
+    if (g_ui_mode) {
+        const char *value = VitaSettings_GetOption(key);
+        if (value)
+            return value;
+    }
+#endif
     static const struct {
         const char *key;
         const char *value;
@@ -242,7 +263,11 @@ static bool environment_cb(unsigned cmd, void *data)
         *(bool *)data = true;
         return true;
     case RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE:
+#ifdef STANDALONE_VITAGL
+        *(bool *)data = g_ui_mode && VitaSettings_ConsumeDirty();
+#else
         *(bool *)data = false;
+#endif
         return true;
     case RETRO_ENVIRONMENT_GET_VARIABLE: {
         struct retro_variable *var = (struct retro_variable *)data;
@@ -877,6 +902,15 @@ static void input_poll_cb(void)
         apply_replay_inputs(g_input_frame++);
     }
 
+    if (g_ui_mode) {
+        const uint32_t pause_mask = SCE_CTRL_SELECT | SCE_CTRL_START;
+        const bool combo_down = (g_pad.buttons & pause_mask) == pause_mask;
+        if (combo_down && !g_pause_combo_down)
+            g_pause_requested = true;
+        g_pause_combo_down = combo_down;
+        return;
+    }
+
     if ((g_pad.buttons & quit_mask) == quit_mask) {
         if (++g_exit_hold >= 120)
             g_exit_requested = true;
@@ -1267,6 +1301,142 @@ static void pace_frame(void)
     g_last_vcount = now;
 }
 
+/* Opens audio at the loaded game's rate and sets the pacing ratio. */
+static void start_audio(const struct retro_system_av_info *av)
+{
+    float refresh = 0.0f;
+    int ret = audio_init((int)av->timing.sample_rate);
+
+    if (ret < 0)
+        sceClibPrintf("pcsx-vita: audio init failed 0x%x; continuing silent\n", ret);
+    else
+        sceClibPrintf("pcsx-vita: audio initialized\n");
+    if (sceDisplayGetRefreshRate(&refresh) < 0 || refresh <= 0.0f)
+        refresh = 59.94f;
+    if (av->timing.fps > 0.0)
+        g_audio_base_ratio = (float)(refresh / av->timing.fps);
+    sceClibPrintf("pcsx-vita: pacing=%s display=%.4fHz core=%.4fHz audio_ratio=%.5f\n",
+        g_pacing == PACING_VBLANK ? "vblank" : "audio", refresh, av->timing.fps,
+        g_pacing == PACING_VBLANK ? g_audio_base_ratio : 1.0f);
+}
+
+#ifdef STANDALONE_VITAGL
+static void wait_for_menu_input_release(void)
+{
+    const uint32_t mask =
+        SCE_CTRL_UP | SCE_CTRL_DOWN | SCE_CTRL_LEFT | SCE_CTRL_RIGHT |
+        SCE_CTRL_TRIANGLE | SCE_CTRL_CIRCLE | SCE_CTRL_CROSS | SCE_CTRL_SQUARE |
+        SCE_CTRL_START | SCE_CTRL_SELECT;
+
+    for (;;) {
+        SceCtrlData pad;
+        memset(&pad, 0, sizeof(pad));
+        if (sceCtrlPeekBufferPositiveExt2(0, &pad, 1) < 0)
+            sceCtrlPeekBufferPositive(0, &pad, 1);
+        if ((pad.buttons & mask) == 0)
+            break;
+        sceKernelDelayThread(1000);
+    }
+    memset(&g_pad, 0, sizeof(g_pad));
+    g_pause_combo_down = false;
+    g_pause_requested = false;
+}
+
+/* The pause menu, until it resumes, restarts or closes the game. Save and
+ * load keep it open on the save-state page, as a failed load does. */
+static int run_pause_menu(const char *game_path)
+{
+    bool reopen_save_states = false;
+    int ret;
+
+    if (g_audio_stream)
+        SDL_PauseAudioStreamDevice(g_audio_stream);
+    /* The menu draws on the renderer thread: no frame may be in flight. */
+    gpu_sync_renderer();
+    for (;;) {
+        ret = VitaPauseMenu_Run(game_path, reopen_save_states ? 1 : 0);
+        reopen_save_states = false;
+        wait_for_menu_input_release();
+
+        if (ret == VITA_PAUSE_SAVE_STATE) {
+            const int slot = VitaSaveStates_GetSlot();
+            sceClibPrintf("pcsx-vita: %s state slot %d\n",
+                VitaSaveStates_Save(game_path, slot) == 0 ? "saved" : "failed to save", slot);
+            reopen_save_states = true;
+            continue;
+        }
+        if (ret == VITA_PAUSE_LOAD_STATE) {
+            const int slot = VitaSaveStates_GetSlot();
+            if (VitaSaveStates_Load(game_path, slot) == 0) {
+                sceClibPrintf("pcsx-vita: loaded state slot %d\n", slot);
+                if (g_audio_stream)
+                    SDL_ClearAudioStream(g_audio_stream);
+                ret = VITA_PAUSE_RESUME;
+                break;
+            }
+            sceClibPrintf("pcsx-vita: failed to load state slot %d\n", slot);
+            reopen_save_states = true;
+            continue;
+        }
+        break;
+    }
+    if (ret == VITA_PAUSE_RESUME && g_audio_stream)
+        SDL_ResumeAudioStreamDevice(g_audio_stream);
+    return ret;
+}
+
+/* Menu mode: selector, game, pause menu, back to the selector. Returns the
+ * process exit code. */
+static int run_ui(void)
+{
+    char game_path[1024];
+    struct retro_game_info game;
+    struct retro_system_av_info av;
+    int ret;
+
+    for (;;) {
+        ret = VitaRomSelector_Run(game_path, sizeof(game_path));
+        if (ret <= 0) {
+            sceClibPrintf("pcsx-vita: ROM selector %s\n", ret < 0 ? "failed" : "closed");
+            return ret < 0 ? 2 : 0;
+        }
+        do {
+            unsigned runs = 0;
+
+            sceClibPrintf("pcsx-vita: booting %s\n", game_path);
+            memset(&game, 0, sizeof(game));
+            game.path = game_path;
+            if (!retro_load_game(&game)) {
+                sceClibPrintf("pcsx-vita: retro_load_game failed\n");
+                return 3;
+            }
+            retro_get_system_av_info(&av);
+            start_audio(&av);
+            memset(&g_pad, 0, sizeof(g_pad));
+            g_pause_requested = false;
+            g_pause_combo_down = false;
+            ret = VITA_PAUSE_CLOSE_GAME;
+            while (!g_exit_requested) {
+                retro_run();
+                pace_frame();
+                if (++runs % 60 == 0)
+                    sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
+                if (!g_pause_requested)
+                    continue;
+                ret = run_pause_menu(game_path);
+                if (ret != VITA_PAUSE_RESUME)
+                    break;
+            }
+            audio_finish();
+            retro_unload_game();
+            if (g_exit_requested)
+                return 0;
+        } while (ret == VITA_PAUSE_RESTART);
+        sceClibPrintf("pcsx-vita: closed %s\n", game_path);
+    }
+}
+#endif
+
 int main(int argc, char **argv)
 {
     struct retro_game_info game;
@@ -1479,6 +1649,15 @@ int main(int argc, char **argv)
     if (g_report_path[0] || g_capture_path[0]) return 4;
 #endif
 
+#ifdef STANDALONE_VITAGL
+    /* No game and no validation run: menu mode. */
+    if (game_path[0] == '\0' && !system12_profile && !validation_frames && !verify_smoke &&
+        !verify_system12_drc_ram_mb) {
+        g_ui_mode = true;
+        VitaSettings_Init();
+        VitaSaveStates_Init();
+    }
+#endif
     sceClibPrintf("pcsx-vita: main entered\n");
     /* Apps start at the system's clocks (GPU 111 MHz): the vitaGL renderer
      * was GPU-bound at ~100 ms a frame there. Raise each clock to the Vita's
@@ -1518,6 +1697,17 @@ int main(int argc, char **argv)
     retro_init();
     sceClibPrintf("pcsx-vita: retro_init complete\n");
 
+#ifdef STANDALONE_VITAGL
+    if (g_ui_mode) {
+        ret = run_ui();
+        retro_deinit();
+        audio_finish();
+        display_finish();
+        if (g_vm_block > 0)
+            sceKernelFreeMemBlock(g_vm_block);
+        return ret;
+    }
+#endif
     if (game_path[0] == '\0' && !find_game(game_path, sizeof(game_path))) {
         sceClibPrintf("pcsx-vita: core initialized; no game found in %s\n", APP_ROOT);
         retro_deinit();
@@ -1543,21 +1733,7 @@ int main(int argc, char **argv)
     }
 
     retro_get_system_av_info(&av);
-    ret = audio_init((int)av.timing.sample_rate);
-    if (ret < 0)
-        sceClibPrintf("pcsx-vita: audio init failed 0x%x; continuing silent\n", ret);
-    else
-        sceClibPrintf("pcsx-vita: audio initialized\n");
-    {
-        float refresh = 0.0f;
-        if (sceDisplayGetRefreshRate(&refresh) < 0 || refresh <= 0.0f)
-            refresh = 59.94f;
-        if (av.timing.fps > 0.0)
-            g_audio_base_ratio = (float)(refresh / av.timing.fps);
-        sceClibPrintf("pcsx-vita: pacing=%s display=%.4fHz core=%.4fHz audio_ratio=%.5f\n",
-            g_pacing == PACING_VBLANK ? "vblank" : "audio", refresh, av.timing.fps,
-            g_pacing == PACING_VBLANK ? g_audio_base_ratio : 1.0f);
-    }
+    start_audio(&av);
 
     unsigned runs = 0;
 #ifdef ARCADE_SYSTEM12

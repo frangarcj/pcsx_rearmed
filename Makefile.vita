@@ -85,9 +85,17 @@ STANDALONE_OBJ := $(BUILD_DIR)/standalone.o
 ifeq ($(VITA_GPUPROF),1)
 GPUPROF_OBJ := $(BUILD_DIR)/vita_gpuprof.o
 endif
+# The vitaGL build has the menu UI: ROM selector, pause menu, options and
+# save states (ImGui on the renderer's GL context).
+UI_OBJS :=
+UI_LIBS :=
+ifeq ($(VITA_GPU),vitagl)
+UI_OBJS := $(BUILD_DIR)/rom_selector.o $(BUILD_DIR)/settings.o $(BUILD_DIR)/savestates.o
+UI_LIBS := -limgui
+endif
 CORE_ARGS := platform=vita ARCADE_SYSTEM12=$(ARCADE_SYSTEM12) SYSTEM12_PROFILE=$(SYSTEM12_PROFILE) VITA_CTR_GPU_TRACE=$(VITA_CTR_GPU_TRACE) TARGET_NAME=$(CORE_NAME) BUILTIN_GPU=$(BUILTIN_VITA_GPU) GPU_NEON_USE_C=$(VITA_GPU_NEON_C) VITAGL_DIR=$(VITAGL_DIR) GIT_VERSION=$(GIT_VERSION) USE_LIBRETRO_VFS=0 \
 	USE_ASYNC_CDROM=0 USE_ASYNC_GPU=$(VITA_GPU_THREAD) USE_ASYNC_SPU=0 \
-	EXTRA_EXTERN_SYMS='_newlib_vm_size_user pcsx_vita_uses_dynarec pcsx_vita_read_smoke pcsx_vita_read_system12_drc pcsx_vita_write_system12_report pcsx_raw_frame_cb pcsx_vita_swap_cb pcsx_vita_gpu_label_cb pcsxr_gpu2_core system12_board_wait_us system12_board_wait_n $(if $(filter 1,$(VITA_GPU_THREAD)),gpu_async_wait_us gpu_async_wait_n,) $(if $(filter vitagl,$(VITA_GPU)),pcsx_vita_gl_capture_request pcsx_vita_gl_capture_store pcsx_vita_gl_hd pcsx_vita_gl_msaa pcsx_vita_ctr_wait_us pcsx_vita_ctr_wait_n,) $(if $(filter 1,$(SYSTEM12_PROFILE)),pcsx_profile_begin pcsx_profile_end pcsx_profile_log,)'
+	EXTRA_EXTERN_SYMS='_newlib_vm_size_user pcsx_vita_uses_dynarec pcsx_vita_read_smoke pcsx_vita_read_system12_drc pcsx_vita_write_system12_report pcsx_raw_frame_cb pcsx_vita_swap_cb pcsx_vita_gpu_label_cb pcsxr_gpu2_core system12_board_wait_us system12_board_wait_n $(if $(filter 1,$(VITA_GPU_THREAD)),gpu_async_wait_us gpu_async_wait_n,) $(if $(filter vitagl,$(VITA_GPU)),pcsx_vita_gl_capture_request pcsx_vita_gl_capture_store pcsx_vita_gl_hd pcsx_vita_gl_msaa pcsx_vita_ctr_wait_us pcsx_vita_ctr_wait_n NativeGpu_InitBackend NativeGpu_RunBackendTaskSync VitaCtrNativeRenderer_PresentCurrentFrame VitaCtrNativeRenderer_SetAspectMode NativeRenderer_SwapWindow gpu_sync_renderer,) $(if $(filter 1,$(SYSTEM12_PROFILE)),pcsx_profile_begin pcsx_profile_end pcsx_profile_log,)'
 
 .PHONY: all core clean vita-gl
 all: $(TARGET).vpk
@@ -104,11 +112,17 @@ $(BUILD_DIR):
 $(STANDALONE_OBJ): frontend/vita/standalone.c frontend/vita/validation.h frontend/vita/input_csv_reader.h Makefile.vita | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
+$(BUILD_DIR)/rom_selector.o: frontend/vita/rom_selector.cpp Makefile.vita | $(BUILD_DIR)
+	$(CXX) $(CFLAGS) -std=gnu++11 -MMD -MP -c $< -o $@
+
+$(BUILD_DIR)/%.o: frontend/vita/%.c Makefile.vita | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+
 $(GPUPROF_OBJ): frontend/vita/vita_gpuprof.c frontend/vita/vita_gpuprof.h Makefile.vita | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
-$(TARGET).elf: core $(STANDALONE_OBJ) $(GPUPROF_OBJ)
-	$(CXX) $(CFLAGS) $(LDFLAGS) $(STANDALONE_OBJ) $(GPUPROF_OBJ) $(CORE) $(LIBS) -o $@
+$(TARGET).elf: core $(STANDALONE_OBJ) $(GPUPROF_OBJ) $(UI_OBJS)
+	$(CXX) $(CFLAGS) $(LDFLAGS) $(STANDALONE_OBJ) $(GPUPROF_OBJ) $(UI_OBJS) $(CORE) $(UI_LIBS) $(LIBS) -o $@
 
 $(TARGET).velf: $(TARGET).elf
 	vita-elf-create $< $@
@@ -122,4 +136,4 @@ clean:
 	$(MAKE) -f Makefile.libretro $(CORE_ARGS) clean || true
 	rm -rf $(BUILD_DIR) $(TARGET).elf $(TARGET).velf $(TARGET).vpk eboot.bin param.sfo
 
--include $(STANDALONE_OBJ:.o=.d)
+-include $(STANDALONE_OBJ:.o=.d) $(UI_OBJS:.o=.d)

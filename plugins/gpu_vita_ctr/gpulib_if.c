@@ -57,6 +57,8 @@ void Platform_Log(const char *fmt, ...);
 extern int ParseTaglessPrimitive(u32 *command);
 extern void VitaCtrNativeGpu_SetDisplayEnv(int x, int y, int w, int h, int depth24);
 extern void VitaCtrNativeRenderer_SetPresentationAspect(int width, int height);
+extern void VitaCtrNativeRenderer_SetAspectMode(int mode);
+extern int VitaCtrNativeRenderer_GetAspectMode(void);
 extern void VitaCtrNativeRenderer_CopyGuestVRAM(const u16 *src, int x, int y, int w, int h);
 extern void VitaCtrNativeRenderer_ReadGuestVRAM(u16 *dst, int x, int y, int w, int h);
 extern void NativeGpu_SetFrontendDisplayBlank(int blank);
@@ -195,6 +197,21 @@ void Platform_EndScene(void)
         capture_gl_frame();
     }
 #endif
+}
+
+/* The last frame again, for a menu drawn over it on the renderer thread. */
+void VitaCtrNativeRenderer_PresentCurrentFrame(void)
+{
+    const DISPENV *display = NativeGpu_GetRenderDispEnv();
+
+    if (NativeGpu_GetRenderDisplayBlank())
+        NativeRenderer_PresentBlank();
+    else if (display->isrgb24)
+        NativeRenderer_PresentVRAMDisplay();
+    else {
+        NativeRenderer_PresentVRAMRect(display->disp.x, display->disp.y, display->disp.w, display->disp.h);
+        NativeRenderer_PresentMainOverlay(display->disp.x, display->disp.y, display->disp.w, display->disp.h);
+    }
 }
 
 typedef struct VitaCtrVramTask {
@@ -721,7 +738,7 @@ static void backend_renderer_init(void *arg)
     if (!NativeRenderer_InitialisePSX())
         return;
 
-    VitaCtrNativeRenderer_SetPresentationAspect(4, 3);
+    VitaCtrNativeRenderer_SetAspectMode(VitaCtrNativeRenderer_GetAspectMode());
     VitaCtrNativeRenderer_CopyGuestVRAM(s_guest_vram, 0, 0, VRAM_WIDTH, VRAM_HEIGHT);
     NativeRenderer_UpdateVRAM();
     task->result = 1;

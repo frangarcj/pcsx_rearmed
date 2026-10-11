@@ -93,6 +93,15 @@ static void sync_renderer(struct psx_gpu *gpu)
   }
 }
 
+#ifdef GPU_VITA_CTR
+/* For a frontend that draws on the renderer between frames (menus): returns
+ * with no GPU work in flight. */
+void gpu_sync_renderer(void)
+{
+  sync_renderer(&gpu);
+}
+#endif
+
 static void sync_renderer_ecmds(struct psx_gpu *gpu)
 {
   gput_sync(&gpu->timing, gpu->ex_regs);
