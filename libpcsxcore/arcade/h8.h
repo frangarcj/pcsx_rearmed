@@ -4,6 +4,7 @@
  */
 #ifndef PCSX_ARCADE_H8_H
 #define PCSX_ARCADE_H8_H
+#include <stddef.h>
 #include <stdint.h>
 #ifdef __cplusplus
 extern "C" {
@@ -67,6 +68,13 @@ typedef struct H8Status {
 } H8Status;
 H8CPU *h8_create(const H8Config *config);
 void h8_destroy(H8CPU *cpu);
+/* Savestates: registers, internal RAM/IO, peripherals and clocks as an
+ * opaque block of h8_state_size() bytes for this build, taken between
+ * h8_run_* calls. A restore keeps the configuration (ROM, callbacks) of the
+ * CPU it is applied to. */
+size_t h8_state_size(void);
+void h8_get_state(const H8CPU *cpu, void *state);
+void h8_set_state(H8CPU *cpu, const void *state);
 void h8_reset(H8CPU *cpu);
 /* Reset at a quiet CPU boundary, never from callbacks. Preserves ER/CCR,
  * internal RAM and mapped GPIO DDR/DR/PCR; resets other modeled peripherals,

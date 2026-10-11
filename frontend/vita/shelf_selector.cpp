@@ -291,8 +291,6 @@ extern "C" int VitaShelfSelector_Run(char *out_path, size_t out_size)
 static void pause_task(void *arg)
 {
     PauseTask *task = (PauseTask *)arg;
-    /* System 12 boards cannot be saved (retro_serialize refuses them):
-     * MAME sets get no save-state page. */
     const size_t length = strlen(task->game_path);
     const bool arcade = length > 4 && !strcasecmp(task->game_path + length - 4, ".zip");
     int option_count;
@@ -307,7 +305,7 @@ static void pause_task(void *arg)
         art = std::string(APP_ROOT "/snap/") + file.substr(0, file.size() - 4) + ".png";
     }
     const ShelfMenus menus = { options, option_count, (void *)task->game_path,
-        get_option, set_option, arcade ? 0 : 10, state_exists, arcade ? arcade_actions : NULL, arcade ? 1 : 0 };
+        get_option, set_option, 10, state_exists, arcade ? arcade_actions : NULL, arcade ? 1 : 0 };
     const ShelfConfig config = shelf_config(&menus);
     std::string title = g_game_path == task->game_path ? g_game_title : std::string();
     if (title.empty()) {

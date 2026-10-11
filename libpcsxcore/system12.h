@@ -46,6 +46,11 @@ int system12_load_regions(const system12_desc *desc, u8 *main, u8 *banked,
 		u8 *sub, u8 *wave);
 void system12_unload(void);
 int system12_active(void);
+/* Savestates (misc.c): the board's state after the PSX core's, through
+ * SaveFuncs. mode 1 saves, 0 loads; 0 on success. A state is for the build
+ * and the set that made it. system12_freeze_size: the bytes it writes. */
+int system12_freeze(void *f, int mode);
+size_t system12_freeze_size(void);
 #ifdef PCSX_SYSTEM12_PROFILE
 void system12_profile_counters(uint64_t *cycles, uint64_t *samples);
 #endif

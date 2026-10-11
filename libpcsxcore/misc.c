@@ -36,6 +36,10 @@
 #include "database.h"
 #include "zlib_wrapper.h"
 #include "revision.h"
+#ifdef PCSX_SYSTEM12
+#include "system12.h"
+#include "psxcounters.h"
+#endif
 
 #ifdef GPU_VITA_CTR
 extern void renderer_update_caches(int x, int y, int w, int h, int state_changed);
@@ -871,6 +875,23 @@ int SaveState(const char *file) {
 	mdecFreeze(f, 1);
 	ndrc_freeze(f, 1);
 	padFreeze(f, 1);
+#ifdef PCSX_SYSTEM12
+	/* Namco System 12, after the console's state: the RAM past 2 MB, VRAM
+	 * rows 512-1023, the arcade screen clock and the board. */
+	if (system12_active()) {
+		const u32 ram = psxRamSize;
+		SaveFuncs.write(f, "S12X", 4);
+		SaveFuncs.write(f, &ram, sizeof(ram));
+		SaveFuncs.write(f, psxRegs.ptrs.psxM + 0x200000, ram - 0x200000);
+		SaveFuncs.write(f, vram + 1024 * 512, 1024 * 512 * 2);
+		psxRcntArcadeFreeze(f, 1);
+		if (system12_freeze(f, 1)) {
+			memset(misc, 0xff, sizeof(*misc));
+			SaveFuncs.close(f);
+			return -1;
+		}
+	}
+#endif
 
 	memset(misc, 0xff, sizeof(*misc));
 	SaveFuncs.close(f);
@@ -881,6 +902,13 @@ int LoadState(const char *file) {
 	struct misc_save_data *misc = (void *)(psxRegs.ptrs.psxH + 0xf000);
 	u32 biosBranchCheckOld = psxRegs.biosBranchCheck;
 	u32 oldCP0sr = psxRegs.CP0.n.SR;
+#ifdef PCSX_SYSTEM12
+	/* The interpreter's cycle remainder and delayed load from a System 12
+	 * state: the CPU's after-load notice resets them, so they go back after. */
+	int arcade = 0;
+	u32 subCycle = 0, subCycleStep = 0, dloadVal[2] = { 0, 0 };
+	u8 dloadSel = 0, dloadReg[2] = { 0, 0 };
+#endif
 	union {
 		// save stack space
 		GPUFreeze_t gpu_hdr;
@@ -1001,6 +1029,31 @@ int LoadState(const char *file) {
 	}
 	ndrc_freeze(f, 0);
 	padFreeze(f, 0);
+#ifdef PCSX_SYSTEM12
+	if (system12_active()) {
+		char tag[4];
+		u32 ram = 0;
+		if (SaveFuncs.read(f, tag, 4) != 4 || memcmp(tag, "S12X", 4) ||
+		    SaveFuncs.read(f, &ram, sizeof(ram)) != (int)sizeof(ram) || ram != psxRamSize) {
+			SysPrintf("%s: not a savestate of this System 12 game\n", file);
+			goto cleanup;
+		}
+		SaveFuncs.read(f, psxRegs.ptrs.psxM + 0x200000, ram - 0x200000);
+		SaveFuncs.read(f, vram + 1024 * 512, 1024 * 512 * 2);
+#ifdef GPU_VITA_CTR
+		renderer_update_caches(0, 512, 1024, 512, 0);
+#endif
+		psxRcntArcadeFreeze(f, 0);
+		if (system12_freeze(f, 0))
+			goto cleanup;
+		arcade = 1;
+		subCycle = psxRegs.subCycle;
+		subCycleStep = psxRegs.subCycleStep;
+		dloadSel = psxRegs.dloadSel;
+		memcpy(dloadReg, psxRegs.dloadReg, sizeof(dloadReg));
+		memcpy(dloadVal, psxRegs.dloadVal, sizeof(dloadVal));
+	}
+#endif
 
 	events_restore();
 	if (Config.HLE)
@@ -1009,6 +1062,15 @@ int LoadState(const char *file) {
 		psxMemOnIsolate((psxRegs.CP0.n.SR >> 16) & 1);
 
 	psxCpu->Notify(R3000ACPU_NOTIFY_AFTER_LOAD_STATE, NULL);
+#ifdef PCSX_SYSTEM12
+	if (arcade) {
+		psxRegs.subCycle = subCycle;
+		psxRegs.subCycleStep = subCycleStep;
+		psxRegs.dloadSel = dloadSel;
+		memcpy(psxRegs.dloadReg, dloadReg, sizeof(dloadReg));
+		memcpy(psxRegs.dloadVal, dloadVal, sizeof(dloadVal));
+	}
+#endif
 
 	result = 0;
 cleanup:

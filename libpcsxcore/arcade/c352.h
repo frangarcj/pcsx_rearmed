@@ -30,6 +30,13 @@ unsigned c352_sample_rate(const C352 *c352);
 /* Writes interleaved FL, FR, RL, RR signed 16-bit samples. */
 void c352_generate(C352 *c352, int16_t *out_interleaved_4ch, size_t frames);
 
+/* Savestates: the voices and registers as an opaque block of
+ * c352_state_size() bytes for this build. A restore keeps the sample ROM
+ * and rate of the chip it is applied to. */
+size_t c352_state_size(void);
+void c352_get_state(const C352 *c352, void *state);
+void c352_set_state(C352 *c352, const void *state);
+
 #ifdef __cplusplus
 }
 #endif

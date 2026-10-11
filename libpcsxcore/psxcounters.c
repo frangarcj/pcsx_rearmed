@@ -785,5 +785,38 @@ s32 psxRcntFreeze( void *f, s32 Mode )
     return 0;
 }
 
+#ifdef PCSX_SYSTEM12
+s32 psxRcntArcadeFreeze( void *f, s32 Mode )
+{
+    /* psxRcntFreeze's load rewrites each count from the elapsed cycles and
+     * drops the part of a tick: the exact counters again. */
+    gzfreeze( &rcnts, sizeof(Rcnt) * CounterQuantity );
+    gzfreeze( &psxRegs.psxNextCounter, sizeof(psxRegs.psxNextCounter) );
+    gzfreeze( &psxRegs.psxNextsCounter, sizeof(psxRegs.psxNextsCounter) );
+    /* The interpreter's cycle remainder and delayed load, which the console
+     * state leaves out: without them timing drifts after a load. */
+    gzfreeze( &psxRegs.subCycle, sizeof(psxRegs.subCycle) );
+    gzfreeze( &psxRegs.subCycleStep, sizeof(psxRegs.subCycleStep) );
+    gzfreeze( &psxRegs.dloadSel, sizeof(psxRegs.dloadSel) );
+    gzfreeze( psxRegs.dloadReg, sizeof(psxRegs.dloadReg) );
+    gzfreeze( psxRegs.dloadVal, sizeof(psxRegs.dloadVal) );
+    /* The pending events as saved: loading the console state reschedules
+     * the counters before this clock is back, from the wrong screen time. */
+    gzfreeze( &psxRegs.interrupt, sizeof(psxRegs.interrupt) );
+    gzfreeze( psxRegs.intCycle, sizeof(psxRegs.intCycle) );
+    gzfreeze( psxRegs.event_cycles, sizeof(psxRegs.event_cycles) );
+    gzfreeze( &psxRegs.next_interupt, sizeof(psxRegs.next_interupt) );
+    gzfreeze( &source_screen, sizeof(source_screen) );
+    gzfreeze( &source_main_cycles, sizeof(source_main_cycles) );
+    gzfreeze( &source_epoch_cycles, sizeof(source_epoch_cycles) );
+    gzfreeze( &source_last_cycle, sizeof(source_last_cycle) );
+    gzfreeze( &hsync_steps, sizeof(hsync_steps) );
+
+    if (Mode == 0)
+        source_screen_updating = 0;
+    return 0;
+}
+#endif
+
 /******************************************************************************/
 // vim:ts=4:shiftwidth=4:expandtab

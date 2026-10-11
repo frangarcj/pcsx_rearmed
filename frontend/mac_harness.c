@@ -313,7 +313,7 @@ static void usage(const char *name)
     "[--trace FILE --trace-blocks N] [--cycle-snapshots FILE "
     "--snapshot-start CYCLES --snapshot-interval N] "
     "[--board-bus-trace FILE] [--system12-edge-trace FILE] [--system12-trace-shared-writes | --system12-trace-shared-accesses] "
-    "[--max-blocks N] [--icache] [--widescreen] [--drc] [--interactive [--art-dir DIR] [--pause-at N [--pause-script STEPS] [--pause-shot FILE.ppm]]...] [--system12-vblank-sync-only] [--system12-source-step] [--frontend-loop]\n"
+    "[--max-blocks N] [--icache] [--widescreen] [--save-state-at FRAME FILE] [--load-state FILE] [--drc] [--interactive [--art-dir DIR] [--pause-at N [--pause-script STEPS] [--pause-shot FILE.ppm]]...] [--system12-vblank-sync-only] [--system12-source-step] [--frontend-loop]\n"
     "       %s (--gpu-type1-test | --gpu-type1-test-1m)\n", name, name);
 }
 
@@ -594,6 +594,10 @@ int main(int argc, char **argv)
   int board_family = 12;
   int icache = 0;
   int widescreen = 0;
+  /* Savestate checks: save at a frame and run on; or start from a state. */
+  const char *save_state_path = NULL, *load_state_path = NULL;
+  unsigned save_state_at = 0;
+  int state_saved = 0;
   int use_drc = 0;
   int capture_gl = 0;
   int interactive = 0;
@@ -729,6 +733,11 @@ int main(int argc, char **argv)
     else if (!strcmp(argv[i], "--board-test")) board_test = 1;
     else if (!strcmp(argv[i], "--verify-smoke")) verify = 1;
     else if (!strcmp(argv[i], "--icache")) icache = 1;
+    else if (!strcmp(argv[i], "--save-state-at") && i + 2 < argc) {
+      save_state_at = (unsigned)atoi(argv[++i]);
+      save_state_path = argv[++i];
+    }
+    else if (!strcmp(argv[i], "--load-state") && i + 1 < argc) load_state_path = argv[++i];
     /* The Vita's 16:9 widescreen hook: the GTE squeezes the scene and the
      * vitagl-like renderer widens frames the GPU drew. */
     else if (!strcmp(argv[i], "--widescreen")) widescreen = 1;
@@ -1128,6 +1137,21 @@ int main(int argc, char **argv)
     fprintf(stderr, "Interactive: 5 coin, 1 start, arrows move, A/S/D/Space buttons, Escape pause\n");
   }
 #endif
+  if (!result && load_state_path) {
+    if (LoadState(load_state_path)) {
+      fprintf(stderr, "cannot load state %s\n", load_state_path);
+      result = 1;
+    }
+    else {
+      fprintf(stderr, "Loaded state %s: frame=%u cycle=%u\n", load_state_path, frame_counter, psxRegs.cycle);
+      /* --save-state-at 0 with a load: the state again at once, for a round-trip check. */
+      if (save_state_path && save_state_at == 0) {
+        state_saved = 1;
+        if (SaveState(save_state_path)) { fprintf(stderr, "cannot save state %s\n", save_state_path); result = 1; }
+        else fprintf(stderr, "Saved state %s right after the load\n", save_state_path);
+      }
+    }
+  }
   start_frame = frame_counter; prev_cycle = psxRegs.cycle;
   if (harness_configure_gl_capture(capture_gl, start_frame + frames - 1)) {
     fprintf(stderr, "failed to configure GL capture\n");
@@ -1290,6 +1314,17 @@ int main(int argc, char **argv)
       }
     }
 #endif
+    /* Between blocks, with the board caught up and no branch in flight. */
+    if (save_state_path && !state_saved && frame_counter - start_frame >= save_state_at &&
+        !psxRegs.branching && !source_step && !frontend_loop) {
+      state_saved = 1;
+      if (SaveState(save_state_path)) {
+        fprintf(stderr, "cannot save state %s\n", save_state_path);
+        result = 1;
+      }
+      else
+        fprintf(stderr, "Saved state %s: frame=%u cycle=%u\n", save_state_path, frame_counter, psxRegs.cycle);
+    }
     if (snapshots && snapshot_count < 200000 && cycles >= next_snapshot) {
       unsigned int r;
       fprintf(snapshots, "%" PRIu64 ",%u,%08x,%08x,%08x,%08x,%08x,%04x,%04x,%08x"

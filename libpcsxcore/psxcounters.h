@@ -63,6 +63,11 @@ u32 psxRcntRmode(u32 index);
 u32 psxRcntRtarget(u32 index);
 
 s32 psxRcntFreeze(void *f, s32 Mode);
+#ifdef PCSX_SYSTEM12
+/* The arcade source-timing screen clock, which psxRcntFreeze leaves out
+ * (System 12 savestates, misc.c). */
+s32 psxRcntArcadeFreeze(void *f, s32 Mode);
+#endif
 
 double psxGetFps();
 

@@ -26,6 +26,7 @@
 #include "gpu_vram.h"
 #include "arcade/serial_nvram.h"
 #include "arcade/at28c16.h"
+#include "misc.h"
 #include <errno.h>
 #ifdef SYSTEM12_BOARD_THREAD
 #include <stdatomic.h>
@@ -760,6 +761,90 @@ static void board_audio_out(const int16_t *stereo, unsigned frames)
 #endif
     if (board.audio_cb)
         board.audio_cb(board.audio_opaque, stereo, frames);
+}
+
+/* ---- savestates ---- */
+
+#define S12_STATE_MAGIC 0x53323153u /* "S12S" */
+#define S12_STATE_VERSION 1u
+
+size_t system12_freeze_size(void)
+{
+    return 5 * sizeof(u32) + sizeof(board) + sizeof(AT28C16State) + h8_state_size() + c352_state_size();
+}
+
+/* The board struct is saved whole; a load keeps what belongs to this run
+ * rather than to the game's state: ROMs, devices, callbacks, outputs and
+ * the loaded set's configuration. */
+static void restore_live_fields(const __typeof__(board) *live)
+{
+    board.main = live->main; board.banked = live->banked; board.sub = live->sub; board.wave = live->wave;
+    board.main_size = live->main_size; board.banked_size = live->banked_size;
+    board.sub_size = live->sub_size; board.wave_size = live->wave_size; board.ram_size = live->ram_size;
+    board.eeprom = live->eeprom; board.h8 = live->h8; board.pcm = live->pcm;
+    board.rtc.data_cb = live->rtc.data_cb; board.rtc.data_opaque = live->rtc.data_opaque;
+    board.settings.frame_cb = live->settings.frame_cb; board.settings.frame_opaque = live->settings.frame_opaque;
+    board.audio_file = live->audio_file; board.audio_cb = live->audio_cb; board.audio_opaque = live->audio_opaque;
+    board.audio_bytes = live->audio_bytes; board.audio_error = live->audio_error;
+    board.profile = live->profile; board.machine = live->machine; board.state = live->state;
+    board.unsupported = live->unsupported; board.boot_hack = live->boot_hack; board.alt_bank = live->alt_bank;
+    board.tektagt_dma = live->tektagt_dma; board.has_tektagt_dma = live->has_tektagt_dma;
+    board.profile_owned = live->profile_owned; board.active = live->active;
+}
+
+int system12_freeze(void *f, int mode)
+{
+    u32 header[5] = { S12_STATE_MAGIC, S12_STATE_VERSION, (u32)sizeof(board), (u32)h8_state_size(),
+        (u32)c352_state_size() };
+    AT28C16State eeprom;
+    void *h8 = malloc(h8_state_size()), *pcm = malloc(c352_state_size());
+    int result = -1;
+
+    if (!board.active || !h8 || !pcm)
+        goto done;
+    /* The board thread finishes what it was given: its devices are idle. */
+    board_drain();
+    if (mode) {
+        if (at28c16_get_state(board.eeprom, &eeprom))
+            goto done;
+        h8_get_state(board.h8, h8);
+        c352_get_state(board.pcm, pcm);
+        SaveFuncs.write(f, header, sizeof(header));
+        SaveFuncs.write(f, &board, sizeof(board));
+        SaveFuncs.write(f, &eeprom, sizeof(eeprom));
+        SaveFuncs.write(f, h8, h8_state_size());
+        SaveFuncs.write(f, pcm, c352_state_size());
+        result = 0;
+    } else {
+        u32 saved[5];
+        __typeof__(board) live = board;
+        if (SaveFuncs.read(f, saved, sizeof(saved)) != (int)sizeof(saved) || memcmp(saved, header, sizeof(header))) {
+            SysPrintf("System12: the savestate is from another build or not a System 12 one\n");
+            goto done;
+        }
+        if (SaveFuncs.read(f, &board, sizeof(board)) != (int)sizeof(board) ||
+            SaveFuncs.read(f, &eeprom, sizeof(eeprom)) != (int)sizeof(eeprom) ||
+            SaveFuncs.read(f, h8, h8_state_size()) != (int)h8_state_size() ||
+            SaveFuncs.read(f, pcm, c352_state_size()) != (int)c352_state_size()) {
+            board = live;
+            SysPrintf("System12: the savestate is truncated\n");
+            goto done;
+        }
+        restore_live_fields(&live);
+        at28c16_set_state(board.eeprom, &eeprom);
+        h8_set_state(board.h8, h8);
+        c352_set_state(board.pcm, pcm);
+#ifdef SYSTEM12_BOARD_THREAD
+        /* Sound the board made before the load is not this game's any more. */
+        if (bt.active)
+            atomic_store(&bt.audio_tail, atomic_load(&bt.audio_head));
+#endif
+        result = 0;
+    }
+done:
+    free(h8);
+    free(pcm);
+    return result;
 }
 
 void system12_audio_pump(void)

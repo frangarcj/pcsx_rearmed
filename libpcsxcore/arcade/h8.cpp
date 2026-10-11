@@ -486,6 +486,19 @@ H8CPU *h8_create(const H8Config *config) {
     return cpu;
 }
 void h8_destroy(H8CPU *cpu) {delete cpu;}
+size_t h8_state_size(void) {return sizeof(H8CPU);}
+void h8_get_state(const H8CPU *cpu,void *state) {memcpy(state,(const void *)cpu,sizeof(*cpu));}
+void h8_set_state(H8CPU *cpu,const void *state) {
+    /* Plain data but for the configuration and the peripherals' callbacks
+     * into this CPU, which stay this CPU's. */
+    const H8Config config=cpu->config;
+    memcpy((void *)cpu,state,sizeof(*cpu));
+    cpu->config=config;
+    cpu->bind_peripherals();
+    cpu->next_event_valid=false;
+    cpu->irq_regs_dirty=true;
+    cpu->in_run=cpu->executing_state=cpu->deadline_run=false;
+}
 void h8_reset(H8CPU *c) {
     if(!c)return;
     H8CPU::SyncTimerState old_timers[2]={c->sync_timer[0],c->sync_timer[1]};

@@ -911,8 +911,10 @@ static void input_poll_cb(void)
         const bool combo_down = (g_pad.buttons & pause_mask) == pause_mask;
         if (combo_down && !g_pause_combo_down)
             g_pause_requested = true;
+#ifdef STANDALONE_VITAGL
             /* The frame this run presents is the menu's backdrop. */
             pcsx_menu_backdrop_request = 1;
+#endif
         g_pause_combo_down = combo_down;
         return;
     }

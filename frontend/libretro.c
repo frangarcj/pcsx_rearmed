@@ -1340,14 +1340,14 @@ size_t retro_serialize_size(void)
    if (systemgnet_active())
       return 0;
 #endif
-#ifdef ARCADE_SYSTEM12
-   /* The generic state format hard-codes console RAM/ROM and does not freeze
-    * the System12 H8, C352, EEPROM, RTC, or board registers. */
-   if (system12_active())
-      return 0;
-#endif
    // it's currently 4380651-4397047 bytes,
    // but have some reserved for future
+#ifdef ARCADE_SYSTEM12
+   /* System 12 (misc.c): the RAM past 2 MB, VRAM rows 512-1023, the arcade
+    * screen clock (under 4 KB) and the board. */
+   if (system12_active())
+      return 0x440000 + (psxRamSize - 0x200000) + 0x100000 + 0x1000 + system12_freeze_size();
+#endif
    return 0x440000;
 }
 
@@ -1443,10 +1443,6 @@ bool retro_serialize(void *data, size_t size)
    if (systemgnet_active())
       return false;
 #endif
-#ifdef ARCADE_SYSTEM12
-   if (system12_active())
-      return false;
-#endif
    CdromFrontendId = disk_current_index;
    ret = SaveState(data);
 
@@ -1462,10 +1458,6 @@ bool retro_unserialize(const void *data, size_t size)
    int ret;
 #ifdef PCSX_SYSTEM_GNET
    if (systemgnet_active())
-      return false;
-#endif
-#ifdef ARCADE_SYSTEM12
-   if (system12_active())
       return false;
 #endif
    CdromFrontendId = -1;

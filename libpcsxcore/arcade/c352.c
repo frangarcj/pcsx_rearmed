@@ -217,6 +217,21 @@ C352 *c352_create(const uint8_t *rom, size_t rom_size,
 
 void c352_destroy(C352 *c) { free(c); }
 
+size_t c352_state_size(void) { return sizeof(C352); }
+
+void c352_get_state(const C352 *c, void *state) { memcpy(state, c, sizeof(*c)); }
+
+void c352_set_state(C352 *c, const void *state)
+{
+    const uint8_t *rom = c->rom;
+    const size_t rom_size = c->rom_size;
+    const unsigned sample_rate = c->sample_rate;
+    memcpy(c, state, sizeof(*c));
+    c->rom = rom;
+    c->rom_size = rom_size;
+    c->sample_rate = sample_rate;
+}
+
 void c352_reset(C352 *c)
 {
     if (!c) return;
