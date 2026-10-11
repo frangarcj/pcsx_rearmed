@@ -482,6 +482,33 @@ static void generate_voice_major(C352 *c, int16_t *out, size_t frames)
 #endif
 }
 
+size_t c352_flags_stable_frames(const C352 *c)
+{
+    size_t stable = SIZE_MAX;
+    unsigned j;
+    if (!c) return 0;
+    for (j = 0; j < 32; ++j) {
+        const C352Voice *v = &c->voice[j];
+        uint64_t fetches, need, frames;
+        if (!(v->flags & C352_FLG_BUSY) || (v->flags & C352_FLG_NOISE))
+            continue;   /* noise voices never change their flags */
+        if (v->flags & C352_FLG_REVERSE)
+            return 0;
+        if (!v->freq)
+            continue;   /* never fetches */
+        /* The fetch that reads pos == wave_end changes the flags: the
+         * (d + 1)th fetch from here. A frame fetches when its counter
+         * passes 0x10000 (freq < 0x10000: at most one per frame), so the
+         * kth fetch is in frame ceil((k * 0x10000 - counter) / freq). */
+        fetches = (uint16_t)(v->wave_end - (uint16_t)v->pos) + 1u;
+        need = fetches * 0x10000u - v->counter;
+        frames = (need + v->freq - 1) / v->freq;
+        if (frames - 1 < stable)
+            stable = (size_t)(frames - 1);
+    }
+    return stable;
+}
+
 void c352_generate(C352 *c, int16_t *out, size_t frames)
 {
     size_t done;
@@ -496,6 +523,29 @@ void c352_generate(C352 *c, int16_t *out, size_t frames)
         if ((c->voice[j].flags & (C352_FLG_BUSY | C352_FLG_NOISE)) ==
             (C352_FLG_BUSY | C352_FLG_NOISE))
             noise = 1;
+#if !defined(__vita__)
+    {
+        static int trace = -1;
+        static unsigned long calls, total, slow_noise, slow_short, busy_sum;
+        if (trace < 0) trace = getenv("PCSX_TRACE_C352") != NULL;
+        if (trace) {
+            unsigned b = 0;
+            for (j = 0; j < 32; ++j) b += !!(c->voice[j].flags & C352_FLG_BUSY);
+            calls++; total += frames; busy_sum += b;
+            if (noise) slow_noise++; else if (frames < 2) slow_short++;
+            if (total >= c->sample_rate) {
+                fprintf(stderr, "c352: %lu calls/s, %.1f frames/call, busy voices %.1f, slow noise %lu short %lu\n",
+                    calls, (double)total / calls, (double)busy_sum / calls, slow_noise, slow_short);
+                {
+                    extern unsigned long system12_pcm_origin_h8, system12_pcm_origin_sync;
+                    fprintf(stderr, "c352 syncs: H8 accesses %lu, board SYNC %lu\n", system12_pcm_origin_h8, system12_pcm_origin_sync);
+                    system12_pcm_origin_h8 = system12_pcm_origin_sync = 0;
+                }
+                calls = total = slow_noise = slow_short = busy_sum = 0;
+            }
+        }
+    }
+#endif
     for (done = 0; done < frames; ) {
         size_t n = frames - done > C352_BLOCK ? C352_BLOCK : frames - done;
         if (noise || n < 2)

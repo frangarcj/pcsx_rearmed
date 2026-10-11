@@ -1333,6 +1333,12 @@ static void print_wait_stats(unsigned runs)
         WAIT_FIELD("b_c352", system12_pcm_us - last_pcm, 0);
         last_h8 = system12_h8_us;
         last_pcm = system12_pcm_us;
+        extern unsigned long long system12_h8_instructions, system12_h8_shared;
+        static unsigned long long last_ins, last_shared;
+        at += snprintf(line + at, sizeof(line) - at, " h8_ins=%llu h8_shared=%llu",
+            (system12_h8_instructions - last_ins) / frames, (system12_h8_shared - last_shared) / frames);
+        last_ins = system12_h8_instructions;
+        last_shared = system12_h8_shared;
     }
     last_board_us = system12_board_wait_us;
     last_board_n = system12_board_wait_n;

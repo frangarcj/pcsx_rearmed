@@ -29,6 +29,11 @@ void c352_write(C352 *c352, uint32_t word_offset,
 unsigned c352_sample_rate(const C352 *c352);
 /* Writes interleaved FL, FR, RL, RR signed 16-bit samples. */
 void c352_generate(C352 *c352, int16_t *out_interleaved_4ch, size_t frames);
+/* How many frames c352_generate can make before a voice's flags register
+ * can change (a voice reaching its wave end or loop point); voices played
+ * in reverse count as changing at once. Registers other than the voices'
+ * flags never change by generating. */
+size_t c352_flags_stable_frames(const C352 *c352);
 
 /* Savestates: the voices and registers as an opaque block of
  * c352_state_size() bytes for this build. A restore keeps the sample ROM

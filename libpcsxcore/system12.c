@@ -92,6 +92,12 @@ static struct {
     int slice_open, slice_ran;
 } board;
 static void pcm_sync_h8(void);
+/* Until this stream frame no C352 voice flags can change: an H8 read of the
+ * flags at or before it needs no generating (0: unknown). Not in `board`,
+ * whose size the savestates check. */
+static u64 pcm_flags_until;
+static void pcm_flags_horizon(void);
+static int pcm_access_needs_sync(unsigned reg, int write, u16 value, u16 mask);
 typedef struct board_cmd board_cmd;
 static void board_post(const board_cmd *c);
 static void board_drain(void);
@@ -380,8 +386,10 @@ static u8 sub_read8(void *opaque, u32 address)
         return value;
     }
     if (address >= 0x280000 && address < 0x288000) {
-        pcm_sync_h8();
-        u16 word = c352_read(board.pcm, (address - 0x280000) / 2);
+        const unsigned reg = (address - 0x280000) / 2;
+        if (pcm_access_needs_sync(reg, 0, 0, 0))
+            pcm_sync_h8();
+        u16 word = c352_read(board.pcm, reg);
         return address & 1 ? word : word >> 8;
     }
     /* Default JVS reads are active-low with all controls released. */
@@ -400,9 +408,12 @@ static void sub_write8(void *opaque, u32 address, u8 value)
     }
     else if (address >= 0x280000 && address < 0x288000) {
         unsigned shift = address & 1 ? 0 : 8;
-        pcm_sync_h8();
-        c352_write(board.pcm, (address - 0x280000) / 2,
-            (u16)value << shift, 0xffu << shift);
+        const unsigned reg = (address - 0x280000) / 2;
+        if (pcm_access_needs_sync(reg, 1, (u16)value << shift, 0xffu << shift)) {
+            pcm_sync_h8();
+            c352_write(board.pcm, reg, (u16)value << shift, 0xffu << shift);
+            pcm_flags_horizon();
+        }
     }
 }
 
@@ -444,8 +455,12 @@ static u16 sub_read16(void *opaque, u32 address)
 static void sub_write16(void *opaque, u32 address, u16 value)
 {
     if (address >= 0x280000 && address < 0x288000) {
-        pcm_sync_h8();
-        c352_write(board.pcm, (address - 0x280000) / 2, value, 0xffff);
+        const unsigned reg = (address - 0x280000) / 2;
+        if (pcm_access_needs_sync(reg, 1, value, 0xffff)) {
+            pcm_sync_h8();
+            c352_write(board.pcm, reg, value, 0xffff);
+            pcm_flags_horizon();
+        }
     } else if (address >= 0x080000 && address < 0x08ffff) {
         board.shared[(address - 0x080000) ^ 1] = value >> 8;
         board.shared[((address + 1) - 0x080000) ^ 1] = value;
@@ -512,6 +527,13 @@ static int eeprom_advance_cycles(u32 elapsed)
     return at28c16_advance_to_us(board.eeprom, board.eeprom_time_us);
 }
 
+static void pcm_flags_horizon(void)
+{
+    const size_t stable = c352_flags_stable_frames(board.pcm);
+    pcm_flags_until = stable > UINT64_MAX - board.pcm_frames
+        ? UINT64_MAX : board.pcm_frames + stable;
+}
+
 /* One monotonic stream cursor for register catch-up and board catch-up. */
 static void pcm_generate_to(u64 target)
 {
@@ -538,19 +560,54 @@ static void pcm_generate_to(u64 target)
             SysPrintf("System12: WAV audio write failed\n");
         board.pcm_frames += frames;
     }
+    pcm_flags_horizon();
 }
 
+
+#if !defined(__vita__)
+unsigned long system12_pcm_origin_h8, system12_pcm_origin_sync;
+#define PCM_ORIGIN(i) ((i) ? system12_pcm_origin_sync++ : system12_pcm_origin_h8++)
+#else
+#define PCM_ORIGIN(i)
+#endif
 static void pcm_sync_h8(void)
 {
     u64 target;
+    PCM_ORIGIN(0);
     if (system12_audio_clock_advance(&board.pcm_h8_clock,
             h8_current_cycle(board.h8), &target) == 0)
         pcm_generate_to(target);
 }
 
+/* Whether the stream must reach the H8's time before it accesses C352
+ * register reg (writing value under mask, or reading when !write). The
+ * sound program reads voice flags and rewrites unchanged values about
+ * once per sample: generating one frame at a time cost Soul Calibur up to
+ * 9 ms a frame. Generating changes no register but the voices' flags, and
+ * those only at a wave end (c352_flags_stable_frames); the stream is the
+ * same whenever it is made, as long as it is made before a register
+ * changes. */
+static int pcm_access_needs_sync(unsigned reg, int write, u16 value, u16 mask)
+{
+    const int flags = reg < 0x100 && reg % 8 == 3;
+    u64 target;
+    if (write) {
+        const u16 old = c352_read(board.pcm, reg);
+        if (reg == 0x202 || ((old & ~mask) | (value & mask)) != old)
+            return 1;
+    }
+    if (!flags)
+        return 0;
+    if (system12_audio_clock_advance(&board.pcm_h8_clock, h8_current_cycle(board.h8), &target))
+        return 0;
+    return !pcm_flags_until || target > pcm_flags_until;
+}
+
 #ifdef __vita__
 /* The board's time split: H8, C352 (for the progress lines). */
 unsigned long long system12_h8_us, system12_pcm_us;
+/* H8 instructions run and its shared RAM accesses, totals. */
+unsigned long long system12_h8_instructions, system12_h8_shared;
 #endif
 
 static void board_exec(const board_cmd *c)
@@ -574,6 +631,7 @@ static void board_exec(const board_cmd *c)
         system12_h8_us += sceKernelGetProcessTimeWide() - t0;
         t0 = sceKernelGetProcessTimeWide();
 #endif
+        PCM_ORIGIN(1);
         pcm_generate_to(c->pcm_target);
 #ifdef __vita__
         system12_pcm_us += sceKernelGetProcessTimeWide() - t0;
@@ -582,9 +640,21 @@ static void board_exec(const board_cmd *c)
     case BOARD_CMD_VBLANK:
         if (c->run_h8) {
             started = pcsx_profile_begin(PCSX_PROF_H8, 1);
+#ifdef __vita__
+            t0 = sceKernelGetProcessTimeWide();
+#endif
             if (h8_run_until(board.h8, c->h8_target))
                 SysPrintf("System12: invalid H8 screen deadline\n");
             pcsx_profile_end(PCSX_PROF_H8, started);
+#ifdef __vita__
+            system12_h8_us += sceKernelGetProcessTimeWide() - t0;
+            {
+                H8Status status;
+                h8_get_status(board.h8, &status);
+                system12_h8_instructions = status.instructions;
+                system12_h8_shared = board.shared_reads + board.shared_writes;
+            }
+#endif
             h8_set_irq(board.h8, 1, c->level);
             h8_adc_trigger(board.h8, c->level);
             board.portb = (board.portb & 0x7f) | (c->level ? 0x80 : 0);
@@ -863,6 +933,7 @@ int system12_freeze(void *f, int mode)
         at28c16_set_state(board.eeprom, &eeprom);
         h8_set_state(board.h8, h8);
         c352_set_state(board.pcm, pcm);
+        pcm_flags_until = 0;
 #ifdef SYSTEM12_BOARD_THREAD
         /* Sound the board made before the load is not this game's any more. */
         if (bt.active)
@@ -1431,6 +1502,7 @@ void system12_reset(void)
         board.dma_offset = board.alt_bank_offset = board.tektagt_dma_offset = 0;
         board.h8_fraction = board.h8_requested = 0;
         board.pcm_fraction = board.pcm_due = board.pcm_frames = 0;
+        pcm_flags_until = 0;
         memset(&board.pcm_h8_clock, 0, sizeof(board.pcm_h8_clock));
         board.port8 = board.porta = 0; board.portb = 0x50;
         board.jvs_player[0] = board.jvs_player[1] = board.jvs_system = 0;
