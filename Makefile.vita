@@ -136,6 +136,15 @@ UI_LIBS := -limgui
 endif
 # Screenshots on request for hardware debugging (frontend/vita/shelf_common.h).
 VITA_DEBUG_SHOT ?= 0
+# Release builds (RELEASE=1, the published VPKs): no debugging aids, and the
+# app does not keep the console awake while a game runs.
+RELEASE ?= 0
+ifeq ($(RELEASE),1)
+ifeq ($(VITA_DEBUG_SHOT),1)
+$(error RELEASE=1 excludes VITA_DEBUG_SHOT=1)
+endif
+CFLAGS += -DPCSX_RELEASE
+endif
 ifeq ($(REARCADE)$(VITA_DEBUG_SHOT),11)
 CFLAGS += -DVITA_DEBUG_SHOT
 endif

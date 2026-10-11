@@ -1504,8 +1504,13 @@ static int run_ui_game(const char *game_path)
             }
 #endif
             pace_frame();
-            if (++runs % 60 == 0)
+            ++runs;
+#ifndef PCSX_RELEASE
+            /* Development builds keep the console awake for remote runs;
+             * releases leave suspend and screen off to the system. */
+            if (runs % 60 == 0)
                 sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
+#endif
 #ifdef VITA_DEBUG_SHOT
             if (runs % 60 == 0) {
                 static SceUInt64 last;
