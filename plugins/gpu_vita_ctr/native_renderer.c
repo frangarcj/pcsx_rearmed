@@ -946,6 +946,16 @@ int VitaCtrNativeRenderer_GetAspectMode(void)
 	return s_presentAspectMode;
 }
 
+/* Where the last frame was presented in the window (GL pixels): what a
+ * snapshot of the game reads. */
+void VitaCtrNativeRenderer_GetFrameViewport(int rect[4])
+{
+	rect[0] = s_frameViewport.x;
+	rect[1] = s_frameViewport.y;
+	rect[2] = s_frameViewport.w;
+	rect[3] = s_frameViewport.h;
+}
+
 internal void NativeRenderer_InitRenderTarget(struct NativeRenderTarget *target)
 {
 	target->texture = (TextureID)-1;
@@ -4974,13 +4984,100 @@ internal int NativeRenderer_OverlayTarget(const struct NativeRenderTarget *targe
  * packed to 15-bit PSX pixels; borders and CPU uploads stay as presented.
  * Then the main target becomes the previous one; the next scene reloads its
  * replacement from VRAM. */
+/* The target the last present drew over the display, for a menu's redraw
+ * of that frame (the targets swap after a present; no scene is drawn while
+ * a menu is up, so its texture is still the one shown). */
+global_variable struct NativeRenderTarget s_shownOverlay;
+global_variable RECT16 s_shownOverlayRect;
+global_variable int s_shownOverlayValid;
+
+/* The window as last presented, kept for a menu drawn over the game: by
+ * the time a menu opens the game may be drawing its next frame into the
+ * target that was shown, so the frame is copied when it is presented. */
+global_variable struct NativeRenderTarget s_backdrop;
+global_variable int s_backdropValid;
+
+void NativeRenderer_CaptureBackdrop(void)
+{
+	const int width = g_windowWidth, height = g_windowHeight;
+	if (width <= 0 || height <= 0)
+		return;
+	u8 *pixels = (u8 *)malloc((size_t)width * height * 4);
+	if (!pixels)
+		return;
+	/* The window's own framebuffer, whatever target is bound now. */
+	GLint previousFramebuffer = 0;
+	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previousFramebuffer);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glFinish();
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)previousFramebuffer);
+	if (s_backdrop.texture == 0)
+		glGenTextures(1, &s_backdrop.texture);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, s_backdrop.texture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	free(pixels);
+	s_backdrop.width = s_backdrop.allocWidth = width;
+	s_backdrop.height = s_backdrop.allocHeight = height;
+	s_backdropValid = 1;
+	s_lastBoundTexture = (TextureID)-1;
+}
+
+/* Before a menu's redraw of the frame: whatever GL state the menu restored
+ * (its own drawing keeps the GL state it found, not this file's caches),
+ * no scissor, stencil, blending or depth may touch the redraw. */
+void NativeRenderer_BeginMenuRedraw(void)
+{
+	glDisable(GL_SCISSOR_TEST);
+	glDisable(GL_STENCIL_TEST);
+	glDisable(GL_BLEND);
+	glDisable(GL_DEPTH_TEST);
+	glDepthMask(GL_FALSE);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	s_previousScissorState = 0;
+	s_previousBlendMode = BM_NONE;
+	s_previousMixedSTPBlend = 0;
+	s_previousDepthMode = 0;
+	s_previousDepthWrite = 0;
+	NativeRenderer_InvalidateScissorRectCache();
+}
+
+/* Draws the captured frame over the whole window; 0 if there is none. */
+int NativeRenderer_PresentBackdrop(void)
+{
+	if (!s_backdropValid)
+		return 0;
+	NativeRenderer_DrawMainTarget(&s_backdrop, 0, 0, g_windowWidth, g_windowHeight, 0, NULL);
+	return 1;
+}
+
+void NativeRenderer_InvalidateBackdrop(void)
+{
+	s_backdropValid = 0;
+}
+
 void NativeRenderer_PresentMainOverlay(int displayX, int displayY, int displayW, int displayH)
 {
-	if (!s_mainLoaded || s_mainDirty ||
-	    !NativeRenderer_OverlayTarget(&s_mainRenderTarget, &s_mainDrawRect, displayX, displayY, displayW, displayH))
+	s_shownOverlayValid = 0;
+	if (s_mainLoaded && !s_mainDirty &&
+	    NativeRenderer_OverlayTarget(&s_mainRenderTarget, &s_mainDrawRect, displayX, displayY, displayW, displayH))
 	{
-		if (s_prevMainValid)
-			NativeRenderer_OverlayTarget(&s_prevMainRenderTarget, &s_prevMainRect, displayX, displayY, displayW, displayH);
+		s_shownOverlay = s_mainRenderTarget;
+		s_shownOverlayRect = s_mainDrawRect;
+		s_shownOverlayValid = 1;
+	}
+	else if (s_prevMainValid &&
+	         NativeRenderer_OverlayTarget(&s_prevMainRenderTarget, &s_prevMainRect, displayX, displayY, displayW, displayH))
+	{
+		s_shownOverlay = s_prevMainRenderTarget;
+		s_shownOverlayRect = s_prevMainRect;
+		s_shownOverlayValid = 1;
 	}
 	if (s_mainLoaded && !s_mainDirty && s_mainDrawRect.w > 0 && s_mainDrawRect.h > 0)
 	{
@@ -4991,6 +5088,13 @@ void NativeRenderer_PresentMainOverlay(int displayX, int displayY, int displayW,
 		s_prevMainValid = 1;
 		s_mainLoaded = 0;
 	}
+}
+
+/* The last present's overlay again, without the swap (a menu's redraw). */
+void NativeRenderer_PresentShownOverlay(int displayX, int displayY, int displayW, int displayH)
+{
+	if (s_shownOverlayValid)
+		NativeRenderer_OverlayTarget(&s_shownOverlay, &s_shownOverlayRect, displayX, displayY, displayW, displayH);
 }
 #endif
 

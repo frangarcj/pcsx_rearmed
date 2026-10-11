@@ -82,6 +82,7 @@ static uint8_t *g_capture_rgb;
 /* The vitaGL GPU presents by itself, so video_cb never sees its pixels: it
  * reads its next picture back once asked, into capture_gl_frame. */
 extern volatile int pcsx_vita_gl_capture_request;
+extern volatile int pcsx_menu_backdrop_request;
 extern void (*pcsx_vita_gl_capture_store)(const uint8_t *rgba, unsigned y, unsigned rows,
                                           unsigned width, unsigned height);
 #endif
@@ -910,6 +911,8 @@ static void input_poll_cb(void)
         const bool combo_down = (g_pad.buttons & pause_mask) == pause_mask;
         if (combo_down && !g_pause_combo_down)
             g_pause_requested = true;
+            /* The frame this run presents is the menu's backdrop. */
+            pcsx_menu_backdrop_request = 1;
         g_pause_combo_down = combo_down;
         return;
     }

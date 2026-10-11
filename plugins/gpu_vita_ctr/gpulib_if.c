@@ -168,6 +168,10 @@ static void capture_gl_frame(void)
 }
 #endif
 
+/* Set by a frontend when a menu is about to open over the game: the next
+ * present keeps a copy of the frame (VitaCtrNativeRenderer_PresentCurrentFrame). */
+volatile int pcsx_menu_backdrop_request;
+
 void Platform_EndScene(void)
 {
     const DISPENV *display = NativeGpu_GetRenderDispEnv();
@@ -190,6 +194,14 @@ void Platform_EndScene(void)
         NativeRenderer_PresentVRAMRect(display->disp.x, display->disp.y, display->disp.w, display->disp.h);
         NativeRenderer_PresentMainOverlay(display->disp.x, display->disp.y, display->disp.w, display->disp.h);
     }
+    const int keep_backdrop = pcsx_menu_backdrop_request;
+    pcsx_menu_backdrop_request = 0;
+    if (!keep_backdrop)
+        NativeRenderer_InvalidateBackdrop();
+#ifndef __vita__
+    else
+        NativeRenderer_CaptureBackdrop(); /* the back buffer, before the swap */
+#endif
 #if defined(PCSX_NATIVE_VITA_PATH) && !defined(__vita__)
     extern void harness_capture_gl_frame(unsigned int frame);
     if (pl_rearmed_cbs.gpu_frame_count != NULL)
@@ -197,6 +209,12 @@ void Platform_EndScene(void)
 #endif
     NativeRenderer_SwapWindow();
 #if defined(__vita__)
+    if (keep_backdrop) {
+        /* vitaGL ends the scene at the swap: the front buffer holds it. */
+        glReadBuffer(GL_FRONT);
+        NativeRenderer_CaptureBackdrop();
+        glReadBuffer(GL_BACK);
+    }
     if (pcsx_vita_gl_capture_request && pcsx_vita_gl_capture_store) {
         pcsx_vita_gl_capture_request = 0;
         capture_gl_frame();
@@ -207,6 +225,10 @@ void Platform_EndScene(void)
 /* The last frame again, for a menu drawn over it on the renderer thread. */
 void VitaCtrNativeRenderer_PresentCurrentFrame(void)
 {
+    NativeRenderer_BeginMenuRedraw();
+    /* The frame as it was presented, if it was kept for this menu. */
+    if (NativeRenderer_PresentBackdrop())
+        return;
     const DISPENV *display = NativeGpu_GetRenderDispEnv();
 
     if (NativeGpu_GetRenderDisplayBlank())
@@ -215,7 +237,7 @@ void VitaCtrNativeRenderer_PresentCurrentFrame(void)
         NativeRenderer_PresentVRAMDisplay();
     else {
         NativeRenderer_PresentVRAMRect(display->disp.x, display->disp.y, display->disp.w, display->disp.h);
-        NativeRenderer_PresentMainOverlay(display->disp.x, display->disp.y, display->disp.w, display->disp.h);
+        NativeRenderer_PresentShownOverlay(display->disp.x, display->disp.y, display->disp.w, display->disp.h);
     }
 }
 
