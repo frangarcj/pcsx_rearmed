@@ -1322,6 +1322,18 @@ static void print_wait_stats(unsigned runs)
 #endif
 #ifdef ARCADE_SYSTEM12
     WAIT_FIELD("board", system12_board_wait_us - last_board_us, system12_board_wait_n - last_board_n);
+    {
+        extern unsigned long long system12_board_busy_us;
+        static unsigned long long last_board_busy;
+        WAIT_FIELD("b_busy", system12_board_busy_us - last_board_busy, 0);
+        last_board_busy = system12_board_busy_us;
+        extern unsigned long long system12_h8_us, system12_pcm_us;
+        static unsigned long long last_h8, last_pcm;
+        WAIT_FIELD("b_h8", system12_h8_us - last_h8, 0);
+        WAIT_FIELD("b_c352", system12_pcm_us - last_pcm, 0);
+        last_h8 = system12_h8_us;
+        last_pcm = system12_pcm_us;
+    }
     last_board_us = system12_board_wait_us;
     last_board_n = system12_board_wait_n;
 #endif
@@ -1334,6 +1346,37 @@ static void print_wait_stats(unsigned runs)
         WAIT_FIELD("gpu_thread", gpu_async_wait_us - last_gpu_us, gpu_async_wait_n - last_gpu_n);
         last_gpu_us = gpu_async_wait_us;
         last_gpu_n = gpu_async_wait_n;
+#ifdef VITA_DEBUG_SHOT
+        {
+            /* The GPU thread's busy time: lists, presents, DMA writes;
+             * and the command words per frame. */
+            extern unsigned long long gpu_async_busy_us[3], gpu_async_words;
+            static unsigned long long last_busy[3], last_words;
+            static const char *const busy_names[3] = { "g_list", "g_present", "g_dma" };
+            for (int i = 0; i < 3; i++) {
+                WAIT_FIELD(busy_names[i], gpu_async_busy_us[i] - last_busy[i], 0);
+                last_busy[i] = gpu_async_busy_us[i];
+            }
+            at += snprintf(line + at, sizeof(line) - at, " words=%llu", (gpu_async_words - last_words) / frames);
+            last_words = gpu_async_words;
+            {
+                extern unsigned gpu_async_waits_by[4];
+                extern unsigned long long gpu_async_wait_us_by[4];
+                static unsigned last_by[4];
+                static unsigned long long last_us_by[4];
+                static const char *const why[4] = { "w_other", "w_vramwrite", "w_vramread", "w_full" };
+                extern int gpu_async_write_last[4];
+                at += snprintf(line + at, sizeof(line) - at, " lastwrite=%dx%d@%d,%d/%dw",
+                    gpu_async_write_last[0], gpu_async_write_last[1], gpu_async_write_last[3] & 0xffff,
+                    gpu_async_write_last[3] >> 16, gpu_async_write_last[2]);
+                for (int i = 0; i < 4; i++) {
+                    WAIT_FIELD(why[i], gpu_async_wait_us_by[i] - last_us_by[i], gpu_async_waits_by[i] - last_by[i]);
+                    last_by[i] = gpu_async_waits_by[i];
+                    last_us_by[i] = gpu_async_wait_us_by[i];
+                }
+            }
+        }
+#endif
     }
 #endif
     WAIT_FIELD("vblank", g_vblank_wait_us - last_vblank_us, g_vblank_wait_n - last_vblank_n);

@@ -548,18 +548,36 @@ static void pcm_sync_h8(void)
         pcm_generate_to(target);
 }
 
+#ifdef __vita__
+/* The board's time split: H8, C352 (for the progress lines). */
+unsigned long long system12_h8_us, system12_pcm_us;
+#endif
+
 static void board_exec(const board_cmd *c)
 {
     uint64_t started;
+#ifdef __vita__
+    SceUInt64 t0;
+#endif
     switch (c->kind) {
     case BOARD_CMD_SYNC:
         if (c->rtc_seconds) rtc4543_advance_seconds(&board.rtc, c->rtc_seconds);
         started = pcsx_profile_begin(PCSX_PROF_H8, 1);
+#ifdef __vita__
+        t0 = sceKernelGetProcessTimeWide();
+#endif
         if (!c->run_h8) ;
         else if (c->run_until) h8_run_until(board.h8, c->h8_target);
         else h8_run_cycles(board.h8, c->h8_cycles);
         pcsx_profile_end(PCSX_PROF_H8, started);
+#ifdef __vita__
+        system12_h8_us += sceKernelGetProcessTimeWide() - t0;
+        t0 = sceKernelGetProcessTimeWide();
+#endif
         pcm_generate_to(c->pcm_target);
+#ifdef __vita__
+        system12_pcm_us += sceKernelGetProcessTimeWide() - t0;
+#endif
         break;
     case BOARD_CMD_VBLANK:
         if (c->run_h8) {
@@ -668,6 +686,11 @@ static void board_audio_push(const int16_t *stereo, unsigned frames)
     }
 }
 
+#ifdef __vita__
+/* The board thread's own time (H8 and C352), for the progress lines. */
+unsigned long long system12_board_busy_us;
+#endif
+
 static STRHEAD_RET_TYPE board_thread(void *unused)
 {
     (void)unused;
@@ -681,7 +704,13 @@ static STRHEAD_RET_TYPE board_thread(void *unused)
         }
         slock_unlock(bt.lock);
         BOARD_JITTER(jitter_board_seed);
+#ifdef __vita__
+        const SceUInt64 busy_start = sceKernelGetProcessTimeWide();
+#endif
         board_exec(&bt.queue[next % BOARD_QUEUE]);
+#ifdef __vita__
+        system12_board_busy_us += sceKernelGetProcessTimeWide() - busy_start;
+#endif
         slock_lock(bt.lock);
         atomic_store_explicit(&bt.done, next + 1, memory_order_release);
         scond_signal(bt.done_cond);
