@@ -14,6 +14,7 @@
 #include "arcade_shelf.h"
 #include "../arcade_catalog.h"
 #include "../shelf_options.h"
+#include "../shelf_snapshot.h"
 #include "rom_selector.h"
 #include "savestates.h"
 #include "settings.h"
@@ -29,6 +30,7 @@ extern "C" void NativeGpu_RunBackendTaskSync(void (*task)(void *), void *arg);
 extern "C" void VitaCtrNativeRenderer_PresentCurrentFrame(void);
 extern "C" void VitaCtrNativeRenderer_SetAspectMode(int mode);
 extern "C" void NativeRenderer_SwapWindow(void);
+extern "C" void VitaCtrNativeRenderer_GetFrameViewport(int rect[4]);
 
 struct ShelfTask {
     char *out_path;
@@ -295,8 +297,17 @@ static void pause_task(void *arg)
     const bool arcade = length > 4 && !strcasecmp(task->game_path + length - 4, ".zip");
     int option_count;
     const ShelfOption *options = pcsx_shelf_options(arcade ? PCSX_OPTIONS_ARCADE : PCSX_OPTIONS_DISC, &option_count);
+    /* An arcade game's frame can be its cabinet's screen on the shelf:
+     * snap/<set>.png, the art name of a MAME set. */
+    static const char *const arcade_actions[] = { "Use as cabinet art" };
+    std::string art;
+    if (arcade) {
+        const char *slash = strrchr(task->game_path, '/');
+        const std::string file = slash ? slash + 1 : task->game_path;
+        art = std::string(APP_ROOT "/snap/") + file.substr(0, file.size() - 4) + ".png";
+    }
     const ShelfMenus menus = { options, option_count, (void *)task->game_path,
-        get_option, set_option, arcade ? 0 : 10, state_exists };
+        get_option, set_option, arcade ? 0 : 10, state_exists, arcade ? arcade_actions : NULL, arcade ? 1 : 0 };
     const ShelfConfig config = shelf_config(&menus);
     std::string title = g_game_path == task->game_path ? g_game_title : std::string();
     if (title.empty()) {
@@ -312,6 +323,9 @@ static void pause_task(void *arg)
         return;
     }
     shelf_pause_open(title.c_str(), VitaSaveStates_GetSlot(), task->start_in_save_states);
+    /* A game without art gets the frame it was paused on. */
+    SceIoStat stat;
+    bool snapshot = arcade && sceIoGetstat(art.c_str(), &stat) < 0;
     unsigned ignored = ~0u;
     SceUInt64 previous_time = sceKernelGetProcessTimeWide();
     for (;;) {
@@ -322,11 +336,24 @@ static void pause_task(void *arg)
         VitaCtrNativeRenderer_PresentCurrentFrame();
         glGetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        if (snapshot) {
+            /* The game's frame, before the menu is drawn over it. */
+            int rect[4];
+            snapshot = false;
+            VitaCtrNativeRenderer_GetFrameViewport(rect);
+            const int saved = shelf_snapshot_save(art.c_str(), rect[0], rect[1], rect[2], rect[3]);
+            sceClibPrintf("pcsx-vita: cabinet art %s %s\n", art.c_str(), saved == 0 ? "saved" : "failed");
+            shelf_toast(saved == 0 ? "Cabinet art saved" : "Could not save the cabinet art");
+        }
         const int action = shelf_pause_frame(&input, &slot);
         glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)framebuffer);
         NativeRenderer_SwapWindow();
         if (slot != VitaSaveStates_GetSlot())
             VitaSaveStates_SetSlot(slot);
+        if (action == SHELF_PAUSE_ACTION) {
+            snapshot = true;
+            continue;
+        }
         if (action == SHELF_PAUSE_NONE) {
             sceKernelDelayThread(16000);
             continue;

@@ -11,11 +11,13 @@
 
 #include "arcade_shelf.h"
 #include "shelf_options.h"
+#include "shelf_snapshot.h"
 
 extern "C" SDL_Window *g_window;
 extern "C" void VitaCtrNativeRenderer_PresentCurrentFrame(void);
 extern "C" void VitaCtrNativeRenderer_SetAspectMode(int mode);
 extern "C" void NativeRenderer_SwapWindow(void);
+extern "C" void VitaCtrNativeRenderer_GetFrameViewport(int rect[4]);
 extern "C" void gteSetWidescreenHack(int enabled);
 extern "C" int system12_set_input(const char *control, int pressed);
 extern "C" int PCSXMacVitaGL_CaptureCurrentFrame(void);
@@ -105,8 +107,10 @@ static std::vector<unsigned> parse_script(const char *script)
 	return steps;
 }
 
-extern "C" int mac_pause_run(const char *game, const char *script, const char *shot)
+extern "C" int mac_pause_run(const char *game, const char *script, const char *shot, const char *art)
 {
+	static const char *const actions[] = { "Use as cabinet art" };
+	bool snapshot = false;
 	const std::vector<unsigned> steps = parse_script(script);
 	/* "G" in the script: the shot is the game's frame, without the menu. */
 	const bool game_shot = script && strchr(script, 'G');
@@ -114,7 +118,8 @@ extern "C" int mac_pause_run(const char *game, const char *script, const char *s
 	unsigned frame = 0;
 	int option_count;
 	const ShelfOption *options = pcsx_shelf_options(PCSX_OPTIONS_ARCADE, &option_count);
-	const ShelfMenus menus = { options, option_count, NULL, get_option, set_option, 0, NULL };
+	const ShelfMenus menus = { options, option_count, NULL, get_option, set_option, 0, NULL, art ? actions : NULL,
+		art ? 1 : 0 };
 	int fb_width = 960, fb_height = 544;
 	SDL_GetWindowSizeInPixels(g_window, &fb_width, &fb_height);
 	const ShelfConfig config = { "PCSX", "ReArcade", ".", "", 960, 544, NULL, 0, &menus, NULL, fb_width, fb_height };
@@ -165,6 +170,15 @@ extern "C" int mac_pause_run(const char *game, const char *script, const char *s
 		}
 		glGetIntegerv(GL_FRAMEBUFFER_BINDING, &framebuffer);
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		if (snapshot) {
+			/* The game's frame, before the menu is drawn over it. */
+			int rect[4];
+			snapshot = false;
+			VitaCtrNativeRenderer_GetFrameViewport(rect);
+			const int saved = shelf_snapshot_save(art, rect[0], rect[1], rect[2], rect[3]);
+			fprintf(stderr, "Pause menu: cabinet art %s %s\n", art, saved == 0 ? "saved" : "failed");
+			shelf_toast(saved == 0 ? "Cabinet art saved" : "Could not save the cabinet art");
+		}
 		const int action = shelf_pause_frame(&input, &slot);
 		glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)framebuffer);
 		if (scripted && ++frame >= (steps.size() + 2) * 10) {
@@ -177,6 +191,10 @@ extern "C" int mac_pause_run(const char *game, const char *script, const char *s
 			break;
 		}
 		NativeRenderer_SwapWindow();
+		if (action == SHELF_PAUSE_ACTION) {
+			snapshot = true;
+			continue;
+		}
 		if (action == SHELF_PAUSE_RESUME)
 			break;
 		if (action == SHELF_PAUSE_RESTART || action == SHELF_PAUSE_CLOSE) {

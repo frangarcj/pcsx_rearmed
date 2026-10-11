@@ -49,7 +49,7 @@ GPU_LIBS += $(SDL3_LIBS) $(LIBPNG_LIBS) -framework OpenGL
 # The interactive pause menu (arcade-shelf, its own ImGui).
 SHELF_LIB := deps/arcade-shelf/build/libarcadeshelf.a
 CFLAGS += -Ideps/arcade-shelf/include
-PAUSE_CXXSOURCES := frontend/mac_pause.cpp frontend/shelf_options.cpp
+PAUSE_CXXSOURCES := frontend/mac_pause.cpp frontend/shelf_options.cpp frontend/shelf_snapshot.cpp
 GPU_LIBS += $(SHELF_LIB)
 else
 $(error Unsupported GPU '$(GPU)'; choose neon or vitagl-like)

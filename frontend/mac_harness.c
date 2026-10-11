@@ -313,7 +313,7 @@ static void usage(const char *name)
     "[--trace FILE --trace-blocks N] [--cycle-snapshots FILE "
     "--snapshot-start CYCLES --snapshot-interval N] "
     "[--board-bus-trace FILE] [--system12-edge-trace FILE] [--system12-trace-shared-writes | --system12-trace-shared-accesses] "
-    "[--max-blocks N] [--icache] [--widescreen] [--drc] [--interactive [--pause-at N [--pause-script STEPS] [--pause-shot FILE.ppm]]...] [--system12-vblank-sync-only] [--system12-source-step] [--frontend-loop]\n"
+    "[--max-blocks N] [--icache] [--widescreen] [--drc] [--interactive [--art-dir DIR] [--pause-at N [--pause-script STEPS] [--pause-shot FILE.ppm]]...] [--system12-vblank-sync-only] [--system12-source-step] [--frontend-loop]\n"
     "       %s (--gpu-type1-test | --gpu-type1-test-1m)\n", name, name);
 }
 
@@ -326,6 +326,8 @@ static const struct { SDL_Scancode key; const char *control; } interactive_keys[
   {SDL_SCANCODE_D, "p1button3"}, {SDL_SCANCODE_SPACE, "p1button4"}
 };
 static volatile int pause_requested;
+/* gpulib_if.c: the next present keeps the frame for the menu. */
+extern volatile int pcsx_menu_backdrop_request;
 
 int mac_pause_interrupted(void)
 {
@@ -350,8 +352,10 @@ static void poll_interactive_input(void)
       continue;
     if (event.key.repeat) continue;
     /* Escape pauses, as Start + Select on the Vita. */
-    if (event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_ESCAPE)
+    if (event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_ESCAPE) {
       pause_requested = 1;
+      pcsx_menu_backdrop_request = 1;
+    }
     for (unsigned i = 0; i < sizeof(interactive_keys) / sizeof(interactive_keys[0]); i++)
       if (event.key.scancode == interactive_keys[i].key)
         system12_set_input(interactive_keys[i].control, event.type == SDL_EVENT_KEY_DOWN);
@@ -605,6 +609,8 @@ int main(int argc, char **argv)
   uint64_t interactive_started_ns = 0;
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
   char interactive_game[256] = "";
+  const char *art_dir = NULL;
+  char art_path[1024] = "";
   /* Scripted pauses, in order: each --pause-at starts one. */
   struct { unsigned at; const char *script, *shot; } pauses[8];
   int pause_count = 0, pause_next = 0;
@@ -664,6 +670,9 @@ int main(int argc, char **argv)
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
     /* Checks of the pause menu: open it at frame N, press the script's
      * buttons, save it to a PPM and exit. */
+    /* Where the pause menu saves cabinet art: DIR/snap/<set>.png, the
+     * arcade-shelf data folder (build/arcade-ui/data for the preview). */
+    else if (!strcmp(argv[i], "--art-dir") && i + 1 < argc) art_dir = argv[++i];
     else if (!strcmp(argv[i], "--pause-at") && i + 1 < argc && pause_count < 8) {
       pauses[pause_count].at = (unsigned)atoi(argv[++i]);
       pauses[pause_count].script = pauses[pause_count].shot = NULL;
@@ -1112,6 +1121,10 @@ int main(int argc, char **argv)
     if (open_interactive_audio())
       fprintf(stderr, "Interactive: no audio (%s), pacing at 60 Hz\n", SDL_GetError());
     interactive_title(board, interactive_game, sizeof(interactive_game));
+    if (art_dir) {
+      const system12_romset_info *set = system12_romset_is_zip(board) ? system12_romset_identify(board) : NULL;
+      if (set) snprintf(art_path, sizeof(art_path), "%s/snap/%s.png", art_dir, set->name);
+    }
     fprintf(stderr, "Interactive: 5 coin, 1 start, arrows move, A/S/D/Space buttons, Escape pause\n");
   }
 #endif
@@ -1156,14 +1169,17 @@ int main(int argc, char **argv)
         pause_shot = pauses[pause_next].shot;
         pause_next++;
         pause_requested = 1;
+        pcsx_menu_backdrop_request = 1;
       }
-      if (pause_requested && frame_counter != interactive_frame) {
+      /* A request waits for the next present, which keeps the frame for the
+       * menu and clears pcsx_menu_backdrop_request. */
+      if (pause_requested && !pcsx_menu_backdrop_request) {
         /* Between frames: the menu draws over the one just presented. */
         int choice;
         pause_requested = 0;
         release_interactive_input();
         if (interactive_audio) SDL_PauseAudioStreamDevice(interactive_audio);
-        choice = mac_pause_run(interactive_game, pause_script, pause_shot);
+        choice = mac_pause_run(interactive_game, pause_script, pause_shot, art_path[0] ? art_path : NULL);
         pause_script = pause_shot = NULL;
         if (choice == MAC_PAUSE_CLOSE) interrupted = 1;
         if (choice == MAC_PAUSE_RESTART) {
