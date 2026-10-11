@@ -567,9 +567,16 @@ internal int NativeRenderer_InitialiseGLContext(char *windowName, int fullscreen
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, minor_version);
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, profile);
 
-		if (SDL_GL_CreateContext(g_window))
 		{
-			break;
+			SDL_GLContext context = SDL_GL_CreateContext(g_window);
+			if (context)
+			{
+#if !defined(__vita__)
+				extern SDL_GLContext g_glContext;
+				g_glContext = context;
+#endif
+				break;
+			}
 		}
 
 		minor_version--;

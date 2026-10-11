@@ -29,7 +29,24 @@ unsigned long long gpu_async_wait_us;
 unsigned gpu_async_wait_n;
 #define WAIT_BEGIN() const SceUInt64 wait_start_ = sceKernelGetProcessTimeWide()
 #define WAIT_END() (gpu_async_wait_us += sceKernelGetProcessTimeWide() - wait_start_, gpu_async_wait_n++)
+#define WAIT_END_BY(r) (gpu_async_wait_us_by[r] += sceKernelGetProcessTimeWide() - wait_start_, gpu_async_waits_by[r]++, WAIT_END())
+/* The GPU thread's own time: command lists (gpulib and the renderer's
+ * frontend), presents and DMA writes, and the words it took. */
+unsigned long long gpu_async_busy_us[3];
+/* Why the emulation thread waited: 0 other syncs, 1 VRAM writes the
+ * asynchronous DMA did not take, 2 VRAM reads, 3 a full command buffer. */
+int gpu_async_sync_reason;
+/* The last VRAM write that synced: w, h, words in that call, x | y << 16. */
+int gpu_async_write_last[4];
+unsigned gpu_async_waits_by[4];
+unsigned long long gpu_async_wait_us_by[4];
+unsigned long long gpu_async_words;
+#define BUSY_BEGIN() const SceUInt64 busy_start_ = sceKernelGetProcessTimeWide()
+#define BUSY_END(i) (gpu_async_busy_us[i] += sceKernelGetProcessTimeWide() - busy_start_)
 #else
+#define BUSY_BEGIN()
+#define BUSY_END(i)
+#define WAIT_END_BY(r)
 #define WAIT_BEGIN()
 #define WAIT_END()
 #endif
@@ -234,7 +251,7 @@ static void do_add_with_wait(struct psx_gpu_async *agpu,
       scond_wait(agpu->cond_add, agpu->lock);
     }
     slock_unlock(agpu->lock);
-    WAIT_END();
+    WAIT_END_BY(3);
   }
 }
 
@@ -517,6 +534,15 @@ int gpu_async_try_dma(struct psx_gpu *gpu, const uint32_t *data, int words)
   return 1;
 }
 
+#if defined(GPU_VITA_CTR) && !defined(__vita__)
+/* The Mac harness: the renderer draws on its GL context, made current on
+ * the GPU thread while it runs (gpu_vita_ctr/native_renderer.c). */
+void renderer_gl_thread(int attach);
+#define GL_THREAD(attach) renderer_gl_thread(attach)
+#else
+#define GL_THREAD(attach)
+#endif
+
 static STRHEAD_RET_TYPE gpu_async_thread(void *unused)
 {
   struct psx_gpu *gpup = &gpu;
@@ -524,6 +550,7 @@ static STRHEAD_RET_TYPE gpu_async_thread(void *unused)
   int renderer_dirty = 0;
 
   assert(agpu);
+  GL_THREAD(1);
   slock_lock(agpu->lock);
   while (!agpu->exit)
   {
@@ -558,8 +585,15 @@ static STRHEAD_RET_TYPE gpu_async_thread(void *unused)
     }
 
     len = min(len, AGPU_BUF_LEN - pos);
-    done = renderer_do_cmd_list(agpu->cmd_buffer + pos, len, agpu->ex_regs,
-             &cycles_dummy, &cycles_dummy, &cmd);
+    {
+      BUSY_BEGIN();
+      done = renderer_do_cmd_list(agpu->cmd_buffer + pos, len, agpu->ex_regs,
+               &cycles_dummy, &cycles_dummy, &cmd);
+      BUSY_END(0);
+    }
+#ifdef __vita__
+    gpu_async_words += done;
+#endif
     renderer_dirty |= done;
     if (done != len) {
       const void *list = agpu->cmd_buffer + pos + done;
@@ -574,10 +608,13 @@ static STRHEAD_RET_TYPE gpu_async_thread(void *unused)
           done += do_set_interlace(gpup, list);
           renderer_dirty = 0;
           break;
-        case FAKECMD_DMA_WRITE:
+        case FAKECMD_DMA_WRITE: {
+          BUSY_BEGIN();
           done += do_dma_write(gpup, list, pos + done);
+          BUSY_END(2);
           renderer_dirty = 0;
           break;
+        }
         case FAKECMD_BREAK:
           done += sizeof(struct cmd_break) / 4;
           renderer_flush_queues();
@@ -586,8 +623,10 @@ static STRHEAD_RET_TYPE gpu_async_thread(void *unused)
 #ifdef GPU_VITA_CTR
         case FAKECMD_PRESENT: {
           const union cmd_present *p = list;
+          BUSY_BEGIN();
           renderer_present_frame_rect(p->src_x, p->src_y, p->w, p->h,
               p->pic_x, p->pic_y, p->pic_w, p->pic_h, p->rgb24);
+          BUSY_END(1);
           done += sizeof(*p) / 4;
           renderer_dirty = 0;
           break;
@@ -623,6 +662,7 @@ static STRHEAD_RET_TYPE gpu_async_thread(void *unused)
     }
   }
   slock_unlock(agpu->lock);
+  GL_THREAD(0);
   STRHEAD_RETURN();
 }
 
@@ -779,7 +819,10 @@ static void gpu_async_sync_nocheck(struct psx_gpu *gpu)
     scond_wait(agpu->cond_add, agpu->lock);
   }
   slock_unlock(agpu->lock);
-  WAIT_END();
+#ifdef __vita__
+  WAIT_END_BY(gpu_async_sync_reason & 3);
+  gpu_async_sync_reason = 0;
+#endif
   assert(agpu->pos_added == agpu->pos_used);
   assert(agpu->idle);
 }
@@ -965,6 +1008,7 @@ void gpu_async_stop(struct psx_gpu *gpu)
     gpu_async_sync(gpu);
     psx_gpu_async_free(gpu->async);
     gpu->async = NULL;
+    GL_THREAD(1);
   }
 }
 
@@ -991,7 +1035,10 @@ void gpu_async_enable(struct psx_gpu *gpu, int enable)
     agpu->cond_use = scond_new();
     if (agpu->lock && agpu->cond_add && agpu->cond_use) {
       gpu->async = agpu;
+      GL_THREAD(0);
       agpu->thread = pcsxr_sthread_create(gpu_async_thread, PCSXRT_GPU);
+      if (!agpu->thread)
+        GL_THREAD(1);
     }
     if (agpu->thread) {
       gpu_async_sync_ecmds(gpu);

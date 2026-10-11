@@ -38,6 +38,28 @@
 #include "../../frontend/plugin_lib.h"
 
 SDL_Window *g_window;
+
+#if !defined(__vita__)
+/* gpulib's GPU thread (Mac harness, USE_ASYNC_GPU): the renderer has no
+ * thread of its own there, so GL is called from the GPU thread (lists,
+ * presents) and from the emulation thread (VRAM reads), never at once:
+ * gpulib syncs the GPU thread first. Each entry makes the context current
+ * on the calling thread. */
+SDL_GLContext g_glContext;
+void renderer_gl_current(void)
+{
+    if (g_glContext && g_window && SDL_GL_GetCurrentContext() != g_glContext)
+        SDL_GL_MakeCurrent(g_window, g_glContext);
+}
+void renderer_gl_thread(int attach)
+{
+    if (attach)
+        renderer_gl_current();
+}
+#define GL_ENTER() renderer_gl_current()
+#else
+#define GL_ENTER()
+#endif
 int gNativeAntiAliasingEnabled;
 int gNativeDitheringEnabled = 1;
 int g_dbg_emulatorPaused;
@@ -938,6 +960,7 @@ static void account_timing(const uint32_t *list, int cmd,
 int renderer_do_cmd_list(uint32_t *list, int count, uint32_t *ex_regs,
     int *cycles_sum, int *cycles_last, int *last_cmd)
 {
+    GL_ENTER();
     uint32_t cyc_sum = 0;
     uint32_t cyc = (uint32_t)*cycles_last;
     int pos = 0;
@@ -983,6 +1006,7 @@ int renderer_init(void)
 
 void renderer_finish(void)
 {
+    GL_ENTER();
 #ifdef PCSX_GP0_ROI_TRACE
     gp0_roi_trace_dump();
 #endif
@@ -1006,6 +1030,7 @@ void renderer_finish(void)
 
 void renderer_sync_ecmds(uint32_t *ecmds)
 {
+    GL_ENTER();
     int i;
     if (!s_context_ready || !ecmds)
         return;
@@ -1015,6 +1040,7 @@ void renderer_sync_ecmds(uint32_t *ecmds)
 
 void renderer_update_caches(int x, int y, int w, int h, int state_changed)
 {
+    GL_ENTER();
     VitaCtrVramTask task;
     (void)state_changed;
     if (!s_context_ready || !s_guest_vram || w <= 0 || h <= 0)
@@ -1057,6 +1083,7 @@ void renderer_flush_queues(void)
 
 void renderer_barrier(void)
 {
+    GL_ENTER();
     if (!s_context_ready)
         return;
     if (NativeGpu_HasPendingSplits()) {
@@ -1073,6 +1100,7 @@ unsigned pcsx_vita_ctr_read_n;
 
 void renderer_sync_vram_to_cpu(int x, int y, int w, int h)
 {
+    GL_ENTER();
     VitaCtrVramTask task;
     if (!s_context_ready || !s_guest_vram || w <= 0 || h <= 0)
         return;
@@ -1114,6 +1142,7 @@ void renderer_sync_vram_to_cpu(int x, int y, int w, int h)
 
 void renderer_set_interlace(int enable, int is_odd)
 {
+    GL_ENTER();
     (void)enable;
     (void)is_odd;
 }
@@ -1179,6 +1208,7 @@ static int widescreen_3d_frame(void)
 int renderer_present_frame_rect(int src_x, int src_y, int width, int height,
     int pic_x, int pic_y, int pic_w, int pic_h, int rgb24)
 {
+    GL_ENTER();
     if (!s_context_ready)
         return 0;
 #ifndef __vita__
@@ -1201,6 +1231,7 @@ int renderer_present_frame_rect(int src_x, int src_y, int width, int height,
 
 void renderer_present_blank(void)
 {
+    GL_ENTER();
     if (!s_context_ready)
         return;
 

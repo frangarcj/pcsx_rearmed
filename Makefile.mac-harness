@@ -54,6 +54,12 @@ GPU_LIBS += $(SHELF_LIB)
 else
 $(error Unsupported GPU '$(GPU)'; choose neon or vitagl-like)
 endif
+# gpulib's GPU thread (--gpu-thread), as the Vita builds use it.
+GPU_THREAD ?= 0
+ifeq ($(GPU_THREAD),1)
+CFLAGS += -DUSE_ASYNC_GPU -Ideps/libretro-common/include
+SOURCES += plugins/gpulib/gpu_async.c frontend/pcsxr-threads.c
+endif
 ifeq ($(DRC),1)
 CFLAGS += -DBASE_ADDR_DYNAMIC
 SOURCES += libpcsxcore/new_dynarec/new_dynarec.c libpcsxcore/new_dynarec/pcsxmem.c

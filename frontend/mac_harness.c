@@ -313,7 +313,7 @@ static void usage(const char *name)
     "[--trace FILE --trace-blocks N] [--cycle-snapshots FILE "
     "--snapshot-start CYCLES --snapshot-interval N] "
     "[--board-bus-trace FILE] [--system12-edge-trace FILE] [--system12-trace-shared-writes | --system12-trace-shared-accesses] "
-    "[--max-blocks N] [--icache] [--widescreen] [--borderless] [--save-state-at FRAME FILE] [--load-state FILE] [--drc] [--interactive [--art-dir DIR] [--pause-at N [--pause-script STEPS] [--pause-shot FILE.ppm]]...] [--system12-vblank-sync-only] [--system12-source-step] [--frontend-loop]\n"
+    "[--max-blocks N] [--icache] [--widescreen] [--borderless] [--gpu-thread] [--save-state-at FRAME FILE] [--load-state FILE] [--drc] [--interactive [--art-dir DIR] [--pause-at N [--pause-script STEPS] [--pause-shot FILE.ppm]]...] [--system12-vblank-sync-only] [--system12-source-step] [--frontend-loop]\n"
     "       %s (--gpu-type1-test | --gpu-type1-test-1m)\n", name, name);
 }
 
@@ -593,7 +593,7 @@ int main(int argc, char **argv)
   int board_load_result = 0;
   int board_family = 12;
   int icache = 0;
-  int widescreen = 0, borderless = 0;
+  int widescreen = 0, borderless = 0, gpu_thread = 0;
   /* Savestate checks: save at a frame and run on; or start from a state. */
   const char *save_state_path = NULL, *load_state_path = NULL;
   unsigned save_state_at = 0;
@@ -742,6 +742,7 @@ int main(int argc, char **argv)
      * vitagl-like renderer widens frames the GPU drew. */
     else if (!strcmp(argv[i], "--widescreen")) widescreen = 1;
     else if (!strcmp(argv[i], "--borderless")) borderless = 1;
+    else if (!strcmp(argv[i], "--gpu-thread")) gpu_thread = 1;
     else { usage(argv[0]); return 2; }
   }
   if (source_step) {
@@ -979,6 +980,8 @@ int main(int argc, char **argv)
   if (psxInit() || LoadPlugins()) return 1;
   /* Screen Borders = Borderless, the Vita app's default. */
   pl_rearmed_cbs.screen_centering_type = borderless ? C_BORDERLESS : C_AUTO;
+  /* gpulib's GPU thread (GPU_THREAD=1 builds), as on the Vita. */
+  pl_rearmed_cbs.thread_rendering = gpu_thread;
   pl_rearmed_cbs.pl_vout_open = video_open;
   pl_rearmed_cbs.pl_vout_close = video_close;
   pl_rearmed_cbs.pl_vout_set_mode = video_mode;
