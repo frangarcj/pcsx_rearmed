@@ -1,12 +1,14 @@
 /* PCSX ReArcade's selector on macOS: arcade-shelf with the System 12 sets
  * of a rompath (frontend/arcade_catalog.cpp), to preview it without a Vita.
  *
- *   build/arcade-ui/arcade-ui [--rompath DIR] [--data DIR] [--demo] [--disc FILE]...
+ *   build/arcade-ui/arcade-ui [--rompath DIR] [--data DIR] [--demo] [--disc FILE]... [--pause]
  *       [--script STEPS] [--step-frames N] [--shot FILE.png] [--shots DIR] [--headless]
  *
  * --demo lists every supported set, with or without its zips. --disc adds a
  * PlayStation disc, as the Vita lists them: its cover is
- * <data>/covers/<file name without extension>.png. Keys,
+ * <data>/covers/<file name without extension>.png. --pause shows the pause
+ * menu over a stand-in game frame. The options are PCSX's
+ * (frontend/shelf_options.cpp), kept in memory. Keys,
  * scripts and screenshots work as in arcade-shelf's viewer
  * (deps/arcade-shelf/examples/viewer/viewer.cpp).
  */
@@ -16,6 +18,7 @@
 #include <string.h>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 #include <SDL3/SDL.h>
 #define GL_SILENCE_DEPRECATION
@@ -26,6 +29,7 @@
 
 #include "arcade_shelf.h"
 #include "../../frontend/arcade_catalog.h"
+#include "../../frontend/shelf_options.h"
 extern "C" {
 #include "../../libpcsxcore/system12.h"
 }
@@ -100,9 +104,11 @@ static unsigned keyboard_buttons(void)
 	if (keys[SDL_SCANCODE_LEFT]) buttons |= SHELF_LEFT;
 	if (keys[SDL_SCANCODE_RIGHT]) buttons |= SHELF_RIGHT;
 	if (keys[SDL_SCANCODE_Z] || keys[SDL_SCANCODE_RETURN]) buttons |= SHELF_CROSS;
-	if (keys[SDL_SCANCODE_X] || keys[SDL_SCANCODE_ESCAPE]) buttons |= SHELF_CIRCLE;
-	if (keys[SDL_SCANCODE_S]) buttons |= SHELF_TRIANGLE;
+	if (keys[SDL_SCANCODE_X]) buttons |= SHELF_CIRCLE;
+	if (keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_ESCAPE]) buttons |= SHELF_TRIANGLE;
 	if (keys[SDL_SCANCODE_A]) buttons |= SHELF_SQUARE;
+	if (keys[SDL_SCANCODE_TAB]) buttons |= SHELF_SELECT;
+	if (keys[SDL_SCANCODE_SPACE]) buttons |= SHELF_START;
 	if (keys[SDL_SCANCODE_Q]) buttons |= SHELF_L;
 	if (keys[SDL_SCANCODE_W]) buttons |= SHELF_R;
 	return buttons;
@@ -127,12 +133,52 @@ static unsigned gamepad_buttons(SDL_Gamepad *pad)
 	return buttons;
 }
 
+/* The settings and save states, in memory: each option starts on its
+ * first value. */
+static std::vector<std::pair<std::string, std::string> > settings;
+static std::vector<int> saved_slots;
+
+static const char *get_option(void *, const char *key)
+{
+	for (const auto &entry : settings)
+		if (entry.first == key)
+			return entry.second.c_str();
+	return NULL;
+}
+
+static void set_option(void *, const char *key, const char *value)
+{
+	for (auto &entry : settings)
+		if (entry.first == key)
+			entry.second = value;
+}
+
+static int state_exists(void *, int slot)
+{
+	return std::find(saved_slots.begin(), saved_slots.end(), slot) != saved_slots.end();
+}
+
+/* A stand-in for the game's frame under the pause menu. */
+static void draw_game_frame(void)
+{
+	glEnable(GL_SCISSOR_TEST);
+	for (int y = 0; y < HEIGHT; y += 68)
+		for (int x = 0; x < WIDTH; x += 80) {
+			const int odd = (x / 80 + y / 68) & 1;
+			glScissor(x, y, 80, 68);
+			glClearColor(odd ? 0.85f : 0.2f, 0.35f + 0.3f * y / HEIGHT, odd ? 0.3f : 0.75f, 1);
+			glClear(GL_COLOR_BUFFER_BIT);
+		}
+	glDisable(GL_SCISSOR_TEST);
+}
+
 int main(int argc, char **argv)
 {
 	const char *rompath = "roms", *data = "build/arcade-ui/data", *shot = NULL, *shots = NULL;
 	std::vector<unsigned> script;
 	std::vector<std::pair<float, float> > script_sticks;
 	std::vector<std::string> discs;
+	int pause = 0, slot = 0;
 	int step_frames = 15, headless = 0, demo = 0, result = 0;
 	for (int i = 1; i < argc; i++) {
 		const std::string arg = argv[i];
@@ -140,6 +186,7 @@ int main(int argc, char **argv)
 		if (arg == "--rompath" && has_value) rompath = argv[++i];
 		else if (arg == "--demo") demo = 1;
 		else if (arg == "--disc" && has_value) discs.push_back(argv[++i]);
+		else if (arg == "--pause") pause = 1;
 		else if (arg == "--data" && has_value) data = argv[++i];
 		else if (arg == "--headless") headless = 1;
 		else if (arg == "--shot" && has_value) shot = argv[++i];
@@ -206,13 +253,22 @@ int main(int argc, char **argv)
 		title = title.substr(0, title.find_last_of('.'));
 		catalogue.add_disc(disc, title, title);
 	}
+	for (int i = 0; i < pcsx_shelf_option_count; i++) {
+		const ShelfOption &option = pcsx_shelf_options[i];
+		settings.push_back(std::make_pair(option.key, option.choices[0].value));
+	}
+	const ShelfMenus menus = { pcsx_shelf_options, pcsx_shelf_option_count, NULL, get_option, set_option, 10,
+		state_exists };
 	ShelfConfig config = { "PCSX", "ReArcade", data, hint.c_str(), WIDTH, HEIGHT,
-		arcade_catalog_styles, arcade_catalog_style_count };
+		arcade_catalog_styles, arcade_catalog_style_count, &menus };
 	if (!shelf_init(&config)) {
 		fprintf(stderr, "arcade-ui: init failed\n");
 		return 1;
 	}
-	shelf_set_games(catalogue.games(), catalogue.count());
+	if (pause)
+		shelf_pause_open("Soul Calibur (Asia, SOC14/VER.C)", slot, 0);
+	else
+		shelf_set_games(catalogue.games(), catalogue.count());
 
 	SDL_Gamepad *pad = NULL;
 	Uint64 last = SDL_GetTicksNS();
@@ -253,10 +309,26 @@ int main(int argc, char **argv)
 			if (keys[SDL_SCANCODE_K]) stick_y = 1;
 		}
 		char launch[1024];
-		glClearColor(0, 0, 0, 1);
-		glClear(GL_COLOR_BUFFER_BIT);
 		const ShelfInput input = { buttons, stick_x, stick_y, dt };
-		const int action = shelf_frame(&input, launch, sizeof(launch));
+		int action = SHELF_NONE;
+		if (pause) {
+			draw_game_frame();
+			const int result = shelf_pause_frame(&input, &slot);
+			if (result != SHELF_PAUSE_NONE) {
+				static const char *names[] = { "", "resume", "restart", "close", "save", "load" };
+				printf("pause: %s, slot %d\n", names[result], slot);
+				/* As the Vita does: save, then back on the save-state page. */
+				if (result == SHELF_PAUSE_SAVE_STATE)
+					saved_slots.push_back(slot);
+				shelf_pause_open("Soul Calibur (Asia, SOC14/VER.C)", slot, result == SHELF_PAUSE_SAVE_STATE);
+				if ((result == SHELF_PAUSE_RESUME || result == SHELF_PAUSE_CLOSE) && !scripted)
+					running = false;
+			}
+		} else {
+			glClearColor(0, 0, 0, 1);
+			glClear(GL_COLOR_BUFFER_BIT);
+			action = shelf_frame(&input, launch, sizeof(launch));
+		}
 		frame++;
 		if (scripted && frame % step_frames == 0) {
 			if (shots) {

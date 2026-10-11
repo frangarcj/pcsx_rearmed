@@ -104,7 +104,7 @@ ifneq ($(VITA_GPU)$(ARCADE_SYSTEM12),vitagl1)
 $(error ARCADE_SHELF=1 requires VITA_GPU=vitagl and ARCADE_SYSTEM12=1)
 endif
 CFLAGS += -DARCADE_SHELF -I$(SHELF_DIR)/include
-UI_OBJS += $(BUILD_DIR)/shelf_selector.o $(BUILD_DIR)/arcade_catalog.o
+UI_OBJS += $(BUILD_DIR)/shelf_selector.o $(BUILD_DIR)/arcade_catalog.o $(BUILD_DIR)/shelf_options.o
 UI_LIBS := $(SHELF_LIB) $(UI_LIBS)
 endif
 CORE_ARGS := platform=vita ARCADE_SYSTEM12=$(ARCADE_SYSTEM12) SYSTEM12_PROFILE=$(SYSTEM12_PROFILE) VITA_CTR_GPU_TRACE=$(VITA_CTR_GPU_TRACE) TARGET_NAME=$(CORE_NAME) BUILTIN_GPU=$(BUILTIN_VITA_GPU) GPU_NEON_USE_C=$(VITA_GPU_NEON_C) VITAGL_DIR=$(VITAGL_DIR) GIT_VERSION=$(GIT_VERSION) USE_LIBRETRO_VFS=0 \
@@ -132,7 +132,7 @@ $(BUILD_DIR)/rom_selector.o: frontend/vita/rom_selector.cpp Makefile.vita | $(BU
 $(BUILD_DIR)/shelf_selector.o: frontend/vita/shelf_selector.cpp Makefile.vita | $(BUILD_DIR)
 	$(CXX) $(CFLAGS) -std=gnu++11 -MMD -MP -c $< -o $@
 
-$(BUILD_DIR)/arcade_catalog.o: frontend/arcade_catalog.cpp Makefile.vita | $(BUILD_DIR)
+$(BUILD_DIR)/arcade_catalog.o $(BUILD_DIR)/shelf_options.o: $(BUILD_DIR)/%.o: frontend/%.cpp Makefile.vita | $(BUILD_DIR)
 	$(CXX) $(CFLAGS) -std=gnu++11 -MMD -MP -c $< -o $@
 
 # arcade-shelf has its own makefile; it rebuilds only what changed.

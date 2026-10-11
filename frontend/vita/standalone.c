@@ -1358,7 +1358,11 @@ static int run_pause_menu(const char *game_path)
     /* The menu draws on the renderer thread: no frame may be in flight. */
     gpu_sync_renderer();
     for (;;) {
+#ifdef ARCADE_SHELF
+        ret = VitaShelfPause_Run(game_path, reopen_save_states ? 1 : 0);
+#else
         ret = VitaPauseMenu_Run(game_path, reopen_save_states ? 1 : 0);
+#endif
         reopen_save_states = false;
         wait_for_menu_input_release();
 

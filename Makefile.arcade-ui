@@ -18,7 +18,7 @@ LIBPNG_CFLAGS := $(shell pkg-config --cflags libpng)
 LIBPNG_LIBS := $(shell pkg-config --libs libpng)
 CFLAGS := -arch arm64 -O2 -g -Wall -Iinclude -I$(SHELF)/include $(SDL3_CFLAGS) $(LIBPNG_CFLAGS)
 CXXFLAGS := $(CFLAGS) -std=gnu++17
-SOURCES_CXX := tools/arcade-ui/arcade_ui_mac.cpp frontend/arcade_catalog.cpp
+SOURCES_CXX := tools/arcade-ui/arcade_ui_mac.cpp frontend/arcade_catalog.cpp frontend/shelf_options.cpp
 SOURCES_C := libpcsxcore/arcade/system12_romset.c libpcsxcore/arcade/mame_zip.c
 OBJECTS := $(addprefix $(BUILD)/,$(SOURCES_CXX:.cpp=.o) $(SOURCES_C:.c=.o))
 
