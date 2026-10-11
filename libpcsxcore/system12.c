@@ -96,8 +96,57 @@ static void pcm_sync_h8(void);
  * flags at or before it needs no generating (0: unknown). Not in `board`,
  * whose size the savestates check. */
 static u64 pcm_flags_until;
+/* The stream frame board SYNC commands asked for: generated in blocks
+ * (PCM_BATCH), at vblank, and before anything that needs it. */
+static u64 pcm_wanted;
+#define PCM_BATCH 256
+static void pcm_flush_wanted(void);
+/* PCSX_PCM_BATCH=1 (Mac harness): one frame per command, as before, to
+ * compare. */
+static unsigned pcm_batch(void)
+{
+#if !defined(__vita__)
+    static int unbatched = -1;
+    if (unbatched < 0) {
+        const char *v = getenv("PCSX_PCM_BATCH");
+        unbatched = v && atoi(v) <= 1;
+    }
+    if (unbatched) return 1;
+#endif
+    return PCM_BATCH;
+}
 static void pcm_flags_horizon(void);
 static int pcm_access_needs_sync(unsigned reg, int write, u16 value, u16 mask);
+/* The board's time split, H8 and C352, in microseconds (the Vita
+ * frontend's progress lines, the harness's H8 perf line). */
+#ifdef __vita__
+#include <psp2/kernel/processmgr.h>
+static inline u64 board_now_us(void) { return sceKernelGetProcessTimeWide(); }
+#elif defined(__APPLE__)
+/* mach_absolute_time reads a counter; clock_gettime went through
+ * gettimeofday and cost as much as the board's work it timed. */
+#include <mach/mach_time.h>
+static inline u64 board_now_us(void)
+{
+    static mach_timebase_info_data_t base;
+    if (!base.denom) mach_timebase_info(&base);
+    return mach_absolute_time() * base.numer / base.denom / 1000u;
+}
+#else
+#include <time.h>
+static inline u64 board_now_us(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (u64)t.tv_sec * 1000000u + (u64)t.tv_nsec / 1000u;
+}
+#endif
+unsigned long long system12_h8_us, system12_pcm_us;
+/* The timings above cost a clock read per board command (over 100000 a
+ * second): measured only when the frontend asks (diagnostic builds, the
+ * harness's perf line). */
+int system12_perf_timing;
+#define PERF_NOW() (system12_perf_timing ? board_now_us() : 0)
 typedef struct board_cmd board_cmd;
 static void board_post(const board_cmd *c);
 static void board_drain(void);
@@ -233,6 +282,7 @@ int system12_close_audio(void)
     FILE *f;
     int failed;
     board_drain();
+    pcm_flush_wanted();
     f = board.audio_file;
     if (!f) return board.audio_error ? -1 : 0;
     failed = board.audio_error || board.audio_bytes > 0xffffffc3u;
@@ -527,11 +577,27 @@ static int eeprom_advance_cycles(u32 elapsed)
     return at28c16_advance_to_us(board.eeprom, board.eeprom_time_us);
 }
 
+unsigned long long system12_c352_access_us, system12_c352_horizon_us, system12_c352_accesses;
+static void pcm_flags_horizon_body(void);
 static void pcm_flags_horizon(void)
+{
+    const u64 t0 = PERF_NOW();
+    pcm_flags_horizon_body();
+    if (system12_perf_timing)
+        system12_c352_horizon_us += board_now_us() - t0;
+}
+static void pcm_flags_horizon_body(void)
 {
     const size_t stable = c352_flags_stable_frames(board.pcm);
     pcm_flags_until = stable > UINT64_MAX - board.pcm_frames
         ? UINT64_MAX : board.pcm_frames + stable;
+}
+
+static void pcm_generate_to(u64 target);
+static void pcm_flush_wanted(void)
+{
+    if (pcm_wanted > board.pcm_frames)
+        pcm_generate_to(pcm_wanted);
 }
 
 /* One monotonic stream cursor for register catch-up and board catch-up. */
@@ -587,7 +653,17 @@ static void pcm_sync_h8(void)
  * those only at a wave end (c352_flags_stable_frames); the stream is the
  * same whenever it is made, as long as it is made before a register
  * changes. */
+static int pcm_access_needs_sync_body(unsigned reg, int write, u16 value, u16 mask);
 static int pcm_access_needs_sync(unsigned reg, int write, u16 value, u16 mask)
+{
+    const u64 t0 = PERF_NOW();
+    const int result = pcm_access_needs_sync_body(reg, write, value, mask);
+    system12_c352_accesses++;
+    if (system12_perf_timing)
+        system12_c352_access_us += board_now_us() - t0;
+    return result;
+}
+static int pcm_access_needs_sync_body(unsigned reg, int write, u16 value, u16 mask)
 {
     const int flags = reg < 0x100 && reg % 8 == 3;
     u64 target;
@@ -603,58 +679,61 @@ static int pcm_access_needs_sync(unsigned reg, int write, u16 value, u16 mask)
     return !pcm_flags_until || target > pcm_flags_until;
 }
 
-#ifdef __vita__
-/* The board's time split: H8, C352 (for the progress lines). */
-unsigned long long system12_h8_us, system12_pcm_us;
-/* H8 instructions run and its shared RAM accesses, totals. */
-unsigned long long system12_h8_instructions, system12_h8_shared;
-#endif
+/* H8 instructions run and its shared RAM accesses, totals; vblanks seen. */
+unsigned long long system12_h8_instructions, system12_h8_shared, system12_h8_frames;
+/* At the first counted vblank: the H8 perf line's starting point. */
+static unsigned long long perf_base_us, perf_base_instructions, perf_base_board_us;
 
+static void board_exec_kind(const board_cmd *c);
+/* All of the board's work per command (H8, C352, peripherals): the
+ * harness's perf line, the Vita's b_cpu counterpart. */
+unsigned long long system12_board_us;
 static void board_exec(const board_cmd *c)
 {
+    const u64 t0 = PERF_NOW();
+    board_exec_kind(c);
+    if (system12_perf_timing)
+        system12_board_us += board_now_us() - t0;
+}
+
+static void board_exec_kind(const board_cmd *c)
+{
     uint64_t started;
-#ifdef __vita__
-    SceUInt64 t0;
-#endif
+    u64 t0;
     switch (c->kind) {
     case BOARD_CMD_SYNC:
         if (c->rtc_seconds) rtc4543_advance_seconds(&board.rtc, c->rtc_seconds);
         started = pcsx_profile_begin(PCSX_PROF_H8, 1);
-#ifdef __vita__
-        t0 = sceKernelGetProcessTimeWide();
-#endif
+        t0 = PERF_NOW();
         if (!c->run_h8) ;
         else if (c->run_until) h8_run_until(board.h8, c->h8_target);
         else h8_run_cycles(board.h8, c->h8_cycles);
         pcsx_profile_end(PCSX_PROF_H8, started);
-#ifdef __vita__
-        system12_h8_us += sceKernelGetProcessTimeWide() - t0;
-        t0 = sceKernelGetProcessTimeWide();
-#endif
+        if (system12_perf_timing) {
+            system12_h8_us += board_now_us() - t0;
+            t0 = board_now_us();
+        }
         PCM_ORIGIN(1);
-        pcm_generate_to(c->pcm_target);
-#ifdef __vita__
-        system12_pcm_us += sceKernelGetProcessTimeWide() - t0;
-#endif
+        /* The stream is the same whenever it is made, as long as it is made
+         * before a register changes (H8 accesses that change one generate
+         * first): one frame per command took the C352's slow path. */
+        if (c->pcm_target > pcm_wanted)
+            pcm_wanted = c->pcm_target;
+        if (pcm_wanted >= board.pcm_frames + pcm_batch())
+            pcm_generate_to(pcm_wanted);
+        if (system12_perf_timing)
+            system12_pcm_us += board_now_us() - t0;
         break;
     case BOARD_CMD_VBLANK:
+        pcm_flush_wanted();
         if (c->run_h8) {
             started = pcsx_profile_begin(PCSX_PROF_H8, 1);
-#ifdef __vita__
-            t0 = sceKernelGetProcessTimeWide();
-#endif
+            t0 = PERF_NOW();
             if (h8_run_until(board.h8, c->h8_target))
                 SysPrintf("System12: invalid H8 screen deadline\n");
             pcsx_profile_end(PCSX_PROF_H8, started);
-#ifdef __vita__
-            system12_h8_us += sceKernelGetProcessTimeWide() - t0;
-            {
-                H8Status status;
-                h8_get_status(board.h8, &status);
-                system12_h8_instructions = status.instructions;
-                system12_h8_shared = board.shared_reads + board.shared_writes;
-            }
-#endif
+            if (system12_perf_timing)
+                system12_h8_us += board_now_us() - t0;
             h8_set_irq(board.h8, 1, c->level);
             h8_adc_trigger(board.h8, c->level);
             board.portb = (board.portb & 0x7f) | (c->level ? 0x80 : 0);
@@ -662,6 +741,17 @@ static void board_exec(const board_cmd *c)
             board.portb = (board.portb & 0x7f) | (c->level ? 0x80 : 0);
             h8_set_irq(board.h8, 1, c->level);
             h8_adc_trigger(board.h8, c->level);
+        }
+        if (c->level) {
+            H8Status status;
+            h8_get_status(board.h8, &status);
+            system12_h8_instructions = status.instructions - status.skipped;
+            system12_h8_shared = board.shared_reads + board.shared_writes;
+            if (!system12_h8_frames++) {
+                perf_base_us = system12_h8_us;
+                perf_base_instructions = system12_h8_instructions;
+                perf_base_board_us = system12_board_us;
+            }
         }
         trace_edge(SYSTEM12_EDGE_VBLANK, c->level);
         break;
@@ -757,8 +847,11 @@ static void board_audio_push(const int16_t *stereo, unsigned frames)
 }
 
 #ifdef __vita__
-/* The board thread's own time (H8 and C352), for the progress lines. */
-unsigned long long system12_board_busy_us;
+#include <psp2/kernel/threadmgr.h>
+/* The board thread's own time (H8 and C352), for the progress lines, and
+ * the CPU time the kernel gave it (runClocks): busy minus CPU is the time
+ * other threads held its core. */
+unsigned long long system12_board_busy_us, system12_board_cpu_us;
 #endif
 
 static STRHEAD_RET_TYPE board_thread(void *unused)
@@ -775,11 +868,24 @@ static STRHEAD_RET_TYPE board_thread(void *unused)
         slock_unlock(bt.lock);
         BOARD_JITTER(jitter_board_seed);
 #ifdef __vita__
-        const SceUInt64 busy_start = sceKernelGetProcessTimeWide();
+        const SceUInt64 busy_start = system12_perf_timing ? sceKernelGetProcessTimeWide() : 0;
 #endif
         board_exec(&bt.queue[next % BOARD_QUEUE]);
 #ifdef __vita__
-        system12_board_busy_us += sceKernelGetProcessTimeWide() - busy_start;
+        if (system12_perf_timing)
+            system12_board_busy_us += sceKernelGetProcessTimeWide() - busy_start;
+        {
+            /* The kernel's count of this thread's CPU time: cheap enough to
+             * read every 1024 commands in any build. */
+            static unsigned commands;
+            if (!(++commands & 1023)) {
+                SceKernelThreadInfo info;
+                memset(&info, 0, sizeof(info));
+                info.size = sizeof(info);
+                if (sceKernelGetThreadInfo(sceKernelGetThreadId(), &info) >= 0)
+                    system12_board_cpu_us = info.runClocks;
+            }
+        }
 #endif
         slock_lock(bt.lock);
         atomic_store_explicit(&bt.done, next + 1, memory_order_release);
@@ -903,6 +1009,7 @@ int system12_freeze(void *f, int mode)
         goto done;
     /* The board thread finishes what it was given: its devices are idle. */
     board_drain();
+    pcm_flush_wanted();
     if (mode) {
         if (at28c16_get_state(board.eeprom, &eeprom))
             goto done;
@@ -934,6 +1041,7 @@ int system12_freeze(void *f, int mode)
         h8_set_state(board.h8, h8);
         c352_set_state(board.pcm, pcm);
         pcm_flags_until = 0;
+        pcm_wanted = board.pcm_frames;
 #ifdef SYSTEM12_BOARD_THREAD
         /* Sound the board made before the load is not this game's any more. */
         if (bt.active)
@@ -1503,6 +1611,7 @@ void system12_reset(void)
         board.h8_fraction = board.h8_requested = 0;
         board.pcm_fraction = board.pcm_due = board.pcm_frames = 0;
         pcm_flags_until = 0;
+        pcm_wanted = 0;
         memset(&board.pcm_h8_clock, 0, sizeof(board.pcm_h8_clock));
         board.port8 = board.porta = 0; board.portb = 0x50;
         board.jvs_player[0] = board.jvs_player[1] = board.jvs_system = 0;
@@ -1801,6 +1910,7 @@ void system12_dma5(u32 madr, u32 bcr, u32 chcr)
 void system12_report(FILE *out)
 {
     board_drain();
+    pcm_flush_wanted();
     fprintf(out, "System12: JAMMA=%02x/%02x/%02x/%02x\n",
         system12_jamma_read(0), system12_jamma_read(1),
         system12_jamma_read(2), system12_jamma_read(3));
@@ -1819,6 +1929,22 @@ void system12_report(FILE *out)
         board.unknown_reads, board.unknown_writes, board.last_unknown_address, board.last_unknown_pc);
     H8Status h8state;
     h8_get_status(board.h8, &h8state);
+    if (system12_h8_frames > 1) {
+        /* Same quantities as the Vita's progress lines (b_h8, h8_ins). */
+        const unsigned long long frames = system12_h8_frames - 1;
+        const unsigned long long us = system12_h8_us - perf_base_us;
+        const unsigned long long executed = system12_h8_instructions - perf_base_instructions;
+        uint64_t counters[4];
+        h8_perf_counters(counters);
+        fprintf(out, "System12: H8 perf frames=%llu us=%llu executed=%llu us/frame=%.3f executed/frame=%.0f ns/instruction=%.2f pcm_us/frame=%.3f\n",
+            frames, us, executed, (double)us / frames, (double)executed / frames,
+            executed ? us * 1000.0 / executed : 0.0, (double)system12_pcm_us / system12_h8_frames);
+        fprintf(out, "System12: board us/frame=%.3f (all commands)\n",
+            (double)(system12_board_us - perf_base_board_us) / frames);
+        fprintf(out, "System12: H8 loop calls/frame=%.0f skips/frame=%.0f batch/frame=%.0f single/frame=%.0f (since start)\n",
+            (double)counters[0] / system12_h8_frames, (double)counters[1] / system12_h8_frames,
+            (double)counters[2] / system12_h8_frames, (double)counters[3] / system12_h8_frames);
+    }
     fprintf(out, "System12: H8 pc=%06x er7=%08x ccr=%02x cycles=%" PRIu64 " instructions=%" PRIu64 " halted=%u illegal=%06x:%04x unsupported=%x shared r=%" PRIu64 " w=%" PRIu64 "\n",
         h8state.pc, h8state.er[7], h8state.ccr, h8state.cycles, h8state.instructions,
         h8state.halted, h8state.illegal_pc, h8state.illegal_opcode,
