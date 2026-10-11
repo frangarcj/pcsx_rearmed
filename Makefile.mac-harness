@@ -46,6 +46,11 @@ SOURCES += plugins/gpu_vita_ctr/gpulib_if.c plugins/gpu_vita_ctr/native_gpu.c \
   plugins/gpu_vita_ctr/native_renderer.c plugins/gpu_vita_ctr/mac_vita_compat.c \
   frontend/mac_harness_gpu.c
 GPU_LIBS += $(SDL3_LIBS) $(LIBPNG_LIBS) -framework OpenGL
+# The interactive pause menu (arcade-shelf, its own ImGui).
+SHELF_LIB := deps/arcade-shelf/build/libarcadeshelf.a
+CFLAGS += -Ideps/arcade-shelf/include
+PAUSE_CXXSOURCES := frontend/mac_pause.cpp frontend/shelf_options.cpp
+GPU_LIBS += $(SHELF_LIB)
 else
 $(error Unsupported GPU '$(GPU)'; choose neon or vitagl-like)
 endif
@@ -105,6 +110,7 @@ ifeq ($(SYSTEM12_TIMING),1)
 CFLAGS += -DPCSX_SYSTEM12_SOURCE_TIMING
 endif
 endif
+CXXSOURCES += $(PAUSE_CXXSOURCES)
 OBJECTS := $(addprefix $(BUILD)/,$(SOURCES:.c=.o) $(CXXSOURCES:.cpp=.o) $(ASM_SOURCES:.S=.o)) $(LIBCHDR_EXTRA_OBJECTS)
 GNET_TMS_HEADER := $(BUILD)/gnet-generated/tms57002.hxx
 $(GNET_TMS_HEADER): libpcsxcore/arcade/tms57002/tmsinstr.lst libpcsxcore/arcade/tms57002/tmsmake.py
@@ -116,8 +122,13 @@ $(BUILD)/libpcsxcore/arcade/tms57002/tmsops.o: $(GNET_TMS_HEADER)
 
 .PHONY: all clean smoke board-test system11-test system10-test systemgv-test capcom-zn-test taito-fx1-test systemgnet-test gpu-type1-test devices-test FORCE
 all: $(TARGET)
-$(TARGET): $(OBJECTS)
-	$(CXX) -arch arm64 -Wl,-dead_strip -o $@ $^ -lz -lm $(GPU_LIBS)
+$(TARGET): $(OBJECTS) $(SHELF_LIB)
+	$(CXX) -arch arm64 -Wl,-dead_strip -o $@ $(OBJECTS) -lz -lm $(GPU_LIBS)
+# arcade-shelf has its own makefile; it rebuilds only what changed.
+ifneq ($(SHELF_LIB),)
+$(SHELF_LIB): FORCE
+	$(MAKE) -C deps/arcade-shelf build/libarcadeshelf.a
+endif
 $(BUILD)/revision.h:
 	@mkdir -p $(BUILD)
 	@echo '#define REV "mac-harness"' > $@

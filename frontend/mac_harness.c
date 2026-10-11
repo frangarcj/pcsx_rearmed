@@ -9,6 +9,7 @@
 #include <unistd.h>
 #ifdef PCSX_NATIVE_VITA_PATH
 #include <SDL3/SDL.h>
+#include "mac_pause.h"
 #endif
 #include "../libpcsxcore/r3000a.h"
 #include "../libpcsxcore/psxinterpreter.h"
@@ -311,37 +312,55 @@ static void usage(const char *name)
     "[--trace FILE --trace-blocks N] [--cycle-snapshots FILE "
     "--snapshot-start CYCLES --snapshot-interval N] "
     "[--board-bus-trace FILE] [--system12-edge-trace FILE] [--system12-trace-shared-writes | --system12-trace-shared-accesses] "
-    "[--max-blocks N] [--icache] [--drc] [--interactive] [--system12-vblank-sync-only] [--system12-source-step] [--frontend-loop]\n"
+    "[--max-blocks N] [--icache] [--drc] [--interactive [--pause-at N [--pause-script STEPS] [--pause-shot FILE.ppm]]] [--system12-vblank-sync-only] [--system12-source-step] [--frontend-loop]\n"
     "       %s (--gpu-type1-test | --gpu-type1-test-1m)\n", name, name);
 }
 
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
+static const struct { SDL_Scancode key; const char *control; } interactive_keys[] = {
+  {SDL_SCANCODE_5, "coin1"}, {SDL_SCANCODE_1, "p1start"},
+  {SDL_SCANCODE_UP, "p1up"}, {SDL_SCANCODE_DOWN, "p1down"},
+  {SDL_SCANCODE_LEFT, "p1left"}, {SDL_SCANCODE_RIGHT, "p1right"},
+  {SDL_SCANCODE_A, "p1button1"}, {SDL_SCANCODE_S, "p1button2"},
+  {SDL_SCANCODE_D, "p1button3"}, {SDL_SCANCODE_SPACE, "p1button4"}
+};
+static volatile int pause_requested;
+
+static void release_interactive_input(void)
+{
+  for (unsigned i = 0; i < sizeof(interactive_keys) / sizeof(interactive_keys[0]); i++)
+    system12_set_input(interactive_keys[i].control, 0);
+}
+
 static void poll_interactive_input(void)
 {
-  static const struct { SDL_Scancode key; const char *control; } keys[] = {
-    {SDL_SCANCODE_5, "coin1"}, {SDL_SCANCODE_1, "p1start"},
-    {SDL_SCANCODE_UP, "p1up"}, {SDL_SCANCODE_DOWN, "p1down"},
-    {SDL_SCANCODE_LEFT, "p1left"}, {SDL_SCANCODE_RIGHT, "p1right"},
-    {SDL_SCANCODE_A, "p1button1"}, {SDL_SCANCODE_S, "p1button2"},
-    {SDL_SCANCODE_D, "p1button3"}, {SDL_SCANCODE_SPACE, "p1button4"}
-  };
   SDL_Event event;
   while (SDL_PollEvent(&event)) {
     if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
       interrupted = 1;
-    if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
-      for (unsigned i = 0; i < sizeof(keys) / sizeof(keys[0]); i++)
-        system12_set_input(keys[i].control, 0);
-    }
+    if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
+      release_interactive_input();
     if (event.type != SDL_EVENT_KEY_DOWN && event.type != SDL_EVENT_KEY_UP)
       continue;
     if (event.key.repeat) continue;
+    /* Escape pauses, as Start + Select on the Vita. */
     if (event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_ESCAPE)
-      interrupted = 1;
-    for (unsigned i = 0; i < sizeof(keys) / sizeof(keys[0]); i++)
-      if (event.key.scancode == keys[i].key)
-        system12_set_input(keys[i].control, event.type == SDL_EVENT_KEY_DOWN);
+      pause_requested = 1;
+    for (unsigned i = 0; i < sizeof(interactive_keys) / sizeof(interactive_keys[0]); i++)
+      if (event.key.scancode == interactive_keys[i].key)
+        system12_set_input(interactive_keys[i].control, event.type == SDL_EVENT_KEY_DOWN);
   }
+}
+
+/* The pause menu's header: the set's MAME description, else the path's
+ * last part. */
+static void interactive_title(const char *board, char *out, size_t size)
+{
+  const system12_romset_info *info = system12_romset_is_zip(board) ?
+      system12_romset_identify(board) : NULL;
+  const char *slash = strrchr(board, '/');
+  if (info) snprintf(out, size, "%s", info->description);
+  else snprintf(out, size, "%s", slash && slash[1] ? slash + 1 : board);
 }
 
 /* Interactive sound: the board's 88.2 kHz stereo goes to an SDL stream, and
@@ -577,6 +596,11 @@ int main(int argc, char **argv)
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
   unsigned interactive_frame = 0;
   uint64_t interactive_started_ns = 0;
+#if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
+  char interactive_game[256] = "";
+  unsigned pause_at = 0;
+  const char *pause_script = NULL, *pause_shot = NULL;
+#endif
 #endif
   const char *vram_path = NULL;
   struct timespec begin, end;
@@ -628,6 +652,13 @@ int main(int argc, char **argv)
     }
     else if (!strcmp(argv[i], "--drc")) use_drc = 1;
     else if (!strcmp(argv[i], "--interactive")) interactive = 1;
+#if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
+    /* Checks of the pause menu: open it at frame N, press the script's
+     * buttons, save it to a PPM and exit. */
+    else if (!strcmp(argv[i], "--pause-at") && i + 1 < argc) pause_at = (unsigned)atoi(argv[++i]);
+    else if (!strcmp(argv[i], "--pause-script") && i + 1 < argc) pause_script = argv[++i];
+    else if (!strcmp(argv[i], "--pause-shot") && i + 1 < argc) pause_shot = argv[++i];
+#endif
     else if (!strcmp(argv[i], "--system12-vblank-sync-only")) vblank_sync_only = 1;
     else if (!strcmp(argv[i], "--system12-source-step")) source_step = 1;
     else if (!strcmp(argv[i], "--frontend-loop")) frontend_loop = 1;
@@ -1050,7 +1081,8 @@ int main(int argc, char **argv)
     interactive_frame = frame_counter;
     if (open_interactive_audio())
       fprintf(stderr, "Interactive: no audio (%s), pacing at 60 Hz\n", SDL_GetError());
-    fprintf(stderr, "Interactive: 5 coin, 1 start, arrows move, A/S/D/Space buttons, Escape exit\n");
+    interactive_title(board, interactive_game, sizeof(interactive_game));
+    fprintf(stderr, "Interactive: 5 coin, 1 start, arrows move, A/S/D/Space buttons, Escape pause\n");
   }
 #endif
   start_frame = frame_counter; prev_cycle = psxRegs.cycle;
@@ -1089,6 +1121,33 @@ int main(int argc, char **argv)
     if (interactive) {
       if ((blocks & 255) == 0 || frame_counter != interactive_frame)
         poll_interactive_input();
+      if (pause_at && frame_counter - start_frame >= pause_at) {
+        pause_at = 0;
+        pause_requested = 1;
+      }
+      if (pause_requested && frame_counter != interactive_frame) {
+        /* Between frames: the menu draws over the one just presented. */
+        int choice;
+        pause_requested = 0;
+        release_interactive_input();
+        if (interactive_audio) SDL_PauseAudioStreamDevice(interactive_audio);
+        choice = mac_pause_run(interactive_game, pause_script, pause_shot);
+        if (choice == MAC_PAUSE_CLOSE) interrupted = 1;
+        if (choice == MAC_PAUSE_RESTART) {
+          unsigned int elapsed_frames = frame_counter - start_frame;
+          psxReset();
+          start_frame = frame_counter - elapsed_frames;
+          prev_cycle = psxRegs.cycle;
+          slice_steps = 0; slice_started = 0;
+        }
+        if (interactive_audio) {
+          SDL_ClearAudioStream(interactive_audio);
+          SDL_ResumeAudioStreamDevice(interactive_audio);
+        }
+        /* Pace from now, not from before the pause. */
+        interactive_started_ns = SDL_GetTicksNS() -
+            (uint64_t)(frame_counter - start_frame) * 1000000000 / 60;
+      }
       if (frame_counter != interactive_frame) {
         /* Pace presentation only; emulated board clocks remain unchanged. */
         if (interactive_audio)
