@@ -20,12 +20,20 @@
  * drawing the two pending swaps have finished, as the vita2d path does. */
 #define TEX_COUNT 3
 
-extern int (*pcsx_raw_frame_cb)(const void *vram, int ofs, int stride, unsigned mask, int w, int h);
+extern int (*pcsx_raw_frame_cb)(const void *vram, int ofs, int stride, unsigned mask,
+    int x, int y, int w, int h, int disp_w, int disp_h);
+/* GTE projections the widescreen hack squeezed (libpcsxcore/gte.c). */
+extern unsigned gte_widescreen_ops;
 
 static GLuint s_tex[TEX_COUNT], s_program, s_vbo;
 static uint8_t *s_data[TEX_COUNT]; /* the textures' memory, written directly */
 static GLint s_src_loc = -1, s_texsize_loc = -1, s_scale_loc = -1;
-static int s_next, s_ready = -1, s_last = -1, s_w, s_h, s_aspect;
+static int s_next, s_ready = -1, s_last = -1, s_aspect;
+/* Each texture's frame: the w x h picture at x, y on the display (disp_w x
+ * disp_h, the console's canvas or, Borderless, the picture), and whether
+ * it showed 3D (16:9 Unstretched widens only those, as the vitaGL
+ * renderer does). */
+static struct { int x, y, w, h, disp_w, disp_h, wide; } s_frame[TEX_COUNT];
 /* Main-thread time in the present (copy, draw and swap). */
 unsigned long long glp_busy_us;
 
@@ -71,28 +79,62 @@ static GLuint compile(GLenum type, const char *source)
     return shader;
 }
 
-/* Where the picture goes: the 4:3 middle, or the whole screen for 16:9. */
-static void game_rect(int rect[4])
+/* Whether the frame shows 3D: the widescreen hack squeezed a projection
+ * within the last 30 frames (as widescreen_3d_frame, gpu_vita_ctr). */
+static int frame_is_3d(void)
 {
-    const int w = s_aspect ? DISPLAY_W : GAME_W;
-    rect[0] = (DISPLAY_W - w) / 2;
-    rect[1] = 0;
-    rect[2] = w;
-    rect[3] = DISPLAY_H;
+    static unsigned seen, frames_since = 1000;
+    if (gte_widescreen_ops != seen) {
+        seen = gte_widescreen_ops;
+        frames_since = 0;
+    } else if (frames_since < 1000)
+        frames_since++;
+    return frames_since < 30;
 }
 
-static void frame_ready(int w, int h, SceGxmTextureFormat format)
+/* Where texture's picture goes, GL pixels from the bottom left: the
+ * display fills the 4:3 middle, or the whole screen for 16:9 (Unstretched:
+ * 3D frames only), and the picture takes its place on it. */
+static void picture_rect(int texture, int rect[4])
+{
+    const int disp_w = s_frame[texture].disp_w, disp_h = s_frame[texture].disp_h;
+    const int wide = s_aspect == 1 || (s_aspect == 2 && s_frame[texture].wide);
+    const int w = wide ? DISPLAY_W : GAME_W, x0 = (DISPLAY_W - w) / 2;
+    rect[0] = x0 + s_frame[texture].x * w / disp_w;
+    rect[1] = DISPLAY_H - (s_frame[texture].y + s_frame[texture].h) * DISPLAY_H / disp_h;
+    rect[2] = s_frame[texture].w * w / disp_w;
+    rect[3] = s_frame[texture].h * DISPLAY_H / disp_h;
+}
+
+static void last_rect(int rect[4])
+{
+    if (s_last < 0) {
+        rect[0] = (DISPLAY_W - GAME_W) / 2, rect[1] = 0, rect[2] = GAME_W, rect[3] = DISPLAY_H;
+        return;
+    }
+    picture_rect(s_last, rect);
+}
+
+static void frame_ready(int x, int y, int w, int h, int disp_w, int disp_h, SceGxmTextureFormat format)
 {
     glBindTexture(GL_TEXTURE_2D, s_tex[s_next]);
     sceGxmTextureSetFormat(vglGetGxmTexture(GL_TEXTURE_2D), format);
-    s_w = w;
-    s_h = h;
+    if (disp_w < x + w) disp_w = x + w;
+    if (disp_h < y + h) disp_h = y + h;
+    s_frame[s_next].x = x;
+    s_frame[s_next].y = y;
+    s_frame[s_next].w = w;
+    s_frame[s_next].h = h;
+    s_frame[s_next].disp_w = disp_w;
+    s_frame[s_next].disp_h = disp_h;
+    s_frame[s_next].wide = frame_is_3d();
     s_ready = s_next;
     s_next = (s_next + 1) % TEX_COUNT;
 }
 
 /* The displayed VRAM rows, as the core gives them (raw 15-bit). */
-static int glp_raw_frame(const void *vram_, int ofs, int stride, unsigned mask, int w, int h)
+static int glp_raw_frame(const void *vram_, int ofs, int stride, unsigned mask,
+    int pic_x, int pic_y, int w, int h, int disp_w, int disp_h)
 {
     const uint8_t *vram = vram_;
     const SceUInt64 start = sceKernelGetProcessTimeWide();
@@ -113,7 +155,10 @@ static int glp_raw_frame(const void *vram_, int ofs, int stride, unsigned mask, 
             memcpy(out + 2048 - col, vram + (row - col), bytes - (2048 - col));
         }
     }
-    frame_ready(w, h, SCE_GXM_TEXTURE_FORMAT_X1U5U5U5_1BGR);
+    if (pic_x < 0) pic_x = 0;
+    if (pic_y < 0) pic_y = 0;
+    frame_ready(pic_x, pic_y, w, h, disp_w > 0 ? disp_w : w, disp_h > 0 ? disp_h : h,
+        SCE_GXM_TEXTURE_FORMAT_X1U5U5U5_1BGR);
     glp_busy_us += sceKernelGetProcessTimeWide() - start;
     return 1;
 }
@@ -124,7 +169,8 @@ static void rgb565_frame(const void *data, unsigned width, unsigned height, size
     const unsigned w = width > TEX_W ? TEX_W : width, h = height > TEX_H ? TEX_H : height;
     for (unsigned y = 0; y < h; y++)
         memcpy(s_data[s_next] + (size_t)y * TEX_W * 2, (const uint8_t *)data + y * pitch, w * 2);
-    frame_ready((int)w, (int)h, SCE_GXM_TEXTURE_FORMAT_U5U6U5_RGB);
+    /* The converted frame is the whole display, picture placed on it. */
+    frame_ready(0, 0, (int)w, (int)h, (int)w, (int)h, SCE_GXM_TEXTURE_FORMAT_U5U6U5_RGB);
 }
 
 static void draw(int texture)
@@ -139,12 +185,14 @@ static void draw(int texture)
     glClear(GL_COLOR_BUFFER_BIT);
     if (texture < 0)
         return;
-    game_rect(rect);
+    picture_rect(texture, rect);
+    if (rect[2] <= 0 || rect[3] <= 0)
+        return;
     glViewport(rect[0], rect[1], rect[2], rect[3]);
     glUseProgram(s_program);
-    glUniform2f(s_src_loc, (float)s_w, (float)s_h);
+    glUniform2f(s_src_loc, (float)s_frame[texture].w, (float)s_frame[texture].h);
     glUniform2f(s_texsize_loc, (float)TEX_W, (float)TEX_H);
-    glUniform2f(s_scale_loc, (float)rect[2] / s_w, (float)rect[3] / s_h);
+    glUniform2f(s_scale_loc, (float)rect[2] / s_frame[texture].w, (float)rect[3] / s_frame[texture].h);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, s_tex[texture]);
     glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
@@ -177,7 +225,7 @@ static void present_last(void) { draw(s_last); }
 static void swap(void) { vglSwapBuffers(GL_FALSE); }
 static void set_aspect(int mode) { s_aspect = mode; }
 
-static const VitaShelfPresenter k_presenter = { run_here, present_last, game_rect, swap, set_aspect };
+static const VitaShelfPresenter k_presenter = { run_here, present_last, last_rect, swap, set_aspect };
 
 int glp_init(void)
 {

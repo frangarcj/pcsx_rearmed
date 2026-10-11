@@ -457,9 +457,11 @@ static void CrosshairDimensions(int port, struct CrosshairInfo *info) {
 /* Optional frontend hook: take the displayed 15-bit VRAM rectangle as it is
  * (e.g. to scale it on a GPU) instead of the converted frame. Rows start
  * `stride` bytes apart, byte offsets wrap at `mask` and a row wraps within
- * its 2048-byte VRAM line. Return nonzero when the frame was consumed. */
+ * its 2048-byte VRAM line. The w x h picture lies at x, y on the disp_w x
+ * disp_h display (the converted frame's size). Return nonzero when the
+ * frame was consumed. */
 int (*pcsx_raw_frame_cb)(const void *vram, int ofs, int stride, unsigned mask,
-      int w, int h);
+      int x, int y, int w, int h, int disp_w, int disp_h);
 
 extern unsigned gpu_vram_height;
 
@@ -501,7 +503,7 @@ static void vout_flip(const void *vram_, int vram_ofs, int bgr24,
    h = min(h, vout_height);
    if (pcsx_raw_frame_cb && !bgr24 && !enhres &&
        in_enable_crosshair[0] + in_enable_crosshair[1] <= 0 &&
-       pcsx_raw_frame_cb(vram, vram_ofs, sstride, vram_mask, w, h))
+       pcsx_raw_frame_cb(vram, vram_ofs, sstride, vram_mask, x, y, w, h, vout_width, vout_height))
       goto out;
    dest += x * bytes_pp + y * dstride;
 

@@ -13,6 +13,11 @@ static bool is_new_3ds;
 
 int pcsxr_sthread_core_count;
 int pcsxr_gpu2_core = -1;
+/* gpulib's GPU thread's core with the vitaGL renderer (-1: core 2, with
+ * the board); the frontend may choose another for measurements. */
+int pcsxr_gpu_core = -1;
+/* The same for the board thread (-1: core 2). */
+int pcsxr_board_core = -1;
 
 // pcsxr "extensions"
 extern void SysPrintf(const char *fmt, ...);
@@ -102,7 +107,11 @@ sthread_t *pcsxr_sthread_create(void (*thread_func)(void *),
 	 * packets) shares core 2 with the board. */
 #ifdef GPU_VITA_CTR
 	if (h && (type == PCSXRT_GPU || type == PCSXRT_BOARD))
-		sceKernelChangeThreadCpuAffinityMask(h->id, SCE_KERNEL_CPU_MASK_USER_2);
+		sceKernelChangeThreadCpuAffinityMask(h->id,
+			type == PCSXRT_GPU && pcsxr_gpu_core >= 0 && pcsxr_gpu_core <= 3
+			? SCE_KERNEL_CPU_MASK_USER_0 << pcsxr_gpu_core
+			: type == PCSXRT_BOARD && pcsxr_board_core >= 0 && pcsxr_board_core <= 3
+			? SCE_KERNEL_CPU_MASK_USER_0 << pcsxr_board_core : SCE_KERNEL_CPU_MASK_USER_2);
 	/* The board thread falls behind the emulation as soon as it waits for
 	 * the core; the GPU thread has slack (lower number, higher priority). */
 	if (h && type == PCSXRT_GPU)

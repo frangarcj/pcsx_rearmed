@@ -376,7 +376,7 @@ static void gpuprof_swap(void)
  * they are into an uncached texture and the GPU scales them to the screen:
  * no CPU color conversion, and 245 KB written per frame instead of 1.6 MB. */
 extern int (*pcsx_raw_frame_cb)(const void *vram, int ofs, int stride, unsigned mask,
-    int w, int h);
+    int x, int y, int w, int h, int disp_w, int disp_h);
 /* Three textures: the display queue allows two pending swaps, so when a frame
  * writes the texture of the frame three before, that frame's swap has been
  * processed and its rendering is complete. No sceGxmFinish per frame. */
@@ -392,8 +392,10 @@ static vita2d_texture *g_gxm_prescale; /* render target of the sharp pass */
 static int g_prescale_w, g_prescale_h;
 static int g_gxm_next, g_gxm_ready = -1, g_gxm_w, g_gxm_h;
 
-static int gxm_raw_frame(const void *vram_, int ofs, int stride, unsigned mask, int w, int h)
+static int gxm_raw_frame(const void *vram_, int ofs, int stride, unsigned mask,
+    int pic_x, int pic_y, int w, int h, int disp_w, int disp_h)
 {
+    (void)pic_x; (void)pic_y; (void)disp_w; (void)disp_h;
     const uint8_t *vram = vram_;
     vita2d_texture *t = g_gxm_tex[g_gxm_next];
     uint8_t *dst = vita2d_texture_get_datap(t);
@@ -1838,6 +1840,22 @@ int main(int argc, char **argv)
         g_ui_mode = true;
         VitaSettings_Init();
         VitaSaveStates_Init();
+#ifdef VITA_DEBUG_SHOT
+        {
+            /* Measurements: APP_ROOT/gpu_core.txt, "GPU BOARD", picks the
+             * cores of the GPU and board threads (-1: the default). */
+            extern int pcsxr_gpu_core, pcsxr_board_core;
+            char text[16] = { 0 };
+            const SceUID fd = sceIoOpen(APP_ROOT "/gpu_core.txt", SCE_O_RDONLY, 0);
+            if (fd >= 0) {
+                sceIoRead(fd, text, sizeof(text) - 1);
+                sceIoClose(fd);
+                if (sscanf(text, "%d %d", &pcsxr_gpu_core, &pcsxr_board_core) < 1)
+                    pcsxr_gpu_core = -1;
+                sceClibPrintf("pcsx-vita: GPU thread on core %d, board on %d\n", pcsxr_gpu_core, pcsxr_board_core);
+            }
+        }
+#endif
 #ifdef PCSX_REARCADE
         /* The app runs as fast as the measurements do: System 12's board
          * on its own thread, and gpulib's GPU thread. */
