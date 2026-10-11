@@ -32,17 +32,28 @@ typedef struct {
 	unsigned color; /* RGBA, little-endian bytes as ImGui's IM_COL32 */
 } UiVertex3D;
 
-/* Sets the viewport (pixels, top-left origin) and the view-projection
- * matrix (column-major), and enables depth testing. */
-void ui_gl3d_begin(int x, int y, int width, int height, int framebuffer_height, const float view_projection[16]);
+/* Sets the viewport (pixels, top-left origin), the view-projection matrix
+ * (column-major) and the eye position, and enables depth testing. */
+void ui_gl3d_begin(int x, int y, int width, int height, int framebuffer_height,
+	const float view_projection[16], const float eye[3]);
 enum {
-	UI3D_EMISSIVE = 1, /* not shaded (screen, marquee) */
-	UI3D_BLEND = 2     /* alpha blended, no depth writes (shadows) */
+	UI3D_EMISSIVE = 1, /* lit from inside: no diffuse shading (screen, marquee) */
+	UI3D_BLEND = 2,    /* alpha blended, no depth writes (shadows, floor) */
+	UI3D_REFLECTION = 4 /* mirrored below the floor: fades into the floor colour */
 };
-/* Draws triangles with a model matrix; the vertex colours are multiplied
- * by tint (IM_COL32) and light. */
+/* How a surface takes the light. */
+typedef struct {
+	unsigned tint;   /* IM_COL32, multiplies the texture and vertex colours */
+	float specular;  /* highlight strength, 0 for matte */
+	float shininess; /* highlight size: larger is tighter */
+	int flags;       /* UI3D_* */
+} UiMaterial;
+/* Draws triangles with a model matrix, lit per pixel by a key light and a
+ * cool rim light; light scales the result (dimmed neighbours). */
 void ui_gl3d_draw(const UiVertex3D *vertices, int count, unsigned texture, const float model[16],
-	float light, unsigned tint, int flags);
+	float light, const UiMaterial *material);
+/* A texture from RGBA pixels; repeat tiles it. */
+bool ui_gl_texture_rgba(UiTexture *texture, int width, int height, const void *rgba, bool repeat);
 void ui_gl3d_end(void);
 /* A 1x1 white texture for untextured surfaces. */
 unsigned ui_gl_white_texture(void);

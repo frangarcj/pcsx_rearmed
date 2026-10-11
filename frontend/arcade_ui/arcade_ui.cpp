@@ -460,11 +460,13 @@ void ensure_surfaces(const Game &game, Art *art)
 /* The carousel area of the screen, in pixels. */
 const float kStageX = 0.0f, kStageY = 44.0f, kStageW = 584.0f;
 
+const float kEye[3] = { 0.0f, 1.22f, 4.25f };
+
 void stage_camera(float view_projection[16])
 {
 	const float stage_h = (float)s->config.height - kStageY - 44.0f;
 	float projection[16], view[16];
-	const float eye[3] = { 0.0f, 1.22f, 4.25f }, target[3] = { 0.0f, 0.97f, 0.0f }, up[3] = { 0.0f, 1.0f, 0.0f };
+	const float *eye = kEye, target[3] = { 0.0f, 0.97f, 0.0f }, up[3] = { 0.0f, 1.0f, 0.0f };
 	mat4_perspective(projection, 32.0f, kStageW / stage_h, 0.1f, 40.0f);
 	mat4_look_at(view, eye, target, up);
 	mat4_multiply(view_projection, projection, view);
@@ -506,13 +508,16 @@ void draw_stage_3d()
 		ensure_surfaces(game, art_for(game));
 	}
 	stage_camera(view_projection);
-	ui_gl3d_begin((int)kStageX, (int)kStageY, (int)kStageW, (int)stage_h, H, view_projection);
-	for (int i : visible) {
-		cabinet_place(model, (float)i - s->scroll);
-		cabinet3d_shadow(model, std::max(0.3f, 1.0f - 0.3f * fabsf((float)i - s->scroll)));
-	}
-	for (int i : visible) {
+	ui_gl3d_begin((int)kStageX, (int)kStageY, (int)kStageW, (int)stage_h, H, view_projection, kEye);
+	/* Reflections on the floor first (mirrored below it), then shadows, then
+	 * the cabinets. */
+	for (int pass = 0; pass < 3; pass++) for (int i : visible) {
 		const float d = (float)i - s->scroll;
+		if (pass == 1) {
+			cabinet_place(model, d);
+			cabinet3d_shadow(model, std::max(0.3f, 1.0f - 0.3f * fabsf(d)));
+			continue;
+		}
 		Art *art = art_for(s->games[i]);
 		const BoardStyle &style = style_for(s->games[i].board);
 		const float focus = std::max(0.0f, 1.0f - fabsf(d) * 2.0f);
@@ -521,7 +526,16 @@ void draw_stage_3d()
 			/* The selected marquee breathes, as a lit tube does. */
 			1.0f - focus * (0.07f + 0.07f * sinf(s->time * 2.0f * (float)M_PI / 2.5f)) };
 		cabinet_place(model, d);
-		cabinet3d_draw(model, &look);
+		if (pass == 0) {
+			float mirror[16], mirrored[16];
+			mat4_identity(mirror);
+			mirror[5] = -1.0f;
+			mat4_multiply(mirrored, mirror, model);
+			look.light *= 0.45f;
+			cabinet3d_draw(mirrored, &look, 1);
+		} else {
+			cabinet3d_draw(model, &look, 0);
+		}
 	}
 	ui_gl3d_end();
 	(void)W;
@@ -738,7 +752,8 @@ int arcade_ui_frame(unsigned buttons, float stick_x, float stick_y, float dt, ch
 	if (fabsf(stick_x) > 0.2f)
 		s->yaw = fmodf(s->yaw + stick_x * 150.0f * io.DeltaTime, 360.0f);
 	if (fabsf(stick_y) > 0.2f)
-		s->pitch = std::max(-15.0f, std::min(15.0f, s->pitch + stick_y * 45.0f * io.DeltaTime));
+		/* Up brings the top toward the viewer, to look at the control panel. */
+		s->pitch = std::max(-15.0f, std::min(15.0f, s->pitch - stick_y * 45.0f * io.DeltaTime));
 	/* Ease the carousel toward the selected game. */
 	s->scroll += ((float)s->game - s->scroll) * std::min(1.0f, io.DeltaTime * 12.0f);
 	if (fabsf((float)s->game - s->scroll) < 0.001f)

@@ -36,7 +36,7 @@
 static GLuint s_program, s_vbo, s_ibo, s_font_texture, s_white_texture;
 static GLint s_screen_loc = -1;
 static GLuint s_program3d;
-static GLint s_vp_loc = -1, s_model_loc = -1, s_params_loc = -1, s_tint_loc = -1;
+static GLint s_vp_loc = -1, s_model_loc = -1, s_params_loc = -1, s_tint_loc = -1, s_eye_loc = -1, s_floor_loc = -1;
 
 static GLuint compile_shader(GLenum type, const char *source)
 {
@@ -94,7 +94,8 @@ static GLuint link_program(const char *vs, const char *fs, const char *const *at
 	return program;
 }
 
-/* Cabinets: one directional light; emissive surfaces keep their colour. */
+/* Cabinets: per-pixel key light with a Blinn-Phong highlight, and a cool
+ * rim light from behind; emissive surfaces keep their colour. */
 static bool init_3d(void)
 {
 	static const char *vs =
@@ -104,24 +105,42 @@ static bool init_3d(void)
 		"attribute vec4 in_color;\n"
 		"uniform mat4 u_vp;\n"
 		"uniform mat4 u_model;\n"
-		"uniform vec4 u_params;\n" /* light, emissive */
 		"uniform vec4 u_tint;\n"
 		"varying vec2 v_uv;\n"
 		"varying vec4 v_color;\n"
+		"varying vec3 v_normal;\n"
+		"varying vec3 v_world;\n"
 		"void main() {\n"
-		"  gl_Position = u_vp * (u_model * vec4(in_pos, 1.0));\n"
-		"  vec3 n = normalize((u_model * vec4(in_normal, 0.0)).xyz);\n"
-		"  float diffuse = 0.34 + 0.66 * max(dot(n, normalize(vec3(-0.45, 0.55, 0.70))), 0.0);\n"
-		"  float k = mix(diffuse, 1.0, u_params.y) * u_params.x;\n"
-		"  v_color = vec4(in_color.rgb * u_tint.rgb * k, in_color.a * u_tint.a);\n"
+		"  vec4 world = u_model * vec4(in_pos, 1.0);\n"
+		"  gl_Position = u_vp * world;\n"
+		"  v_world = world.xyz;\n"
+		"  v_normal = (u_model * vec4(in_normal, 0.0)).xyz;\n"
+		"  v_color = in_color * u_tint;\n"
 		"  v_uv = in_uv;\n"
 		"}\n";
 	static const char *fs =
 		"uniform sampler2D u_texture;\n"
+		"uniform vec4 u_params;\n" /* light, emissive, specular, shininess */
+		"uniform vec3 u_eye;\n"
+		"uniform vec4 u_floor;\n" /* floor colour, reflection on */
 		"varying vec2 v_uv;\n"
 		"varying vec4 v_color;\n"
+		"varying vec3 v_normal;\n"
+		"varying vec3 v_world;\n"
 		"void main() {\n"
-		"  gl_FragColor = texture2D(u_texture, v_uv) * v_color;\n"
+		"  vec4 base = texture2D(u_texture, v_uv) * v_color;\n"
+		"  vec3 n = normalize(v_normal);\n"
+		"  vec3 key = normalize(vec3(-0.45, 0.60, 0.66));\n"
+		"  vec3 rim = normalize(vec3(0.70, 0.35, -0.62));\n"
+		"  vec3 view = normalize(u_eye - v_world);\n"
+		"  float diffuse = 0.30 + 0.70 * max(dot(n, key), 0.0);\n"
+		"  vec3 shaded = base.rgb * mix(diffuse, 1.0, u_params.y);\n"
+		"  float highlight = pow(max(dot(n, normalize(key + view)), 0.0), u_params.w) * u_params.z;\n"
+		"  float edge = pow(1.0 - max(dot(n, view), 0.0), 3.0) * max(dot(n, rim), 0.0);\n"
+		"  vec3 color = shaded + vec3(highlight) + vec3(0.35, 0.45, 0.75) * edge * (1.0 - u_params.y);\n"
+		"  color *= u_params.x;\n"
+		"  float fade = clamp(0.72 - v_world.y * 2.6, 0.0, 1.0) * u_floor.a;\n"
+		"  gl_FragColor = vec4(mix(color, u_floor.rgb, fade), base.a);\n"
 		"}\n";
 	static const char *const attributes[] = { "in_pos", "in_normal", "in_uv", "in_color" };
 	s_program3d = link_program(vs, fs, attributes, 4);
@@ -131,6 +150,8 @@ static bool init_3d(void)
 	s_model_loc = glGetUniformLocation(s_program3d, "u_model");
 	s_params_loc = glGetUniformLocation(s_program3d, "u_params");
 	s_tint_loc = glGetUniformLocation(s_program3d, "u_tint");
+	s_eye_loc = glGetUniformLocation(s_program3d, "u_eye");
+	s_floor_loc = glGetUniformLocation(s_program3d, "u_floor");
 	glUseProgram(s_program3d);
 	glUniform1i(glGetUniformLocation(s_program3d, "u_texture"), 0);
 	glUseProgram(0);
@@ -313,12 +334,25 @@ bool ui_gl_render_to_texture(UiTexture *texture, int width, int height,
 	return texture->id != 0;
 }
 
+bool ui_gl_texture_rgba(UiTexture *texture, int width, int height, const void *rgba, bool repeat)
+{
+	texture->id = make_texture(width, height, rgba);
+	texture->width = width;
+	texture->height = height;
+	if (repeat) {
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	}
+	return texture->id != 0;
+}
+
 unsigned ui_gl_white_texture(void)
 {
 	return s_white_texture;
 }
 
-void ui_gl3d_begin(int x, int y, int width, int height, int framebuffer_height, const float view_projection[16])
+void ui_gl3d_begin(int x, int y, int width, int height, int framebuffer_height,
+	const float view_projection[16], const float eye[3])
 {
 	glViewport(x, framebuffer_height - y - height, width, height);
 	glEnable(GL_SCISSOR_TEST);
@@ -331,6 +365,7 @@ void ui_gl3d_begin(int x, int y, int width, int height, int framebuffer_height, 
 	glDisable(GL_CULL_FACE);
 	glUseProgram(s_program3d);
 	glUniformMatrix4fv(s_vp_loc, 1, GL_FALSE, view_projection);
+	glUniform3f(s_eye_loc, eye[0], eye[1], eye[2]);
 	glActiveTexture(GL_TEXTURE0);
 	glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
 	for (int i = 0; i < 4; i++)
@@ -338,15 +373,19 @@ void ui_gl3d_begin(int x, int y, int width, int height, int framebuffer_height, 
 }
 
 void ui_gl3d_draw(const UiVertex3D *vertices, int count, unsigned texture, const float model[16],
-	float light, unsigned tint, int flags)
+	float light, const UiMaterial *material)
 {
+	const unsigned tint = material->tint;
+	const int flags = material->flags;
 	if (flags & UI3D_BLEND) {
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 		glDepthMask(GL_FALSE);
 	}
 	glUniformMatrix4fv(s_model_loc, 1, GL_FALSE, model);
-	glUniform4f(s_params_loc, light, (flags & UI3D_EMISSIVE) ? 1.0f : 0.0f, 0.0f, 0.0f);
+	glUniform4f(s_params_loc, light, (flags & UI3D_EMISSIVE) ? 1.0f : 0.0f, material->specular,
+		material->shininess > 1.0f ? material->shininess : 1.0f);
+	glUniform4f(s_floor_loc, 0.085f, 0.10f, 0.19f, (flags & UI3D_REFLECTION) ? 1.0f : 0.0f);
 	glUniform4f(s_tint_loc, (tint & 0xff) / 255.0f, ((tint >> 8) & 0xff) / 255.0f,
 		((tint >> 16) & 0xff) / 255.0f, ((tint >> 24) & 0xff) / 255.0f);
 	glBindTexture(GL_TEXTURE_2D, texture);

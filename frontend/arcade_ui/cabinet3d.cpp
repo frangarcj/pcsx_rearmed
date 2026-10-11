@@ -136,7 +136,10 @@ const float kSide = 0.035f; /* side panel thickness */
 
 std::vector<UiVertex3D> s_surface[SURFACES];
 std::vector<UiVertex3D> s_sides, s_molding, s_shadow;
-UiTexture s_panel, s_shadow_texture;
+/* Controls on the panel: glossy plastic (balls, buttons), black parts,
+ * metal shafts. */
+std::vector<UiVertex3D> s_glossy, s_black, s_metal;
+UiTexture s_panel, s_shadow_texture, s_grain;
 
 void vertex(std::vector<UiVertex3D> &out, float x, float y, float z, const float n[3], float u, float v, ImU32 color)
 {
@@ -207,6 +210,141 @@ ImU32 surface_color(Surface surface)
 	}
 }
 
+/* A point on the control panel: x across, t from its front edge (0) to its
+ * back (1), h above its surface. */
+struct PanelFrame {
+	float origin[3], along[3], normal[3];
+	void at(float x, float t, float h, float out[3]) const
+	{
+		for (int i = 0; i < 3; i++)
+			out[i] = origin[i] + along[i] * t + normal[i] * h;
+		out[0] += x;
+	}
+};
+
+PanelFrame panel_frame()
+{
+	/* Segment D -> E of the profile is the panel top. */
+	const ProfilePoint &d = kProfile[3], &e = kProfile[4];
+	PanelFrame f;
+	f.origin[0] = 0.0f; f.origin[1] = d.y; f.origin[2] = d.z;
+	f.along[0] = 0.0f; f.along[1] = e.y - d.y; f.along[2] = e.z - d.z;
+	f.normal[0] = 0.0f; f.normal[1] = -(e.z - d.z); f.normal[2] = e.y - d.y;
+	normalize3(f.normal);
+	return f;
+}
+
+/* A cylinder standing on the panel at base, along the panel normal, with
+ * its top cap; caps can also be a dome (sphere_top). */
+void cylinder(std::vector<UiVertex3D> &out, const PanelFrame &f, const float base[3], float radius,
+	float height, ImU32 side_color, ImU32 top_color)
+{
+	enum { SEGMENTS = 18 };
+	/* A frame around the panel normal: x and the panel's "along" direction. */
+	float u[3] = { 1.0f, 0.0f, 0.0f }, w[3];
+	w[0] = f.normal[1] * u[2] - f.normal[2] * u[1];
+	w[1] = f.normal[2] * u[0] - f.normal[0] * u[2];
+	w[2] = f.normal[0] * u[1] - f.normal[1] * u[0];
+	normalize3(w);
+	for (int i = 0; i < SEGMENTS; i++) {
+		const float a0 = 2.0f * (float)M_PI * i / SEGMENTS, a1 = 2.0f * (float)M_PI * (i + 1) / SEGMENTS;
+		float r0[3], r1[3], p[4][3], top[3], t0[3], t1[3];
+		for (int k = 0; k < 3; k++) {
+			r0[k] = u[k] * cosf(a0) + w[k] * sinf(a0);
+			r1[k] = u[k] * cosf(a1) + w[k] * sinf(a1);
+			p[0][k] = base[k] + r0[k] * radius;
+			p[1][k] = base[k] + r1[k] * radius;
+			p[2][k] = p[1][k] + f.normal[k] * height;
+			p[3][k] = p[0][k] + f.normal[k] * height;
+			top[k] = base[k] + f.normal[k] * height;
+			t0[k] = p[3][k];
+			t1[k] = p[2][k];
+		}
+		float n0[3] = { r0[0], r0[1], r0[2] }, n1[3] = { r1[0], r1[1], r1[2] };
+		vertex(out, p[0][0], p[0][1], p[0][2], n0, 0, 0, side_color);
+		vertex(out, p[1][0], p[1][1], p[1][2], n1, 0, 0, side_color);
+		vertex(out, p[2][0], p[2][1], p[2][2], n1, 0, 0, side_color);
+		vertex(out, p[0][0], p[0][1], p[0][2], n0, 0, 0, side_color);
+		vertex(out, p[2][0], p[2][1], p[2][2], n1, 0, 0, side_color);
+		vertex(out, p[3][0], p[3][1], p[3][2], n0, 0, 0, side_color);
+		vertex(out, top[0], top[1], top[2], f.normal, 0, 0, top_color);
+		vertex(out, t0[0], t0[1], t0[2], f.normal, 0, 0, top_color);
+		vertex(out, t1[0], t1[1], t1[2], f.normal, 0, 0, top_color);
+	}
+}
+
+void sphere(std::vector<UiVertex3D> &out, const float center[3], float radius, ImU32 color)
+{
+	enum { RINGS = 10, SEGMENTS = 18 };
+	for (int r = 0; r < RINGS; r++)
+		for (int i = 0; i < SEGMENTS; i++) {
+			float n[4][3], p[4][3];
+			const int corners[4][2] = { { r, i }, { r, i + 1 }, { r + 1, i + 1 }, { r + 1, i } };
+			for (int c = 0; c < 4; c++) {
+				const float lat = (float)M_PI * corners[c][0] / RINGS - (float)M_PI * 0.5f;
+				const float lon = 2.0f * (float)M_PI * corners[c][1] / SEGMENTS;
+				n[c][0] = cosf(lat) * cosf(lon);
+				n[c][1] = sinf(lat);
+				n[c][2] = cosf(lat) * sinf(lon);
+				for (int k = 0; k < 3; k++)
+					p[c][k] = center[k] + n[c][k] * radius;
+			}
+			static const int order[6] = { 0, 1, 2, 0, 2, 3 };
+			for (int k : order)
+				vertex(out, p[k][0], p[k][1], p[k][2], n[k], 0, 0, color);
+		}
+}
+
+/* Two players: a stick and four buttons each, Namco style. */
+void build_controls()
+{
+	static const ImU32 buttons[4] = { IM_COL32(240, 200, 30, 255), IM_COL32(40, 110, 240, 255),
+		IM_COL32(40, 190, 80, 255), IM_COL32(230, 50, 60, 255) };
+	static const float layout[4][2] = { { 0.030f, 0.64f }, { 0.074f, 0.68f }, { 0.036f, 0.34f }, { 0.080f, 0.38f } };
+	const PanelFrame f = panel_frame();
+	for (int player = 0; player < 2; player++) {
+		const float x0 = player ? 0.155f : -0.155f;
+		float base[3], top[3];
+		/* Stick: a dust washer, a metal shaft and the ball. */
+		f.at(x0 - 0.075f, 0.5f, 0.0f, base);
+		cylinder(s_black, f, base, 0.030f, 0.005f, IM_COL32(14, 14, 16, 255), IM_COL32(24, 24, 28, 255));
+		cylinder(s_metal, f, base, 0.0065f, 0.066f, IM_COL32(170, 172, 180, 255), IM_COL32(170, 172, 180, 255));
+		f.at(x0 - 0.075f, 0.5f, 0.088f, top);
+		sphere(s_glossy, top, 0.027f, IM_COL32(205, 28, 36, 255));
+		/* Buttons: a black ring and a coloured plunger. */
+		for (int i = 0; i < 4; i++) {
+			f.at(x0 + layout[i][0] - 0.02f, layout[i][1], 0.0f, base);
+			cylinder(s_black, f, base, 0.0215f, 0.006f, IM_COL32(12, 12, 14, 255), IM_COL32(20, 20, 24, 255));
+			cylinder(s_glossy, f, base, 0.0170f, 0.016f, buttons[i], buttons[i]);
+		}
+	}
+}
+
+/* Laminate grain: soft streaks along the panel with fine speckle. */
+void make_grain(UiTexture *texture)
+{
+	enum { SIZE = 128 };
+	std::vector<unsigned char> pixels(SIZE * SIZE * 4);
+	unsigned seed = 12345u;
+	float row_noise[SIZE];
+	for (int y = 0; y < SIZE; y++) {
+		seed = seed * 1103515245u + 12345u;
+		row_noise[y] = (float)((seed >> 16) & 0xff) / 255.0f;
+	}
+	for (int y = 0; y < SIZE; y++)
+		for (int x = 0; x < SIZE; x++) {
+			seed = seed * 1103515245u + 12345u;
+			const float speckle = (float)((seed >> 16) & 0xff) / 255.0f;
+			const float streak = 0.5f + 0.5f * sinf((float)x * 0.21f + row_noise[(y / 3) % SIZE] * 6.0f);
+			const float value = 0.84f + 0.07f * streak + 0.06f * speckle;
+			const unsigned char v = (unsigned char)(value > 1.0f ? 255 : value * 255.0f);
+			unsigned char *p = &pixels[(y * SIZE + x) * 4];
+			p[0] = p[1] = p[2] = v;
+			p[3] = 255;
+		}
+	ui_gl_texture_rgba(texture, SIZE, SIZE, pixels.data(), true);
+}
+
 void build_mesh()
 {
 	const float half = CABINET3D_WIDTH * 0.5f, inner = half - kSide;
@@ -235,9 +373,12 @@ void build_mesh()
 				const int index = triangles[t + (side > 0 ? k : 2 - k)];
 				const ProfilePoint &p = kProfile[index];
 				const int shade = (int)(255.0f * (0.55f + 0.45f * (p.y / CABINET3D_HEIGHT)));
-				vertex(s_sides, side * half, p.y, p.z, n, 0, 0, IM_COL32(shade, shade, shade, 255));
+				/* Grain runs along the panel: tile the texture over it. */
+				vertex(s_sides, side * half, p.y, p.z, n, (p.z + 0.42f) * 1.6f, p.y * 1.1f,
+					IM_COL32(shade, shade, shade, 255));
 			}
 	}
+	build_controls();
 	/* Floor shadow: a quad under the cabinet with a radial texture. */
 	const float up[3] = { 0, 1, 0 };
 	const float shadow[4][3] = { { -0.75f, 0.002f, 1.05f }, { 0.75f, 0.002f, 1.05f },
@@ -246,26 +387,26 @@ void build_mesh()
 	quad(s_shadow, shadow, up, IM_COL32(255, 255, 255, 255), uv);
 }
 
-/* Control panel seen from above: a stick and four buttons, with highlights. */
+/* Control panel top: a dark brushed finish with a player divider; the
+ * sticks and buttons are geometry. */
 void draw_panel(ImDrawList *draw, void *)
 {
 	const float W = 512, H = 160;
-	draw->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(W, H), IM_COL32(58, 58, 66, 255), IM_COL32(58, 58, 66, 255),
-		IM_COL32(34, 34, 40, 255), IM_COL32(34, 34, 40, 255));
-	draw->AddLine(ImVec2(0, 2), ImVec2(W, 2), IM_COL32(255, 255, 255, 50), 3.0f);
-	/* Stick: a dust washer, the shaft seen from above, and the ball. */
-	const ImVec2 stick(150, 82);
-	draw->AddCircleFilled(stick, 30, IM_COL32(20, 20, 24, 255), 32);
-	draw->AddCircleFilled(ImVec2(stick.x, stick.y - 4), 24, IM_COL32(200, 30, 40, 255), 32);
-	draw->AddCircleFilled(ImVec2(stick.x - 7, stick.y - 12), 8, IM_COL32(255, 140, 140, 200), 16);
-	static const ImU32 colors[4] = { IM_COL32(255, 196, 0, 255), IM_COL32(40, 120, 255, 255),
-		IM_COL32(40, 200, 90, 255), IM_COL32(240, 60, 70, 255) };
-	for (int i = 0; i < 4; i++) {
-		const ImVec2 c(290.0f + (i % 2) * 62.0f + (i / 2) * 18.0f, 58.0f + (i / 2) * 50.0f - (i % 2) * 8.0f);
-		draw->AddCircleFilled(c, 21, IM_COL32(16, 16, 20, 255), 28);
-		draw->AddCircleFilled(c, 17, colors[i], 28);
-		draw->AddCircleFilled(ImVec2(c.x - 5, c.y - 6), 6, IM_COL32(255, 255, 255, 110), 16);
+	draw->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(W, H), IM_COL32(64, 64, 72, 255), IM_COL32(64, 64, 72, 255),
+		IM_COL32(36, 36, 42, 255), IM_COL32(36, 36, 42, 255));
+	unsigned seed = 99u;
+	for (int i = 0; i < 260; i++) {
+		seed = seed * 1103515245u + 12345u;
+		const float y = (float)((seed >> 8) % 160);
+		const int a = 6 + (int)((seed >> 20) % 14);
+		draw->AddLine(ImVec2(0, y), ImVec2(W, y), IM_COL32(255, 255, 255, a), 1.0f);
 	}
+	draw->AddLine(ImVec2(0, 2), ImVec2(W, 2), IM_COL32(255, 255, 255, 60), 3.0f);
+	draw->AddLine(ImVec2(W * 0.5f, 12), ImVec2(W * 0.5f, H - 12), IM_COL32(0, 0, 0, 90), 3.0f);
+	/* Outside an ImGui frame there is no current font: name one. */
+	ImFont *font = ImGui::GetIO().Fonts->Fonts[0];
+	draw->AddText(font, 18.0f, ImVec2(20, H - 28), IM_COL32(255, 255, 255, 70), "1P");
+	draw->AddText(font, 18.0f, ImVec2(W - 44, H - 28), IM_COL32(255, 255, 255, 70), "2P");
 }
 
 /* Kick panel: body colour, a coin door with two lit slots. */
@@ -298,6 +439,7 @@ void draw_shadow(ImDrawList *draw, void *)
 bool cabinet3d_init(void)
 {
 	build_mesh();
+	make_grain(&s_grain);
 	return ui_gl_render_to_texture(&s_panel, 512, 160, draw_panel, NULL) &&
 		ui_gl_render_to_texture(&s_shadow_texture, 128, 128, draw_shadow, NULL);
 }
@@ -314,6 +456,10 @@ void cabinet3d_shutdown(void)
 {
 	ui_gl_free_texture(&s_panel);
 	ui_gl_free_texture(&s_shadow_texture);
+	ui_gl_free_texture(&s_grain);
+	s_glossy.clear();
+	s_black.clear();
+	s_metal.clear();
 	for (auto &surface : s_surface)
 		surface.clear();
 	s_sides.clear();
@@ -321,33 +467,46 @@ void cabinet3d_shutdown(void)
 	s_shadow.clear();
 }
 
-void cabinet3d_draw(const float model[16], const CabinetLook *look)
+void cabinet3d_draw(const float model[16], const CabinetLook *look, int reflection)
 {
 	const unsigned white = ui_gl_white_texture();
 	const unsigned plain = IM_COL32(255, 255, 255, 255);
-	ui_gl3d_draw(s_sides.data(), (int)s_sides.size(), white, model, look->light, look->body, 0);
-	ui_gl3d_draw(s_molding.data(), (int)s_molding.size(), white, model, look->light, look->molding, 0);
+	const int mirrored = reflection ? UI3D_REFLECTION : 0;
+	/* Laminate sides, glossy T-molding. */
+	UiMaterial laminate = { look->body, 0.18f, 24.0f, mirrored };
+	UiMaterial molding = { look->molding, 0.30f, 40.0f, mirrored };
+	ui_gl3d_draw(s_sides.data(), (int)s_sides.size(), s_grain.id, model, look->light, &laminate);
+	ui_gl3d_draw(s_molding.data(), (int)s_molding.size(), white, model, look->light, &molding);
 	for (int surface = 0; surface < SURFACES; surface++) {
 		const std::vector<UiVertex3D> &mesh = s_surface[surface];
-		unsigned texture = white, tint = plain;
+		unsigned texture = white;
 		float light = look->light;
-		int flags = 0;
+		UiMaterial material = { plain, 0.25f, 30.0f, mirrored };
 		if (mesh.empty())
 			continue;
 		switch (surface) {
-		case PANEL: texture = s_panel.id; break;
-		case KICK: texture = look->kick; break;
-		case BODY: tint = look->body; break;
-		case SCREEN: texture = look->screen; flags = UI3D_EMISSIVE; break;
-		case MARQUEE: texture = look->marquee; flags = UI3D_EMISSIVE; light *= look->marquee_light; break;
+		case PANEL: texture = s_panel.id; material.specular = 0.35f; material.shininess = 48.0f; break;
+		case KICK: texture = look->kick; material.specular = 0.15f; material.shininess = 20.0f; break;
+		case BODY: texture = s_grain.id; material.tint = look->body; material.specular = 0.15f; break;
+		/* Glass and plexiglass: lit from inside, with a sharp highlight. */
+		case SCREEN: texture = look->screen; material.flags |= UI3D_EMISSIVE;
+			material.specular = 0.55f; material.shininess = 90.0f; break;
+		case MARQUEE: texture = look->marquee; material.flags |= UI3D_EMISSIVE;
+			material.specular = 0.30f; material.shininess = 60.0f; light *= look->marquee_light; break;
 		default: break;
 		}
-		ui_gl3d_draw(mesh.data(), (int)mesh.size(), texture ? texture : white, model, light, tint, flags);
+		ui_gl3d_draw(mesh.data(), (int)mesh.size(), texture ? texture : white, model, light, &material);
 	}
+	UiMaterial plastic = { plain, 0.75f, 60.0f, mirrored };
+	UiMaterial black = { plain, 0.30f, 32.0f, mirrored };
+	UiMaterial metal = { plain, 0.90f, 90.0f, mirrored };
+	ui_gl3d_draw(s_black.data(), (int)s_black.size(), white, model, look->light, &black);
+	ui_gl3d_draw(s_metal.data(), (int)s_metal.size(), white, model, look->light, &metal);
+	ui_gl3d_draw(s_glossy.data(), (int)s_glossy.size(), white, model, look->light, &plastic);
 }
 
 void cabinet3d_shadow(const float model[16], float strength)
 {
-	ui_gl3d_draw(s_shadow.data(), (int)s_shadow.size(), s_shadow_texture.id, model, strength,
-		IM_COL32(255, 255, 255, 255), UI3D_EMISSIVE | UI3D_BLEND);
+	UiMaterial shadow = { IM_COL32(255, 255, 255, 255), 0.0f, 1.0f, UI3D_EMISSIVE | UI3D_BLEND };
+	ui_gl3d_draw(s_shadow.data(), (int)s_shadow.size(), s_shadow_texture.id, model, strength, &shadow);
 }

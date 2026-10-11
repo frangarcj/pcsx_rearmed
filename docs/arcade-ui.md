@@ -36,12 +36,25 @@ along their edges. The front surfaces run between the panels, one per
 profile segment:
 
 - kick panel with a coin door;
-- control panel with a stick and four buttons;
+- control panel with two players' controls, which are geometry: each has
+  a stick (dust washer, metal shaft, red ball) and four buttons (black ring,
+  coloured plunger);
 - screen, which leans back;
 - marquee, under an overhang.
 
-One directional light shades the cabinet. The marquee and the screen are
-lit (not shaded). Per game, both are drawn once with ImGui into textures:
+Each surface has a material, lit per pixel by a key light with a
+Blinn-Phong highlight and a cool rim light from behind:
+
+- laminate sides with a procedural grain;
+- glossy T-molding;
+- a brushed control panel;
+- semi-matte black plastic;
+- glossy balls and buttons;
+- metal shafts.
+
+The marquee (plexiglass) and the screen (glass) are lit from inside, with
+a sharp highlight. Cabinets are also drawn mirrored below the floor, darker
+and fading with depth, as a reflection. Per game, both are drawn once with ImGui into textures:
 
 - the marquee art, or the title on a gradient;
 - the snap inside a bezel, under a glass reflection.
