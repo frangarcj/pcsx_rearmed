@@ -33,9 +33,8 @@ unsigned cabinet3d_kick_texture(unsigned body_top, unsigned body_bottom);
  * kick panel); needs ImGui and the GL context. */
 bool cabinet3d_init(void);
 void cabinet3d_shutdown(void);
-/* Draws a cabinet; call between ui_gl3d_begin and ui_gl3d_end. With
- * reflection, model must mirror it below the floor (y -> -y). */
-void cabinet3d_draw(const float model[16], const CabinetLook *look, int reflection);
+/* Draws a cabinet; call between ui_gl3d_begin and ui_gl3d_end. */
+void cabinet3d_draw(const float model[16], const CabinetLook *look);
 /* A soft shadow on the floor under the cabinet; draw before the cabinets. */
 void cabinet3d_shadow(const float model[16], float strength);
 

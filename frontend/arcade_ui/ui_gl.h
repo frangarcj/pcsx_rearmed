@@ -38,8 +38,7 @@ void ui_gl3d_begin(int x, int y, int width, int height, int framebuffer_height,
 	const float view_projection[16], const float eye[3]);
 enum {
 	UI3D_EMISSIVE = 1, /* lit from inside: no diffuse shading (screen, marquee) */
-	UI3D_BLEND = 2,    /* alpha blended, no depth writes (shadows, floor) */
-	UI3D_REFLECTION = 4 /* mirrored below the floor: fades into the floor colour */
+	UI3D_BLEND = 2     /* alpha blended, no depth writes (shadows) */
 };
 /* How a surface takes the light. */
 typedef struct {

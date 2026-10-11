@@ -53,8 +53,7 @@ Blinn-Phong highlight and a cool rim light from behind:
 - metal shafts.
 
 The marquee (plexiglass) and the screen (glass) are lit from inside, with
-a sharp highlight. Cabinets are also drawn mirrored below the floor, darker
-and fading with depth, as a reflection. Per game, both are drawn once with ImGui into textures:
+a sharp highlight. Per game, both are drawn once with ImGui into textures:
 
 - the marquee art, or the title on a gradient;
 - the snap inside a bezel, under a glass reflection.

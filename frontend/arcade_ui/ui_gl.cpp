@@ -36,7 +36,7 @@
 static GLuint s_program, s_vbo, s_ibo, s_font_texture, s_white_texture;
 static GLint s_screen_loc = -1;
 static GLuint s_program3d;
-static GLint s_vp_loc = -1, s_model_loc = -1, s_params_loc = -1, s_tint_loc = -1, s_eye_loc = -1, s_floor_loc = -1;
+static GLint s_vp_loc = -1, s_model_loc = -1, s_params_loc = -1, s_tint_loc = -1, s_eye_loc = -1;
 
 static GLuint compile_shader(GLenum type, const char *source)
 {
@@ -122,7 +122,6 @@ static bool init_3d(void)
 		"uniform sampler2D u_texture;\n"
 		"uniform vec4 u_params;\n" /* light, emissive, specular, shininess */
 		"uniform vec3 u_eye;\n"
-		"uniform vec4 u_floor;\n" /* floor colour, reflection on */
 		"varying vec2 v_uv;\n"
 		"varying vec4 v_color;\n"
 		"varying vec3 v_normal;\n"
@@ -138,9 +137,7 @@ static bool init_3d(void)
 		"  float highlight = pow(max(dot(n, normalize(key + view)), 0.0), u_params.w) * u_params.z;\n"
 		"  float edge = pow(1.0 - max(dot(n, view), 0.0), 3.0) * max(dot(n, rim), 0.0);\n"
 		"  vec3 color = shaded + vec3(highlight) + vec3(0.35, 0.45, 0.75) * edge * (1.0 - u_params.y);\n"
-		"  color *= u_params.x;\n"
-		"  float fade = clamp(0.72 - v_world.y * 2.6, 0.0, 1.0) * u_floor.a;\n"
-		"  gl_FragColor = vec4(mix(color, u_floor.rgb, fade), base.a);\n"
+		"  gl_FragColor = vec4(color * u_params.x, base.a);\n"
 		"}\n";
 	static const char *const attributes[] = { "in_pos", "in_normal", "in_uv", "in_color" };
 	s_program3d = link_program(vs, fs, attributes, 4);
@@ -151,7 +148,6 @@ static bool init_3d(void)
 	s_params_loc = glGetUniformLocation(s_program3d, "u_params");
 	s_tint_loc = glGetUniformLocation(s_program3d, "u_tint");
 	s_eye_loc = glGetUniformLocation(s_program3d, "u_eye");
-	s_floor_loc = glGetUniformLocation(s_program3d, "u_floor");
 	glUseProgram(s_program3d);
 	glUniform1i(glGetUniformLocation(s_program3d, "u_texture"), 0);
 	glUseProgram(0);
@@ -385,7 +381,6 @@ void ui_gl3d_draw(const UiVertex3D *vertices, int count, unsigned texture, const
 	glUniformMatrix4fv(s_model_loc, 1, GL_FALSE, model);
 	glUniform4f(s_params_loc, light, (flags & UI3D_EMISSIVE) ? 1.0f : 0.0f, material->specular,
 		material->shininess > 1.0f ? material->shininess : 1.0f);
-	glUniform4f(s_floor_loc, 0.085f, 0.10f, 0.19f, (flags & UI3D_REFLECTION) ? 1.0f : 0.0f);
 	glUniform4f(s_tint_loc, (tint & 0xff) / 255.0f, ((tint >> 8) & 0xff) / 255.0f,
 		((tint >> 16) & 0xff) / 255.0f, ((tint >> 24) & 0xff) / 255.0f);
 	glBindTexture(GL_TEXTURE_2D, texture);

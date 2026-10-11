@@ -467,21 +467,20 @@ void cabinet3d_shutdown(void)
 	s_shadow.clear();
 }
 
-void cabinet3d_draw(const float model[16], const CabinetLook *look, int reflection)
+void cabinet3d_draw(const float model[16], const CabinetLook *look)
 {
 	const unsigned white = ui_gl_white_texture();
 	const unsigned plain = IM_COL32(255, 255, 255, 255);
-	const int mirrored = reflection ? UI3D_REFLECTION : 0;
 	/* Laminate sides, glossy T-molding. */
-	UiMaterial laminate = { look->body, 0.18f, 24.0f, mirrored };
-	UiMaterial molding = { look->molding, 0.30f, 40.0f, mirrored };
+	UiMaterial laminate = { look->body, 0.18f, 24.0f, 0 };
+	UiMaterial molding = { look->molding, 0.30f, 40.0f, 0 };
 	ui_gl3d_draw(s_sides.data(), (int)s_sides.size(), s_grain.id, model, look->light, &laminate);
 	ui_gl3d_draw(s_molding.data(), (int)s_molding.size(), white, model, look->light, &molding);
 	for (int surface = 0; surface < SURFACES; surface++) {
 		const std::vector<UiVertex3D> &mesh = s_surface[surface];
 		unsigned texture = white;
 		float light = look->light;
-		UiMaterial material = { plain, 0.25f, 30.0f, mirrored };
+		UiMaterial material = { plain, 0.25f, 30.0f, 0 };
 		if (mesh.empty())
 			continue;
 		switch (surface) {
@@ -497,9 +496,9 @@ void cabinet3d_draw(const float model[16], const CabinetLook *look, int reflecti
 		}
 		ui_gl3d_draw(mesh.data(), (int)mesh.size(), texture ? texture : white, model, light, &material);
 	}
-	UiMaterial plastic = { plain, 0.75f, 60.0f, mirrored };
-	UiMaterial black = { plain, 0.30f, 32.0f, mirrored };
-	UiMaterial metal = { plain, 0.90f, 90.0f, mirrored };
+	UiMaterial plastic = { plain, 0.75f, 60.0f, 0 };
+	UiMaterial black = { plain, 0.30f, 32.0f, 0 };
+	UiMaterial metal = { plain, 0.90f, 90.0f, 0 };
 	ui_gl3d_draw(s_black.data(), (int)s_black.size(), white, model, look->light, &black);
 	ui_gl3d_draw(s_metal.data(), (int)s_metal.size(), white, model, look->light, &metal);
 	ui_gl3d_draw(s_glossy.data(), (int)s_glossy.size(), white, model, look->light, &plastic);

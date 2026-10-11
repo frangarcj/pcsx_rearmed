@@ -509,11 +509,10 @@ void draw_stage_3d()
 	}
 	stage_camera(view_projection);
 	ui_gl3d_begin((int)kStageX, (int)kStageY, (int)kStageW, (int)stage_h, H, view_projection, kEye);
-	/* Reflections on the floor first (mirrored below it), then shadows, then
-	 * the cabinets. */
-	for (int pass = 0; pass < 3; pass++) for (int i : visible) {
+	/* Shadows first, then the cabinets. */
+	for (int pass = 0; pass < 2; pass++) for (int i : visible) {
 		const float d = (float)i - s->scroll;
-		if (pass == 1) {
+		if (pass == 0) {
 			cabinet_place(model, d);
 			cabinet3d_shadow(model, std::max(0.3f, 1.0f - 0.3f * fabsf(d)));
 			continue;
@@ -526,16 +525,7 @@ void draw_stage_3d()
 			/* The selected marquee breathes, as a lit tube does. */
 			1.0f - focus * (0.07f + 0.07f * sinf(s->time * 2.0f * (float)M_PI / 2.5f)) };
 		cabinet_place(model, d);
-		if (pass == 0) {
-			float mirror[16], mirrored[16];
-			mat4_identity(mirror);
-			mirror[5] = -1.0f;
-			mat4_multiply(mirrored, mirror, model);
-			look.light *= 0.45f;
-			cabinet3d_draw(mirrored, &look, 1);
-		} else {
-			cabinet3d_draw(model, &look, 0);
-		}
+		cabinet3d_draw(model, &look);
 	}
 	ui_gl3d_end();
 	(void)W;
