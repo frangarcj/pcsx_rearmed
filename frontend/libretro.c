@@ -2174,7 +2174,7 @@ static bool retro_load_system12_profile(const char *directory)
    set_cd_image(NULL);
    retro_system12_saved_cycle_multiplier = Config.cycle_multiplier;
    psxShutdown();
-   load_result = system12_romset_for_path(directory)
+   load_result = system12_romset_is_zip(directory)
       ? system12_romset_load(directory) : system12_load(directory);
    if (load_result != 0)
    {
@@ -2399,7 +2399,7 @@ bool retro_load_game(const struct retro_game_info *info)
       retro_systemgnet_restore_console();
 #endif
 #ifdef ARCADE_SYSTEM12
-   if (system12_romset_for_path(info->path) || retro_path_is_system12_profile(info->path))
+   if (system12_romset_is_zip(info->path) || retro_path_is_system12_profile(info->path))
       return retro_load_system12_profile(info->path);
    if (system12_active())
       retro_system12_restore_console();

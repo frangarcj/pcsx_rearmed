@@ -3,7 +3,7 @@
  *
  *   cc -Iinclude -o fixture tests/system12_romset_fixture.c \
  *      libpcsxcore/arcade/mame_zip.c libpcsxcore/arcade/system12_romset.c -lz
- *   ./fixture roms/soulclbrac.zip artifacts/system12-profile
+ *   ./fixture roms/soulclbr.zip artifacts/system12-profile
  */
 #include <stdarg.h>
 #include <stdio.h>
@@ -59,27 +59,35 @@ int system12_load_regions(const system12_desc *d, u8 *main, u8 *banked, u8 *sub,
 
 int main(int argc, char **argv)
 {
-	char missing[512];
+	char missing[512], rompath[4096];
 	const system12_romset_info *info;
+	const char *slash;
+	unsigned char *available;
+	unsigned i;
 	int result;
 	if (argc != 3) {
-		fprintf(stderr, "usage: %s ROMPATH/SET.zip REFERENCE_DIR\n", argv[0]);
+		fprintf(stderr, "usage: %s ROMPATH/FILE.zip REFERENCE_DIR\n", argv[0]);
 		return 2;
 	}
 	g_reference = argv[2];
-	if (!(info = system12_romset_for_path(argv[1]))) {
-		printf("%s does not name a System 12 set\n", argv[1]);
+	slash = strrchr(argv[1], '/');
+	snprintf(rompath, sizeof(rompath), "%.*s", slash ? (int)(slash - argv[1]) : 1, slash ? argv[1] : ".");
+	available = calloc(system12_romset_count(), 1);
+	printf("%u sets, %d complete in %s:", system12_romset_count(),
+		system12_romset_scan(rompath, available), rompath);
+	for (i = 0; i < system12_romset_count(); i++)
+		if (available[i])
+			printf(" %s", system12_romset_at(i)->name);
+	printf("\n");
+	free(available);
+	if (!(info = system12_romset_identify(argv[1]))) {
+		printf("%s: no complete System 12 set\n", argv[1]);
 		return 1;
 	}
-	printf("%u sets; %s: %s (%d), parent %s\n", system12_romset_count(), info->name,
-		info->description, info->year, info->parent[0] ? info->parent : "none");
-	{
-		char rompath[4096];
-		const char *slash = strrchr(argv[1], '/');
-		snprintf(rompath, sizeof(rompath), "%.*s", slash ? (int)(slash - argv[1]) : 1, slash ? argv[1] : ".");
-		result = system12_romset_verify(rompath, info->name, missing, sizeof(missing));
-		printf("verify: %s%s\n", result ? "missing " : "complete", result ? missing : "");
-	}
+	printf("%s is %s: %s (%d), parent %s\n", argv[1], info->name, info->description, info->year,
+		info->parent[0] ? info->parent : "none");
+	result = system12_romset_verify(rompath, info->name, missing, sizeof(missing));
+	printf("verify: %s%s\n", result ? "missing " : "complete", result ? missing : "");
 	result = system12_romset_load(argv[1]);
 	printf("load: %d, regions %s\n", result, g_compared ? "compared" : "not built");
 	return result || !g_compared;

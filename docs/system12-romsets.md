@@ -7,25 +7,30 @@ validation harnesses.
 
 ## Use
 
-Give the core the path of a set's zip, for example
-`ux0:data/pcsx-rearmed/roms/soulclbr.zip` or `roms/soulclbrac.zip`.
-The file name without `.zip` selects the set, as in MAME. The loader then
-looks for every file of the set in these places, in this order:
+Give the core the path of a zip in a rompath, for example
+`ux0:data/pcsx-rearmed/roms/soulclbr.zip`. The loader indexes every zip in
+that directory and finds each ROM file by CRC32 and size, not by name. It
+searches the set's own zip first, then its parent's, then the other zips.
+So merged, split and non-merged sets all work, and the zip names do not
+matter.
 
-1. `<rompath>/<set>.zip`
-2. `<rompath>/<parent>.zip`, for a clone
+The zip path selects the set like this:
 
-It finds files by CRC32 and size, not by name. So merged, split and
-non-merged sets all work. A clone works with only the parent's zip if that
-zip holds the clone's files (a merged set). The zip that the path names does
-not have to exist: `roms/soulclbrac.zip` loads from `roms/soulclbr.zip`.
+1. If the zip's name is a set (as in MAME) and that set is complete, it is
+   that set. The zip itself does not have to exist: `roms/soulclbrac.zip`
+   loads from `roms/soulclbr.zip`.
+2. Otherwise it is the complete set with the most of its own files in that
+   zip. Own files are the files that the parent does not have; for a parent,
+   all files. A `soulclbr.zip` that holds the program ROMs of `soulclbrac`
+   loads `soulclbrac`, and the log says so.
 
-System 12 has no BIOS set. If a file is missing, the log names it and its
-CRC32. Every member is checked against its CRC32 while it is read. SHA1 is
-not checked at load time.
+`system12_romset_scan()` lists the complete sets of a rompath, for the
+selector. System 12 has no BIOS set. If a file is missing, the log names it
+and its CRC32. Every member is checked against its CRC32 while it is read.
+SHA1 is not checked at load time.
 
 Sets that the board adapter does not emulate (`unsupported` in
-`scripts/system12_boards.json`) are refused before any zip is read. A set
+`scripts/system12_boards.json`) are refused before any ROM is read. A set
 whose MAME declaration has an undumped file (`tektagtja3`) is refused too.
 
 ## Table
@@ -52,7 +57,7 @@ operation that the C loader does not apply.
 
 | Check | Result |
 | --- | --- |
-| `tests/system12_romset_fixture.c`, `roms/soulclbrac.zip` through `soulclbr.zip` | main, banked, sub and wave identical to `artifacts/system12-profile` |
+| `tests/system12_romset_fixture.c` with `roms/soulclbr.zip` (holds `soulclbrac`), `roms/soulclbrac.zip` (absent) and a copy named `micopia.zip` | each is `soulclbrac`; main, banked, sub and wave identical to `artifacts/system12-profile` |
 | Mac harness, 1,800 frames from the zip and from the directory | PPM, WAV and System 12 report identical |
 | `python3 -m unittest tests.test_system12_romset` | ROM_LOAD placement equals `prepare_mame_psx._apply_load` for 7 modes; stored and deflated members; corrupt member fails its CRC32 |
 | `make -f Makefile.mac-harness board-test` | PASS |

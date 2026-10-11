@@ -200,7 +200,7 @@ static int sync_systemgnet(u32 cycle) { return systemgnet_sync(cycle); }
 /* --system12 takes a prepared region directory or a MAME zip (<set>.zip). */
 static int load_system12(const char *path)
 {
-  return system12_romset_for_path(path) ? system12_romset_load(path) : system12_load(path);
+  return system12_romset_is_zip(path) ? system12_romset_load(path) : system12_load(path);
 }
 static const HarnessBoard boards[] = {
   {101, "TaitoFX1S", systemtaito_load, systemtaito_unload, systemtaito_sync,
