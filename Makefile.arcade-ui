@@ -1,54 +1,36 @@
-# The arcade selector on macOS (tools/arcade-ui/arcade_ui_mac.cpp), to work
-# on the UI without a Vita. Needs SDL3 and libpng (Homebrew) and the
-# deps/imgui submodule.
+# PCSX ReArcade's selector on macOS (tools/arcade-ui/arcade_ui_mac.cpp):
+# arcade-shelf (deps/arcade-shelf) with the System 12 sets of a rompath, to
+# preview it without a Vita. Needs SDL3 and libpng (Homebrew).
 #   make -f Makefile.arcade-ui
 #   build/arcade-ui/arcade-ui --demo
+# ADB=1 adds the artwork download from Arcade Database (needs the site
+# author's agreement before release; see deps/arcade-shelf/src/adb_scraper.h).
 CC := xcrun clang
 CXX := xcrun clang++
-# ADB=1 adds the artwork download from Arcade Database (needs the site
-# author's agreement before release; see frontend/arcade_ui/adb_scraper.h).
 ADB ?= 0
-ifeq ($(ADB),1)
-BUILD := build/arcade-ui-adb
-else
-BUILD := build/arcade-ui
-endif
+SHELF := deps/arcade-shelf
+SHELF_LIB := $(SHELF)/build$(if $(filter 1,$(ADB)),-adb,)/libarcadeshelf.a
+BUILD := build/arcade-ui$(if $(filter 1,$(ADB)),-adb,)
 TARGET := $(BUILD)/arcade-ui
 SDL3_CFLAGS := $(shell pkg-config --cflags sdl3)
 SDL3_LIBS := $(shell pkg-config --libs sdl3)
 LIBPNG_CFLAGS := $(shell pkg-config --cflags libpng)
 LIBPNG_LIBS := $(shell pkg-config --libs libpng)
-CFLAGS := -arch arm64 -O2 -g -Wall -Iinclude -Ideps/imgui -I$(BUILD) $(SDL3_CFLAGS) $(LIBPNG_CFLAGS)
-CXXFLAGS := $(CFLAGS) -std=c++17
-SOURCES_CXX := deps/imgui/imgui.cpp deps/imgui/imgui_draw.cpp \
-	frontend/arcade_ui/arcade_ui.cpp frontend/arcade_ui/ui_gl.cpp frontend/arcade_ui/cabinet3d.cpp tools/arcade-ui/arcade_ui_mac.cpp
+CFLAGS := -arch arm64 -O2 -g -Wall -Iinclude -I$(SHELF)/include $(SDL3_CFLAGS) $(LIBPNG_CFLAGS)
+CXXFLAGS := $(CFLAGS) -std=gnu++17
+SOURCES_CXX := tools/arcade-ui/arcade_ui_mac.cpp frontend/arcade_catalog.cpp
 SOURCES_C := libpcsxcore/arcade/system12_romset.c libpcsxcore/arcade/mame_zip.c
-EXTRA_LIBS :=
-ifeq ($(ADB),1)
-CFLAGS += -DARCADE_UI_ADB -Ideps/libretro-common/include
-CXXFLAGS += -DARCADE_UI_ADB -Ideps/libretro-common/include
-SOURCES_CXX += frontend/arcade_ui/adb_scraper.cpp
-SOURCES_C += deps/libretro-common/formats/json/rjson.c deps/libretro-common/string/rstrtod.c
-EXTRA_LIBS += -lcurl
-endif
 OBJECTS := $(addprefix $(BUILD)/,$(SOURCES_CXX:.cpp=.o) $(SOURCES_C:.c=.o))
-FONT := $(BUILD)/roboto_medium.inc
 
-.PHONY: all clean
+.PHONY: all clean FORCE
 all: $(TARGET)
 
-$(TARGET): $(OBJECTS)
-	$(CXX) -arch arm64 -o $@ $^ $(SDL3_LIBS) $(LIBPNG_LIBS) $(EXTRA_LIBS) -lz -framework OpenGL
+$(TARGET): $(OBJECTS) $(SHELF_LIB)
+	$(CXX) -arch arm64 -o $@ $^ $(SDL3_LIBS) $(LIBPNG_LIBS) $(if $(filter 1,$(ADB)),-lcurl,) -lz -framework OpenGL
 
-# Roboto Medium (Apache License 2.0) from deps/imgui/misc/fonts, as a C array.
-$(FONT): deps/imgui/misc/fonts/Roboto-Medium.ttf
-	@mkdir -p $(BUILD)
-	cd deps/imgui/misc/fonts && xxd -i Roboto-Medium.ttf > $(CURDIR)/$@
-
-$(BUILD)/frontend/arcade_ui/arcade_ui.o: $(FONT)
-
-# Dear ImGui 1.61 predates clang's -Wnontrivial-memcall.
-$(BUILD)/deps/imgui/%.o: CXXFLAGS += -Wno-nontrivial-memcall
+# arcade-shelf has its own makefile; it rebuilds only what changed.
+$(SHELF_LIB): FORCE
+	$(MAKE) -C $(SHELF) ADB=$(ADB) $(patsubst $(SHELF)/%,%,$(SHELF_LIB))
 
 $(BUILD)/%.o: %.cpp Makefile.arcade-ui
 	@mkdir -p $(dir $@)
@@ -59,6 +41,7 @@ $(BUILD)/%.o: %.c Makefile.arcade-ui
 	$(CC) $(CFLAGS) -std=gnu99 -MMD -MP -c $< -o $@
 
 clean:
-	rm -rf $(BUILD)
+	rm -rf build/arcade-ui build/arcade-ui-adb
+	$(MAKE) -C $(SHELF) clean
 
 -include $(OBJECTS:.o=.d)

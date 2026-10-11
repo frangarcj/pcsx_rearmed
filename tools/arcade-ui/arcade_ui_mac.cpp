@@ -1,17 +1,12 @@
-/* The arcade selector on macOS, to work on the UI without a Vita.
+/* PCSX ReArcade's selector on macOS: arcade-shelf with the System 12 sets
+ * of a rompath (frontend/arcade_catalog.cpp), to preview it without a Vita.
  *
- *   build/arcade-ui/arcade-ui [--rompath DIR] [--data DIR] [--demo | --demo-boards]
- *       [--script STEPS] [--step-frames N] [--shot FILE.png] [--shots DIR] [--headless] [--flat]
+ *   build/arcade-ui/arcade-ui [--rompath DIR] [--data DIR] [--demo]
+ *       [--script STEPS] [--step-frames N] [--shot FILE.png] [--shots DIR] [--headless]
  *
- * Keys: arrows; Z or Enter = cross (play); X or Esc = circle (exit);
- * S = triangle; A = square; Q/W = L/R; J L I K = right stick (turns the
- * cabinet). A game controller works too.
- * --script runs a comma-separated button list (U D L R X O T S LB RB ST SE,
- * or "-" for no button), one press every --step-frames frames, then exits;
- * SL SR SU SD hold the right stick for a whole step.
- * --shots saves a PNG after each step; --shot saves the last frame.
- * --headless draws into an offscreen framebuffer instead of a window.
- * --flat draws 2D cabinet fronts instead of the 3D carousel.
+ * --demo lists every supported set, with or without its zips. Keys,
+ * scripts and screenshots work as in arcade-shelf's viewer
+ * (deps/arcade-shelf/examples/viewer/viewer.cpp).
  */
 #include <stdarg.h>
 #include <stdio.h>
@@ -27,7 +22,8 @@
 #include <OpenGL/glext.h>
 #include <png.h>
 
-#include "../../frontend/arcade_ui/arcade_ui.h"
+#include "arcade_shelf.h"
+#include "../../frontend/arcade_catalog.h"
 extern "C" {
 #include "../../libpcsxcore/system12.h"
 }
@@ -62,9 +58,9 @@ static bool script_stick(const std::string &name, float *x, float *y)
 static unsigned script_button(const std::string &name)
 {
 	static const struct { const char *name; unsigned button; } names[] = {
-		{"U", UI_UP}, {"D", UI_DOWN}, {"L", UI_LEFT}, {"R", UI_RIGHT}, {"X", UI_CROSS},
-		{"O", UI_CIRCLE}, {"T", UI_TRIANGLE}, {"S", UI_SQUARE}, {"LB", UI_L}, {"RB", UI_R},
-		{"ST", UI_START}, {"SE", UI_SELECT}, {"-", 0},
+		{"U", SHELF_UP}, {"D", SHELF_DOWN}, {"L", SHELF_LEFT}, {"R", SHELF_RIGHT}, {"X", SHELF_CROSS},
+		{"O", SHELF_CIRCLE}, {"T", SHELF_TRIANGLE}, {"S", SHELF_SQUARE}, {"LB", SHELF_L}, {"RB", SHELF_R},
+		{"ST", SHELF_START}, {"SE", SHELF_SELECT}, {"-", 0},
 	};
 	for (const auto &entry : names)
 		if (name == entry.name)
@@ -97,35 +93,35 @@ static unsigned keyboard_buttons(void)
 {
 	const bool *keys = SDL_GetKeyboardState(NULL);
 	unsigned buttons = 0;
-	if (keys[SDL_SCANCODE_UP]) buttons |= UI_UP;
-	if (keys[SDL_SCANCODE_DOWN]) buttons |= UI_DOWN;
-	if (keys[SDL_SCANCODE_LEFT]) buttons |= UI_LEFT;
-	if (keys[SDL_SCANCODE_RIGHT]) buttons |= UI_RIGHT;
-	if (keys[SDL_SCANCODE_Z] || keys[SDL_SCANCODE_RETURN]) buttons |= UI_CROSS;
-	if (keys[SDL_SCANCODE_X] || keys[SDL_SCANCODE_ESCAPE]) buttons |= UI_CIRCLE;
-	if (keys[SDL_SCANCODE_S]) buttons |= UI_TRIANGLE;
-	if (keys[SDL_SCANCODE_A]) buttons |= UI_SQUARE;
-	if (keys[SDL_SCANCODE_Q]) buttons |= UI_L;
-	if (keys[SDL_SCANCODE_W]) buttons |= UI_R;
+	if (keys[SDL_SCANCODE_UP]) buttons |= SHELF_UP;
+	if (keys[SDL_SCANCODE_DOWN]) buttons |= SHELF_DOWN;
+	if (keys[SDL_SCANCODE_LEFT]) buttons |= SHELF_LEFT;
+	if (keys[SDL_SCANCODE_RIGHT]) buttons |= SHELF_RIGHT;
+	if (keys[SDL_SCANCODE_Z] || keys[SDL_SCANCODE_RETURN]) buttons |= SHELF_CROSS;
+	if (keys[SDL_SCANCODE_X] || keys[SDL_SCANCODE_ESCAPE]) buttons |= SHELF_CIRCLE;
+	if (keys[SDL_SCANCODE_S]) buttons |= SHELF_TRIANGLE;
+	if (keys[SDL_SCANCODE_A]) buttons |= SHELF_SQUARE;
+	if (keys[SDL_SCANCODE_Q]) buttons |= SHELF_L;
+	if (keys[SDL_SCANCODE_W]) buttons |= SHELF_R;
 	return buttons;
 }
 
 static unsigned gamepad_buttons(SDL_Gamepad *pad)
 {
-	static const struct { SDL_GamepadButton button; unsigned ui; } map[] = {
-		{SDL_GAMEPAD_BUTTON_DPAD_UP, UI_UP}, {SDL_GAMEPAD_BUTTON_DPAD_DOWN, UI_DOWN},
-		{SDL_GAMEPAD_BUTTON_DPAD_LEFT, UI_LEFT}, {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, UI_RIGHT},
-		{SDL_GAMEPAD_BUTTON_SOUTH, UI_CROSS}, {SDL_GAMEPAD_BUTTON_EAST, UI_CIRCLE},
-		{SDL_GAMEPAD_BUTTON_NORTH, UI_TRIANGLE}, {SDL_GAMEPAD_BUTTON_WEST, UI_SQUARE},
-		{SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, UI_L}, {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, UI_R},
-		{SDL_GAMEPAD_BUTTON_START, UI_START}, {SDL_GAMEPAD_BUTTON_BACK, UI_SELECT},
+	static const struct { SDL_GamepadButton button; unsigned shelf; } map[] = {
+		{SDL_GAMEPAD_BUTTON_DPAD_UP, SHELF_UP}, {SDL_GAMEPAD_BUTTON_DPAD_DOWN, SHELF_DOWN},
+		{SDL_GAMEPAD_BUTTON_DPAD_LEFT, SHELF_LEFT}, {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, SHELF_RIGHT},
+		{SDL_GAMEPAD_BUTTON_SOUTH, SHELF_CROSS}, {SDL_GAMEPAD_BUTTON_EAST, SHELF_CIRCLE},
+		{SDL_GAMEPAD_BUTTON_NORTH, SHELF_TRIANGLE}, {SDL_GAMEPAD_BUTTON_WEST, SHELF_SQUARE},
+		{SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, SHELF_L}, {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, SHELF_R},
+		{SDL_GAMEPAD_BUTTON_START, SHELF_START}, {SDL_GAMEPAD_BUTTON_BACK, SHELF_SELECT},
 	};
 	unsigned buttons = 0;
 	if (!pad)
 		return 0;
 	for (const auto &entry : map)
 		if (SDL_GetGamepadButton(pad, entry.button))
-			buttons |= entry.ui;
+			buttons |= entry.shelf;
 	return buttons;
 }
 
@@ -134,15 +130,13 @@ int main(int argc, char **argv)
 	const char *rompath = "roms", *data = "build/arcade-ui/data", *shot = NULL, *shots = NULL;
 	std::vector<unsigned> script;
 	std::vector<std::pair<float, float> > script_sticks;
-	int step_frames = 15, demo = 0, flat = 0, headless = 0, result = 0;
+	int step_frames = 15, headless = 0, demo = 0, result = 0;
 	for (int i = 1; i < argc; i++) {
 		const std::string arg = argv[i];
 		const bool has_value = i + 1 < argc;
 		if (arg == "--rompath" && has_value) rompath = argv[++i];
-		else if (arg == "--data" && has_value) data = argv[++i];
 		else if (arg == "--demo") demo = 1;
-		else if (arg == "--demo-boards") demo = 2;
-		else if (arg == "--flat") flat = 1;
+		else if (arg == "--data" && has_value) data = argv[++i];
 		else if (arg == "--headless") headless = 1;
 		else if (arg == "--shot" && has_value) shot = argv[++i];
 		else if (arg == "--shots" && has_value) shots = argv[++i];
@@ -175,7 +169,7 @@ int main(int argc, char **argv)
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
 	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-	SDL_Window *window = SDL_CreateWindow("Arcade selector", WIDTH, HEIGHT,
+	SDL_Window *window = SDL_CreateWindow("PCSX ReArcade", WIDTH, HEIGHT,
 		SDL_WINDOW_OPENGL | (headless ? SDL_WINDOW_HIDDEN : 0));
 	SDL_GLContext context = window ? SDL_GL_CreateContext(window) : NULL;
 	if (!context) {
@@ -199,11 +193,16 @@ int main(int argc, char **argv)
 	}
 
 	SDL_CreateDirectory(data);
-	ArcadeUiConfig config = { rompath, data, WIDTH, HEIGHT, demo, flat };
-	if (!arcade_ui_init(&config)) {
+	ArcadeCatalog catalogue;
+	const std::string hint = std::string("Copy MAME romset zips (soulclbr.zip, tekken3.zip...) to ") + rompath;
+	catalogue.build(rompath, demo != 0);
+	ShelfConfig config = { "PCSX", "ReArcade", data, hint.c_str(), WIDTH, HEIGHT,
+		arcade_catalog_styles, arcade_catalog_style_count };
+	if (!shelf_init(&config)) {
 		fprintf(stderr, "arcade-ui: init failed\n");
 		return 1;
 	}
+	shelf_set_games(catalogue.games(), catalogue.count());
 
 	SDL_Gamepad *pad = NULL;
 	Uint64 last = SDL_GetTicksNS();
@@ -246,7 +245,8 @@ int main(int argc, char **argv)
 		char launch[1024];
 		glClearColor(0, 0, 0, 1);
 		glClear(GL_COLOR_BUFFER_BIT);
-		const int action = arcade_ui_frame(buttons, stick_x, stick_y, dt, launch, sizeof(launch));
+		const ShelfInput input = { buttons, stick_x, stick_y, dt };
+		const int action = shelf_frame(&input, launch, sizeof(launch));
 		frame++;
 		if (scripted && frame % step_frames == 0) {
 			if (shots) {
@@ -260,17 +260,17 @@ int main(int argc, char **argv)
 				running = false;
 			}
 		}
-		if (action == ARCADE_UI_LAUNCH) {
+		if (action == SHELF_LAUNCH) {
 			printf("launch %s\n", launch);
 			if (!scripted)
 				running = false;
-		} else if (action == ARCADE_UI_QUIT && !scripted) {
+		} else if (action == SHELF_QUIT && !scripted) {
 			running = false;
 		}
 		if (!headless)
 			SDL_GL_SwapWindow(window);
 	}
-	arcade_ui_shutdown();
+	shelf_shutdown();
 	if (framebuffer) {
 		glDeleteFramebuffersEXT(1, &framebuffer);
 		glDeleteRenderbuffersEXT(1, &color);
