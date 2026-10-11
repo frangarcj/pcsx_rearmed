@@ -313,7 +313,7 @@ static void usage(const char *name)
     "[--trace FILE --trace-blocks N] [--cycle-snapshots FILE "
     "--snapshot-start CYCLES --snapshot-interval N] "
     "[--board-bus-trace FILE] [--system12-edge-trace FILE] [--system12-trace-shared-writes | --system12-trace-shared-accesses] "
-    "[--max-blocks N] [--icache] [--widescreen] [--drc] [--interactive [--pause-at N [--pause-script STEPS] [--pause-shot FILE.ppm]]] [--system12-vblank-sync-only] [--system12-source-step] [--frontend-loop]\n"
+    "[--max-blocks N] [--icache] [--widescreen] [--drc] [--interactive [--pause-at N [--pause-script STEPS] [--pause-shot FILE.ppm]]...] [--system12-vblank-sync-only] [--system12-source-step] [--frontend-loop]\n"
     "       %s (--gpu-type1-test | --gpu-type1-test-1m)\n", name, name);
 }
 
@@ -326,6 +326,11 @@ static const struct { SDL_Scancode key; const char *control; } interactive_keys[
   {SDL_SCANCODE_D, "p1button3"}, {SDL_SCANCODE_SPACE, "p1button4"}
 };
 static volatile int pause_requested;
+
+int mac_pause_interrupted(void)
+{
+  return interrupted != 0;
+}
 
 static void release_interactive_input(void)
 {
@@ -600,7 +605,9 @@ int main(int argc, char **argv)
   uint64_t interactive_started_ns = 0;
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
   char interactive_game[256] = "";
-  unsigned pause_at = 0;
+  /* Scripted pauses, in order: each --pause-at starts one. */
+  struct { unsigned at; const char *script, *shot; } pauses[8];
+  int pause_count = 0, pause_next = 0;
   const char *pause_script = NULL, *pause_shot = NULL;
 #endif
 #endif
@@ -657,9 +664,15 @@ int main(int argc, char **argv)
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
     /* Checks of the pause menu: open it at frame N, press the script's
      * buttons, save it to a PPM and exit. */
-    else if (!strcmp(argv[i], "--pause-at") && i + 1 < argc) pause_at = (unsigned)atoi(argv[++i]);
-    else if (!strcmp(argv[i], "--pause-script") && i + 1 < argc) pause_script = argv[++i];
-    else if (!strcmp(argv[i], "--pause-shot") && i + 1 < argc) pause_shot = argv[++i];
+    else if (!strcmp(argv[i], "--pause-at") && i + 1 < argc && pause_count < 8) {
+      pauses[pause_count].at = (unsigned)atoi(argv[++i]);
+      pauses[pause_count].script = pauses[pause_count].shot = NULL;
+      pause_count++;
+    }
+    else if (!strcmp(argv[i], "--pause-script") && i + 1 < argc && pause_count)
+      pauses[pause_count - 1].script = argv[++i];
+    else if (!strcmp(argv[i], "--pause-shot") && i + 1 < argc && pause_count)
+      pauses[pause_count - 1].shot = argv[++i];
 #endif
     else if (!strcmp(argv[i], "--system12-vblank-sync-only")) vblank_sync_only = 1;
     else if (!strcmp(argv[i], "--system12-source-step")) source_step = 1;
@@ -1138,8 +1151,10 @@ int main(int argc, char **argv)
     if (interactive) {
       if ((blocks & 255) == 0 || frame_counter != interactive_frame)
         poll_interactive_input();
-      if (pause_at && frame_counter - start_frame >= pause_at) {
-        pause_at = 0;
+      if (pause_next < pause_count && !pause_requested && frame_counter - start_frame >= pauses[pause_next].at) {
+        pause_script = pauses[pause_next].script;
+        pause_shot = pauses[pause_next].shot;
+        pause_next++;
         pause_requested = 1;
       }
       if (pause_requested && frame_counter != interactive_frame) {
@@ -1149,6 +1164,7 @@ int main(int argc, char **argv)
         release_interactive_input();
         if (interactive_audio) SDL_PauseAudioStreamDevice(interactive_audio);
         choice = mac_pause_run(interactive_game, pause_script, pause_shot);
+        pause_script = pause_shot = NULL;
         if (choice == MAC_PAUSE_CLOSE) interrupted = 1;
         if (choice == MAC_PAUSE_RESTART) {
           unsigned int elapsed_frames = frame_counter - start_frame;
