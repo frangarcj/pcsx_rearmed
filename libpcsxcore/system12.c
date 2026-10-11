@@ -1058,67 +1058,29 @@ static int parse_decimal(const char *value, size_t *result)
     return 0;
 }
 
-static int load_profile(const char *directory)
+/* Checks a board description against the boards this adapter emulates and
+ * makes it the active profile (the strings are copied). */
+static int apply_desc(const system12_desc *d)
 {
-    static const char *const keys[] = {"schema", "mame_set", "machine", "state",
-        "ram_size", "main_size", "bank_size", "sub_size", "wave_size",
-        "boot_hack", "alt_bank", "tektagt_dma", "unsupported"};
-    char path[4096], line[512], *eq;
-    char values[13][256] = {{0}};
-    unsigned seen = 0, i;
-    FILE *f;
-    if (snprintf(path, sizeof(path), "%s/board.cfg", directory) >= (int)sizeof(path)) return -1;
-    f = fopen(path, "rb");
-    if (!f) {
-        if (errno != ENOENT) return -1;
-        /* Original Soul Calibur harness regions predate board.cfg. */
-        board.main_size = DEFAULT_MAIN_SIZE; board.banked_size = DEFAULT_BANK_SIZE;
-        board.sub_size = DEFAULT_SUB_SIZE; board.wave_size = DEFAULT_WAVE_SIZE;
-        board.ram_size = DEFAULT_RAM_SIZE;
-        board.profile = "coh700"; board.machine = "coh700"; board.state = "namcos12_state";
-        board.unsupported = "none";
-        return 0;
-    }
-    while (fgets(line, sizeof(line), f)) {
-        char *key = line, *value;
-        size_t length = strlen(line);
-        if (length && line[length - 1] == '\n') line[--length] = 0;
-        if (!length || line[0] == '#') continue;
-        eq = strchr(line, '=');
-        if (!eq || eq == line || !eq[1]) { fclose(f); return -1; }
-        *eq = 0; value = eq + 1;
-        for (i = 0; i < sizeof(keys) / sizeof(keys[0]); i++)
-            if (!strcmp(key, keys[i])) break;
-        if (i == sizeof(keys) / sizeof(keys[0]) || (seen & (1u << i)) || strlen(value) >= sizeof(values[i])) {
-            fclose(f); return -1;
-        }
-        strcpy(values[i], value); seen |= 1u << i;
-    }
-    if (ferror(f)) { fclose(f); return -1; }
-    fclose(f);
-    if (seen != (1u << (sizeof(keys) / sizeof(keys[0]))) - 1 || strcmp(values[0], "1")) return -1;
-    if (!values[1][0] || !values[2][0] || !values[3][0]) return -1;
-    {
-        size_t sizes[5];
-        for (i = 0; i < 5; i++) if (parse_decimal(values[4 + i], &sizes[i])) return -1;
-        if ((sizes[0] != 0x400000 && sizes[0] != 0x1000000) || sizes[1] != DEFAULT_MAIN_SIZE ||
-            sizes[2] < 0x400000 || sizes[2] > 0x4000000 || (sizes[2] % WINDOW_SIZE) ||
-            sizes[3] != DEFAULT_SUB_SIZE || sizes[4] == 0 || sizes[4] > 0x1000000)
-            return -1;
-        board.ram_size = (u32)sizes[0]; board.main_size = sizes[1];
-        board.banked_size = sizes[2]; board.sub_size = sizes[3]; board.wave_size = sizes[4];
-    }
-    for (i = 9; i < 12; i++) if (strcmp(values[i], "0") && strcmp(values[i], "1")) return -1;
+    if ((d->ram_size != 0x400000 && d->ram_size != 0x1000000) || d->main_size != DEFAULT_MAIN_SIZE ||
+        d->bank_size < 0x400000 || d->bank_size > 0x4000000 || (d->bank_size % WINDOW_SIZE) ||
+        d->sub_size != DEFAULT_SUB_SIZE || d->wave_size == 0 || d->wave_size > 0x1000000)
+        return -1;
+    if (!d->mame_set || !d->mame_set[0] || !d->machine || !d->machine[0] ||
+        !d->state || !d->state[0] || !d->unsupported || !d->unsupported[0])
+        return -1;
+    board.ram_size = d->ram_size; board.main_size = d->main_size;
+    board.banked_size = d->bank_size; board.sub_size = d->sub_size; board.wave_size = d->wave_size;
     board.profile_owned = 1;
-    board.profile = strdup(values[1]); board.machine = strdup(values[2]);
-    board.state = strdup(values[3]); board.unsupported = strdup(values[12]);
+    board.profile = strdup(d->mame_set); board.machine = strdup(d->machine);
+    board.state = strdup(d->state); board.unsupported = strdup(d->unsupported);
     if (!board.profile || !board.machine || !board.state || !board.unsupported) return -1;
-    board.boot_hack = values[9][0] == '1';
-    board.alt_bank = values[10][0] == '1';
-    board.tektagt_dma = values[11][0] == '1';
+    board.boot_hack = d->boot_hack != 0;
+    board.alt_bank = d->alt_bank != 0;
+    board.tektagt_dma = d->tektagt_dma != 0;
     if (strcmp(board.unsupported, "none")) {
         SysPrintf("System12: %s requires unimplemented board device(s): %s\n",
-            values[1], board.unsupported);
+            board.profile, board.unsupported);
         return -2;
     }
     if ((strcmp(board.machine, "coh700") && strcmp(board.machine, "coh700b") &&
@@ -1137,24 +1099,65 @@ static int load_profile(const char *directory)
     return 0;
 }
 
-int system12_load(const char *directory)
+/* Reads <directory>/board.cfg into *d; values[] holds its strings. */
+static int load_profile(const char *directory, system12_desc *d, char values[13][256])
 {
-    int profile_result;
-    /* Layout must be selected before the core allocates/maps memory. */
-    if (psxRegs.ptrs.psxM || board.active || systemtaito_active() || systemzn_active() || system10_active() || system11_active())
-        return -1;
-    profile_result = load_profile(directory);
-    if (profile_result) {
-        system12_unload();
-        return profile_result;
+    static const char *const keys[] = {"schema", "mame_set", "machine", "state",
+        "ram_size", "main_size", "bank_size", "sub_size", "wave_size",
+        "boot_hack", "alt_bank", "tektagt_dma", "unsupported"};
+    char path[4096], line[512], *eq;
+    unsigned seen = 0, i;
+    FILE *f;
+    if (snprintf(path, sizeof(path), "%s/board.cfg", directory) >= (int)sizeof(path)) return -1;
+    f = fopen(path, "rb");
+    if (!f) {
+        if (errno != ENOENT) return -1;
+        /* Original Soul Calibur harness regions predate board.cfg. */
+        d->mame_set = "coh700"; d->machine = "coh700"; d->state = "namcos12_state";
+        d->unsupported = "none";
+        d->ram_size = DEFAULT_RAM_SIZE; d->main_size = DEFAULT_MAIN_SIZE;
+        d->bank_size = DEFAULT_BANK_SIZE; d->sub_size = DEFAULT_SUB_SIZE;
+        d->wave_size = DEFAULT_WAVE_SIZE;
+        d->boot_hack = d->alt_bank = d->tektagt_dma = 0;
+        return 0;
     }
-    if (load_region(directory, "main.bin", board.main_size, &board.main) ||
-        load_region(directory, "banked.bin", board.banked_size, &board.banked) ||
-        load_region(directory, "sub.bin", board.sub_size, &board.sub) ||
-        load_region(directory, "wave.bin", board.wave_size, &board.wave)) {
-        system12_unload();
-        return -1;
+    while (fgets(line, sizeof(line), f)) {
+        char *key = line, *value;
+        size_t length = strlen(line);
+        if (length && line[length - 1] == '\n') line[--length] = 0;
+        if (!length || line[0] == '#') continue;
+        eq = strchr(line, '=');
+        if (!eq || eq == line || !eq[1]) { fclose(f); return -1; }
+        *eq = 0; value = eq + 1;
+        for (i = 0; i < sizeof(keys) / sizeof(keys[0]); i++)
+            if (!strcmp(key, keys[i])) break;
+        if (i == sizeof(keys) / sizeof(keys[0]) || (seen & (1u << i)) || strlen(value) >= 256) {
+            fclose(f); return -1;
+        }
+        strcpy(values[i], value); seen |= 1u << i;
     }
+    if (ferror(f)) { fclose(f); return -1; }
+    fclose(f);
+    if (seen != (1u << (sizeof(keys) / sizeof(keys[0]))) - 1 || strcmp(values[0], "1")) return -1;
+    {
+        size_t sizes[5];
+        for (i = 0; i < 5; i++) if (parse_decimal(values[4 + i], &sizes[i])) return -1;
+        if (sizes[0] > 0xffffffffu) return -1;
+        d->ram_size = (u32)sizes[0]; d->main_size = sizes[1]; d->bank_size = sizes[2];
+        d->sub_size = sizes[3]; d->wave_size = sizes[4];
+    }
+    for (i = 9; i < 12; i++) if (strcmp(values[i], "0") && strcmp(values[i], "1")) return -1;
+    d->mame_set = values[1]; d->machine = values[2]; d->state = values[3];
+    d->unsupported = values[12];
+    d->boot_hack = values[9][0] == '1';
+    d->alt_bank = values[10][0] == '1';
+    d->tektagt_dma = values[11][0] == '1';
+    return 0;
+}
+
+/* Creates the board devices once the profile and regions are in place. */
+static int start_board(void)
+{
     H8Config h8config = {0};
     board.pcm = c352_create(board.wave, board.wave_size, 25401600, 288);
     board.eeprom = at28c16_create(NULL, 0);
@@ -1167,18 +1170,68 @@ int system12_load(const char *directory)
     h8config.peek8 = sub_peek8; h8config.account_reads = sub_account_reads;
     h8config.rom = board.sub; h8config.rom_size = (uint32_t)board.sub_size;
     board.h8 = h8_create(&h8config);
-    if (!board.pcm || !board.h8 || !board.eeprom) { system12_unload(); return -1; }
+    if (!board.pcm || !board.h8 || !board.eeprom) return -1;
     rtc4543_datetime_t epoch = {2026, 10, 4, 7, 12, 0, 0};
     rtc4543_init(&board.rtc, rtc_serial_data, NULL, &epoch);
     namco_settings_init(&board.settings, NULL, NULL);
     psxRamSize = board.ram_size;
     psxRomSize = board.main_size;
-    if (gpu_set_vram_height(1024)) { system12_unload(); return -1; }
+    if (gpu_set_vram_height(1024)) return -1;
     board.active = 1;
 #ifndef DRC_DISABLE
     new_dynarec_set_code_span_provider(system12_code_span);
 #endif
     return 0;
+}
+
+static int board_busy(void)
+{
+    /* Layout must be selected before the core allocates/maps memory. */
+    return psxRegs.ptrs.psxM || board.active || systemtaito_active() || systemzn_active() ||
+        system10_active() || system11_active();
+}
+
+int system12_load(const char *directory)
+{
+    system12_desc desc;
+    char values[13][256] = {{0}};
+    int result;
+    if (board_busy())
+        return -1;
+    result = load_profile(directory, &desc, values);
+    if (!result)
+        result = apply_desc(&desc);
+    if (result) {
+        system12_unload();
+        return result;
+    }
+    if (load_region(directory, "main.bin", board.main_size, &board.main) ||
+        load_region(directory, "banked.bin", board.banked_size, &board.banked) ||
+        load_region(directory, "sub.bin", board.sub_size, &board.sub) ||
+        load_region(directory, "wave.bin", board.wave_size, &board.wave) ||
+        start_board()) {
+        system12_unload();
+        return -1;
+    }
+    return 0;
+}
+
+int system12_load_regions(const system12_desc *desc, u8 *main, u8 *banked, u8 *sub, u8 *wave)
+{
+    int result;
+    if (board_busy()) {
+        free(main); free(banked); free(sub); free(wave);
+        return -1;
+    }
+    board.main = main; board.banked = banked; board.sub = sub; board.wave = wave;
+    result = apply_desc(desc);
+    if (!result && (!main || !banked || !sub || !wave))
+        result = -1;
+    if (!result && start_board())
+        result = -1;
+    if (result)
+        system12_unload();
+    return result;
 }
 
 void system12_unload(void)

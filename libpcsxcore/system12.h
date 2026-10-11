@@ -32,6 +32,18 @@ typedef void (*system12_edge_trace_cb)(void *opaque,
 		const system12_edge_event *event);
 
 int system12_load(const char *directory);
+/* A board profile as board.cfg describes it (sizes in bytes). */
+typedef struct {
+	const char *mame_set, *machine, *state, *unsupported;
+	u32 ram_size;
+	size_t main_size, bank_size, sub_size, wave_size;
+	int boot_hack, alt_bank, tektagt_dma;
+} system12_desc;
+/* Same as system12_load, from regions already in memory (for example built
+ * from a MAME romset). Takes ownership of the four malloc'd buffers, which
+ * must hold exactly the sizes in desc; they are freed on failure too. */
+int system12_load_regions(const system12_desc *desc, u8 *main, u8 *banked,
+		u8 *sub, u8 *wave);
 void system12_unload(void);
 int system12_active(void);
 #ifdef PCSX_SYSTEM12_PROFILE
