@@ -347,6 +347,16 @@ int main(int argc, char **argv)
 			printf("launch %s\n", launch);
 			if (!scripted)
 				running = false;
+		} else if (action == SHELF_RESCAN) {
+			/* The rompath again, as the Vita does when its files change. */
+			catalogue.build(rompath, demo != 0);
+			for (const std::string &disc : discs) {
+				const size_t slash = disc.find_last_of('/');
+				std::string title = slash == std::string::npos ? disc : disc.substr(slash + 1);
+				title = title.substr(0, title.find_last_of('.'));
+				catalogue.add_disc(disc, title, title);
+			}
+			shelf_set_games(catalogue.games(), catalogue.count());
 		} else if (action == SHELF_QUIT && !scripted) {
 			running = false;
 		}

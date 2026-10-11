@@ -1,9 +1,12 @@
 #include "shelf_selector.h"
 
+#include <stdint.h>
 #include <string.h>
 #include <string>
 
 #include <psp2/ctrl.h>
+#include <psp2/io/dirent.h>
+#include <psp2/io/stat.h>
 #include <psp2/kernel/clib.h>
 #include <psp2/kernel/processmgr.h>
 #include <vitaGL.h>
@@ -157,33 +160,103 @@ static void remember_title(const ArcadeCatalog &catalog, const char *path)
     }
 }
 
+/* A file the shelf lists: a MAME zip or a disc the ROM selector takes. */
+static bool is_game_file(const char *name)
+{
+    static const char *const extensions[] = { ".zip", ".cue", ".chd", ".pbp", ".m3u", ".iso", ".img", ".bin", ".exe" };
+    const size_t length = strlen(name);
+    for (const char *extension : extensions)
+        if (length > 4 && !strcasecmp(name + length - 4, extension))
+            return true;
+    return false;
+}
+
+/* Names and sizes of the game files in the ROM folders. When it changes
+ * (games copied over FTP...) the shelf rescans; sizes catch a copy that was
+ * still running at the last scan. */
+static uint64_t games_signature(void)
+{
+    static const char *const folders[] = { APP_ROOT, ROMS_DIR };
+    uint64_t hash = 0xcbf29ce484222325ULL;
+    for (const char *folder : folders) {
+        SceUID dir = sceIoDopen(folder);
+        SceIoDirent entry;
+        if (dir < 0)
+            continue;
+        memset(&entry, 0, sizeof(entry));
+        while (sceIoDread(dir, &entry) > 0) {
+            if (!SCE_S_ISDIR(entry.d_stat.st_mode) && is_game_file(entry.d_name)) {
+                for (const char *c = entry.d_name; *c; c++)
+                    hash = (hash ^ (unsigned char)*c) * 0x100000001b3ULL;
+                hash = (hash ^ (uint64_t)entry.d_stat.st_size) * 0x100000001b3ULL;
+            }
+            memset(&entry, 0, sizeof(entry));
+        }
+        sceIoDclose(dir);
+    }
+    return hash;
+}
+
+static void draw_shelf_frame(const ShelfInput *input, char *launch, size_t launch_size, int *action)
+{
+    glViewport(0, 0, MENU_W, MENU_H);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    *action = shelf_frame(input, launch, launch_size);
+    vglSwapBuffers(GL_FALSE);
+}
+
+/* Lists the games again, with a notice on screen while it reads them. */
+static void scan_games(ArcadeCatalog &catalog, uint64_t *signature, bool notice)
+{
+    if (notice) {
+        const ShelfInput idle = { 0, 0.0f, 0.0f, 0.0f };
+        char unused[8];
+        int action;
+        shelf_notice("Scanning games...");
+        draw_shelf_frame(&idle, unused, sizeof(unused), &action);
+    }
+    *signature = games_signature();
+    catalog.build(ROMS_DIR, false);
+    VitaRomSelector_ListRoms(add_disc, &catalog);
+    sceClibPrintf("pcsx-vita: shelf has %d games\n", catalog.count());
+    shelf_set_games(catalog.games(), catalog.count());
+    shelf_notice(NULL);
+}
+
 static void shelf_task(void *arg)
 {
     ShelfTask *task = (ShelfTask *)arg;
     ArcadeCatalog catalog;
     const ShelfMenus menus = { pcsx_shelf_options, pcsx_shelf_option_count, NULL, get_option, set_option, 0, NULL };
     const ShelfConfig config = shelf_config(&menus);
+    uint64_t signature = 0;
 
     task->result = -1;
-    catalog.build(ROMS_DIR, false);
-    VitaRomSelector_ListRoms(add_disc, &catalog);
-    sceClibPrintf("pcsx-vita: shelf has %d games\n", catalog.count());
     if (!shelf_init(&config)) {
         sceClibPrintf("pcsx-vita: shelf init failed\n");
         shelf_shutdown();
         return;
     }
-    shelf_set_games(catalog.games(), catalog.count());
+    scan_games(catalog, &signature, false);
 
     unsigned ignored = ~0u;
     SceUInt64 previous_time = sceKernelGetProcessTimeWide();
+    SceUInt64 checked = previous_time;
     for (;;) {
         const ShelfInput input = read_input(&ignored, &previous_time);
-        glViewport(0, 0, MENU_W, MENU_H);
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        const int action = shelf_frame(&input, task->out_path, task->out_size);
-        vglSwapBuffers(GL_FALSE);
+        int action;
+        draw_shelf_frame(&input, task->out_path, task->out_size, &action);
+        /* Every 2 s: did the game files change? */
+        if (action == SHELF_NONE && previous_time - checked >= 2000000) {
+            checked = previous_time;
+            if (games_signature() != signature)
+                action = SHELF_RESCAN;
+        }
+        if (action == SHELF_RESCAN) {
+            scan_games(catalog, &signature, true);
+            continue;
+        }
         if (action == SHELF_LAUNCH) {
             task->result = 1;
             remember_title(catalog, task->out_path);
