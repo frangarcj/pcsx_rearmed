@@ -14,7 +14,7 @@ LIBPNG_LIBS := $(shell pkg-config --libs libpng)
 CFLAGS := -arch arm64 -O2 -g -Wall -Iinclude -Ideps/imgui -I$(BUILD) $(SDL3_CFLAGS) $(LIBPNG_CFLAGS)
 CXXFLAGS := $(CFLAGS) -std=c++17
 SOURCES_CXX := deps/imgui/imgui.cpp deps/imgui/imgui_draw.cpp \
-	frontend/arcade_ui/arcade_ui.cpp frontend/arcade_ui/ui_gl.cpp tools/arcade-ui/arcade_ui_mac.cpp
+	frontend/arcade_ui/arcade_ui.cpp frontend/arcade_ui/ui_gl.cpp frontend/arcade_ui/cabinet3d.cpp tools/arcade-ui/arcade_ui_mac.cpp
 SOURCES_C := libpcsxcore/arcade/system12_romset.c libpcsxcore/arcade/mame_zip.c
 OBJECTS := $(addprefix $(BUILD)/,$(SOURCES_CXX:.cpp=.o) $(SOURCES_C:.c=.o))
 FONT := $(BUILD)/roboto_medium.inc

@@ -1,7 +1,7 @@
 /* The arcade selector on macOS, to work on the UI without a Vita.
  *
  *   build/arcade-ui/arcade-ui [--rompath DIR] [--data DIR] [--demo]
- *       [--script STEPS] [--step-frames N] [--shot FILE.png] [--shots DIR] [--headless]
+ *       [--script STEPS] [--step-frames N] [--shot FILE.png] [--shots DIR] [--headless] [--flat]
  *
  * Keys: arrows; Z or Enter = cross (play); X or Esc = circle (exit);
  * S = triangle; A = square; Q/W = L/R. A game controller works too.
@@ -9,6 +9,7 @@
  * or "-" for no button), one press every --step-frames frames, then exits.
  * --shots saves a PNG after each step; --shot saves the last frame.
  * --headless draws into an offscreen framebuffer instead of a window.
+ * --flat draws 2D cabinet fronts instead of the 3D carousel.
  */
 #include <stdarg.h>
 #include <stdio.h>
@@ -120,13 +121,14 @@ int main(int argc, char **argv)
 {
 	const char *rompath = "roms", *data = "build/arcade-ui/data", *shot = NULL, *shots = NULL;
 	std::vector<unsigned> script;
-	int step_frames = 15, demo = 0, headless = 0, result = 0;
+	int step_frames = 15, demo = 0, flat = 0, headless = 0, result = 0;
 	for (int i = 1; i < argc; i++) {
 		const std::string arg = argv[i];
 		const bool has_value = i + 1 < argc;
 		if (arg == "--rompath" && has_value) rompath = argv[++i];
 		else if (arg == "--data" && has_value) data = argv[++i];
 		else if (arg == "--demo") demo = 1;
+		else if (arg == "--flat") flat = 1;
 		else if (arg == "--headless") headless = 1;
 		else if (arg == "--shot" && has_value) shot = argv[++i];
 		else if (arg == "--shots" && has_value) shots = argv[++i];
@@ -154,6 +156,7 @@ int main(int argc, char **argv)
 	}
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 	SDL_Window *window = SDL_CreateWindow("Arcade selector", WIDTH, HEIGHT,
 		SDL_WINDOW_OPENGL | (headless ? SDL_WINDOW_HIDDEN : 0));
 	SDL_GLContext context = window ? SDL_GL_CreateContext(window) : NULL;
@@ -163,18 +166,22 @@ int main(int argc, char **argv)
 	}
 	SDL_GL_SetSwapInterval(scripted ? 0 : 1);
 
-	GLuint framebuffer = 0, color = 0;
+	GLuint framebuffer = 0, color = 0, depth = 0;
 	if (headless) {
 		glGenFramebuffersEXT(1, &framebuffer);
 		glGenRenderbuffersEXT(1, &color);
+		glGenRenderbuffersEXT(1, &depth);
 		glBindRenderbufferEXT(GL_RENDERBUFFER_EXT, color);
 		glRenderbufferStorageEXT(GL_RENDERBUFFER_EXT, GL_RGBA8, WIDTH, HEIGHT);
+		glBindRenderbufferEXT(GL_RENDERBUFFER_EXT, depth);
+		glRenderbufferStorageEXT(GL_RENDERBUFFER_EXT, GL_DEPTH_COMPONENT24, WIDTH, HEIGHT);
 		glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, framebuffer);
 		glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_RENDERBUFFER_EXT, color);
+		glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, GL_RENDERBUFFER_EXT, depth);
 	}
 
 	SDL_CreateDirectory(data);
-	ArcadeUiConfig config = { rompath, data, WIDTH, HEIGHT, demo };
+	ArcadeUiConfig config = { rompath, data, WIDTH, HEIGHT, demo, flat };
 	if (!arcade_ui_init(&config)) {
 		fprintf(stderr, "arcade-ui: init failed\n");
 		return 1;
@@ -235,6 +242,7 @@ int main(int argc, char **argv)
 	if (framebuffer) {
 		glDeleteFramebuffersEXT(1, &framebuffer);
 		glDeleteRenderbuffersEXT(1, &color);
+		glDeleteRenderbuffersEXT(1, &depth);
 	}
 	SDL_GL_DestroyContext(context);
 	SDL_DestroyWindow(window);

@@ -18,6 +18,7 @@ typedef struct {
 	const char *data_root; /* snap/, titles/, marquees/ and arcade_ui.cfg */
 	int width, height;     /* framebuffer size in pixels */
 	int demo;              /* list every supported set as present (UI work) */
+	int flat;              /* 2D cabinet fronts instead of the 3D carousel */
 } ArcadeUiConfig;
 
 /* Call with the GL context current. */

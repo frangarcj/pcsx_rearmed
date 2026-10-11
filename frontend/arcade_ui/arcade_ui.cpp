@@ -11,6 +11,7 @@
 #include <imgui.h>
 
 #include "ui_gl.h"
+#include "cabinet3d.h"
 #include "../../libpcsxcore/arcade/system12_romset.h"
 #include "roboto_medium.inc" /* Roboto_Medium_ttf, from deps/imgui/misc/fonts */
 
@@ -32,6 +33,7 @@ struct Game {
 struct Art {
 	std::string set;
 	UiTexture snap, marquee;
+	UiTexture marquee3d, screen3d; /* the 3D cabinet's lit surfaces */
 	bool tried;
 	unsigned last_used;
 };
@@ -185,6 +187,8 @@ Art *art_for(const Game &game)
 			[](const Art &a, const Art &b) { return a.last_used < b.last_used; });
 		ui_gl_free_texture(&oldest->snap);
 		ui_gl_free_texture(&oldest->marquee);
+		ui_gl_free_texture(&oldest->marquee3d);
+		ui_gl_free_texture(&oldest->screen3d);
 		s->art.erase(oldest);
 	}
 	Art art{};
@@ -351,11 +355,140 @@ float text_hint(ImDrawList *draw, float x, float y, const char *key, const char 
 	return x + key_size.x + 18 + extent.x + 22;
 }
 
-void draw_frame(ImDrawList *draw)
+/* ---- 3D carousel ---- */
+
+struct SurfaceJob {
+	const Game *game;
+	const Art *art;
+};
+
+/* The lit marquee: the user's art, or the title on a gradient. */
+void draw_marquee3d(ImDrawList *draw, void *opaque)
+{
+	const SurfaceJob *job = (const SurfaceJob *)opaque;
+	const float W = CABINET3D_MARQUEE_W, H = CABINET3D_MARQUEE_H;
+	if (job->art->marquee.id) {
+		draw->AddRectFilled(ImVec2(0, 0), ImVec2(W, H), rgba(0, 0, 0));
+		draw->PushTextureID((ImTextureID)(uintptr_t)job->art->marquee.id);
+		image_fit(draw, job->art->marquee, ImVec2(0, 0), ImVec2(W, H), rgba(255, 255, 255));
+		draw->PopTextureID();
+		return;
+	}
+	draw->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(W, H), rgba(240, 70, 80), rgba(130, 50, 200),
+		rgba(90, 30, 150), rgba(190, 40, 60));
+	draw->AddRectFilled(ImVec2(0, 0), ImVec2(W, H * 0.45f), rgba(255, 255, 255, 0.10f));
+	centred_text(draw, s->font_title, 96.0f, 24, W - 24, H * 0.5f + 2, rgba(0, 0, 0, 0.35f), job->game->title.c_str());
+	centred_text(draw, s->font_title, 96.0f, 24, W - 24, H * 0.5f - 2, rgba(255, 248, 225), job->game->title.c_str());
+}
+
+/* The screen: a black bezel around the 4:3 picture, and the glass. */
+void draw_screen3d(ImDrawList *draw, void *opaque)
+{
+	const SurfaceJob *job = (const SurfaceJob *)opaque;
+	const float W = CABINET3D_SCREEN_W, H = CABINET3D_SCREEN_H;
+	const Version &version = job->game->versions[job->game->selected];
+	draw->AddRectFilled(ImVec2(0, 0), ImVec2(W, H), rgba(8, 8, 12));
+	const float sh = H - 64.0f, sw = sh * 4.0f / 3.0f;
+	const ImVec2 s0((W - sw) * 0.5f, 32.0f), s1((W + sw) * 0.5f, 32.0f + sh);
+	if (job->art->snap.id) {
+		draw->PushTextureID((ImTextureID)(uintptr_t)job->art->snap.id);
+		draw->AddImage((ImTextureID)(uintptr_t)job->art->snap.id, s0, s1);
+		draw->PopTextureID();
+	} else {
+		draw->AddRectFilledMultiColor(s0, s1, rgba(20, 40, 52), rgba(20, 40, 52), rgba(6, 14, 20), rgba(6, 14, 20));
+		for (float y = s0.y; y < s1.y; y += 4.0f)
+			draw->AddLine(ImVec2(s0.x, y), ImVec2(s1.x, y), rgba(0, 0, 0, 0.35f), 1.5f);
+		centred_text(draw, s->font_title, 52.0f, s0.x + 20, s1.x - 20, (s0.y + s1.y) * 0.5f - 14, rgba(120, 235, 205),
+			version.set.c_str());
+		centred_text(draw, s->font_body, 26.0f, s0.x + 20, s1.x - 20, (s0.y + s1.y) * 0.5f + 34, rgba(120, 235, 205, 0.6f),
+			"no snapshot");
+	}
+	/* Glass: a soft diagonal reflection. */
+	const ImVec2 glass[4] = { ImVec2(s0.x, s0.y), ImVec2(s0.x + sw * 0.55f, s0.y), ImVec2(s0.x + sw * 0.25f, s1.y),
+		ImVec2(s0.x, s1.y) };
+	draw->AddConvexPolyFilled(glass, 4, rgba(255, 255, 255, 0.06f));
+}
+
+void ensure_surfaces(const Game &game, Art *art)
+{
+	SurfaceJob job = { &game, art };
+	if (!art->marquee3d.id)
+		ui_gl_render_to_texture(&art->marquee3d, CABINET3D_MARQUEE_W, CABINET3D_MARQUEE_H, draw_marquee3d, &job);
+	if (!art->screen3d.id)
+		ui_gl_render_to_texture(&art->screen3d, CABINET3D_SCREEN_W, CABINET3D_SCREEN_H, draw_screen3d, &job);
+}
+
+/* The carousel area of the screen, in pixels. */
+const float kStageX = 0.0f, kStageY = 44.0f, kStageW = 584.0f;
+
+void stage_camera(float view_projection[16])
+{
+	const float stage_h = (float)s->config.height - kStageY - 44.0f;
+	float projection[16], view[16];
+	const float eye[3] = { 0.0f, 1.22f, 4.25f }, target[3] = { 0.0f, 0.97f, 0.0f }, up[3] = { 0.0f, 1.0f, 0.0f };
+	mat4_perspective(projection, 32.0f, kStageW / stage_h, 0.1f, 40.0f);
+	mat4_look_at(view, eye, target, up);
+	mat4_multiply(view_projection, projection, view);
+}
+
+void cabinet_place(float model[16], float d)
+{
+	const float distance = fabsf(d);
+	/* The selected cabinet turns a little to show its side; neighbours
+	 * step back and turn toward the middle. */
+	mat4_place(model, d * 1.32f, 0.0f, -std::min(distance, 2.5f) * 1.35f, -10.0f - d * 30.0f);
+}
+
+void draw_stage_3d()
+{
+	const int W = s->config.width, H = s->config.height;
+	const float stage_h = (float)H - kStageY - 44.0f;
+	float view_projection[16], model[16];
+	std::vector<int> visible;
+	for (int i = 0; i < (int)s->games.size(); i++)
+		if (fabsf((float)i - s->scroll) < 2.8f)
+			visible.push_back(i);
+	for (int i : visible) {
+		Game &game = s->games[i];
+		ensure_surfaces(game, art_for(game));
+	}
+	stage_camera(view_projection);
+	ui_gl3d_begin((int)kStageX, (int)kStageY, (int)kStageW, (int)stage_h, H, view_projection);
+	for (int i : visible) {
+		cabinet_place(model, (float)i - s->scroll);
+		cabinet3d_shadow(model, std::max(0.3f, 1.0f - 0.3f * fabsf((float)i - s->scroll)));
+	}
+	for (int i : visible) {
+		const float d = (float)i - s->scroll;
+		Art *art = art_for(s->games[i]);
+		CabinetLook look = { art->marquee3d.id, art->screen3d.id, std::max(0.28f, 1.0f - 0.36f * fabsf(d)) };
+		cabinet_place(model, d);
+		cabinet3d_draw(model, &look);
+	}
+	ui_gl3d_end();
+	(void)W;
+}
+
+void draw_background(ImDrawList *draw)
 {
 	const float W = (float)s->config.width, H = (float)s->config.height;
 	draw->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(W, H), rgba(13, 16, 32), rgba(13, 16, 32),
 		rgba(26, 31, 58), rgba(26, 31, 58));
+	if (s->config.flat || s->games.empty())
+		return;
+	/* A pool of light on the floor of the stage. */
+	float view_projection[16], x, y;
+	const float floor_point[3] = { 0.0f, 0.0f, 0.0f };
+	stage_camera(view_projection);
+	if (mat4_project(view_projection, floor_point, kStageX, kStageY, kStageW,
+			(float)s->config.height - kStageY - 44.0f, &x, &y))
+		for (int i = 0; i < 48; i++)
+			draw->AddCircleFilled(ImVec2(x, y), 260.0f - i * 5.0f, rgba(90, 100, 200, 0.006f), 64);
+}
+
+void draw_frame(ImDrawList *draw)
+{
+	const float W = (float)s->config.width, H = (float)s->config.height;
 
 	if (s->games.empty()) {
 		centred_text(draw, s->font_title, 26.0f, 40, W - 40, H * 0.42f, rgba(235, 235, 245),
@@ -386,7 +519,7 @@ void draw_frame(ImDrawList *draw)
 		return fabsf((float)a - s->scroll) > fabsf((float)b - s->scroll);
 	});
 	draw->PushClipRect(ImVec2(0, 48), ImVec2(area_right, H - 50));
-	for (int i : order) {
+	for (int i : s->config.flat ? order : std::vector<int>()) {
 		const float d = (float)i - s->scroll, distance = std::min(fabsf(d), 2.0f);
 		const float scale = 1.0f - 0.24f * distance;
 		const float x = center_x + d * 210.0f, top = 62.0f + (1.0f - scale) * 220.0f;
@@ -478,7 +611,7 @@ bool arcade_ui_init(const ArcadeUiConfig *config)
 	s->font_body = io.Fonts->AddFontFromMemoryTTF(Roboto_Medium_ttf, sizeof(Roboto_Medium_ttf), 18.0f, &font_config);
 	s->font_title = io.Fonts->AddFontFromMemoryTTF(Roboto_Medium_ttf, sizeof(Roboto_Medium_ttf), 30.0f, &font_config);
 	s->font_marquee = s->font_title;
-	if (!ui_gl_init())
+	if (!ui_gl_init() || !cabinet3d_init())
 		return false;
 	build_catalog();
 	return true;
@@ -492,7 +625,10 @@ void arcade_ui_shutdown(void)
 	for (Art &art : s->art) {
 		ui_gl_free_texture(&art.snap);
 		ui_gl_free_texture(&art.marquee);
+		ui_gl_free_texture(&art.marquee3d);
+		ui_gl_free_texture(&art.screen3d);
 	}
+	cabinet3d_shutdown();
 	ui_gl_shutdown();
 	ImGui::DestroyContext();
 	delete s;
@@ -531,6 +667,17 @@ int arcade_ui_frame(unsigned buttons, float dt, char *launch_path, size_t launch
 	s->scroll += ((float)s->game - s->scroll) * std::min(1.0f, io.DeltaTime * 12.0f);
 	if (fabsf((float)s->game - s->scroll) < 0.001f)
 		s->scroll = (float)s->game;
+
+	{
+		ImDrawList background(ImGui::GetDrawListSharedData());
+		ImDrawList *lists[1] = { &background };
+		background.PushClipRect(ImVec2(0, 0), io.DisplaySize);
+		background.PushTextureID(io.Fonts->TexID);
+		draw_background(&background);
+		ui_gl_render_lists(lists, 1, s->config.width, s->config.height);
+	}
+	if (!s->config.flat && !s->games.empty())
+		draw_stage_3d();
 
 	ImGui::NewFrame();
 	ImGui::SetNextWindowPos(ImVec2(0, 0));

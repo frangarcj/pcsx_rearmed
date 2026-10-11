@@ -1,8 +1,8 @@
 # Arcade selector
 
 `frontend/arcade_ui/` is the game selector of the arcade build. It shows one
-cabinet per game (a MAME parent) and lists the game's versions (its MAME
-sets) beside it:
+3D cabinet per game (a MAME parent) in a carousel, and lists the game's
+versions (its MAME sets) beside it:
 
 - Left and right change the game. Up and down change the version.
 - Cross (or Start) plays the selected set. Circle exits.
@@ -26,13 +26,35 @@ whatever its pixel size. Without art, the marquee shows the game title and
 the screen shows the set name. The control panel, the coin door and the
 cabinet are drawn by the UI. The build ships no game art.
 
+## Cabinets
+
+`cabinet3d.cpp` builds an upright cabinet from its side profile. The side
+panels are that profile, ear-clipped into triangles, with a red T-molding
+along their edges. The front surfaces run between the panels, one per
+profile segment:
+
+- kick panel with a coin door;
+- control panel with a stick and four buttons;
+- screen, which leans back;
+- marquee, under an overhang.
+
+One directional light shades the cabinet. The marquee and the screen are
+lit (not shaded). Per game, both are drawn once with ImGui into textures:
+
+- the marquee art, or the title on a gradient;
+- the snap inside a bezel, under a glass reflection.
+
+Neighbours step back, turn toward the middle and darken. A soft shadow and a
+pool of light mark the floor. `--flat` keeps the earlier 2D fronts.
+
 ## Code
 
 - `arcade_ui.cpp` holds the catalog, the input handling and the drawing,
   with Dear ImGui draw lists.
-- `ui_gl.cpp` renders ImGui and loads PNG textures with libpng. It uses only
-  GLES2-style calls and no VAOs, so the same code runs on vitaGL and on the
-  OpenGL 2.1 context of macOS.
+- `ui_gl.cpp` renders ImGui and loads PNG textures with libpng. It also
+  renders draw lists into textures (framebuffer objects) and draws the lit
+  3D triangles. It uses only GLES2-style calls and no VAOs, so the same code
+  runs on vitaGL and on the OpenGL 2.1 context of macOS.
 - `deps/imgui` is pinned to v1.61, the version that VitaSDK's `libimgui`
   has.
 - The font is Roboto Medium (Apache License 2.0, from
