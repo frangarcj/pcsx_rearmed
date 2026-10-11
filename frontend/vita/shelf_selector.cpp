@@ -213,8 +213,12 @@ extern "C" int VitaShelfSelector_Run(char *out_path, size_t out_size)
 static void pause_task(void *arg)
 {
     PauseTask *task = (PauseTask *)arg;
+    /* System 12 boards cannot be saved (retro_serialize refuses them):
+     * MAME sets get no save-state page. */
+    const size_t length = strlen(task->game_path);
+    const bool arcade = length > 4 && !strcasecmp(task->game_path + length - 4, ".zip");
     const ShelfMenus menus = { pcsx_shelf_options, pcsx_shelf_option_count, (void *)task->game_path,
-        get_option, set_option, 10, state_exists };
+        get_option, set_option, arcade ? 0 : 10, state_exists };
     const ShelfConfig config = shelf_config(&menus);
     std::string title = g_game_path == task->game_path ? g_game_title : std::string();
     if (title.empty()) {
