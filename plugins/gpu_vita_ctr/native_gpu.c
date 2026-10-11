@@ -4299,17 +4299,20 @@ int VitaCtrNativeGpu_RenderHadGeometry(void)
 	return s_pcsxRenderHadGeometry;
 }
 
-void VitaCtrNativeGpu_SetDisplayEnv(int x, int y, int w, int h, int depth24)
+/* disp: the hres x vres display, from VRAM x, y. screen: the picture on it,
+ * as a console DISPENV gives it (renderer_present_frame in gpulib's gpu.h);
+ * the presentation leaves the rest black. */
+void VitaCtrNativeGpu_SetDisplayEnv(int x, int y, int w, int h, int pic_x, int pic_y, int pic_w, int pic_h, int depth24)
 {
 	activeDispEnv.disp.x = (s16)x;
 	activeDispEnv.disp.y = (s16)y;
 	activeDispEnv.disp.w = (s16)w;
 	activeDispEnv.disp.h = (s16)h;
 	activeDispEnv.isrgb24 = depth24 != 0;
-	activeDispEnv.screen.x = 0;
-	activeDispEnv.screen.y = 0;
-	activeDispEnv.screen.w = (s16)w;
-	activeDispEnv.screen.h = (s16)h;
+	activeDispEnv.screen.x = (s16)pic_x;
+	activeDispEnv.screen.y = (s16)pic_y;
+	activeDispEnv.screen.w = (s16)pic_w;
+	activeDispEnv.screen.h = (s16)pic_h;
 	VitaCtrNativeGpu_UpdateDrawTargetMode();
 	activeDrawEnv.isbg = 0;
 	NativeGpu_SetFrontendDrawEnv(&activeDrawEnv);

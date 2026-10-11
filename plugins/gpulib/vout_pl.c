@@ -93,10 +93,12 @@ int vout_update(struct psx_gpu *gpu, int src_x, int src_y)
 
   check_mode_change(gpu, 0);
 #ifdef GPU_VITA_CTR
+  /* The renderer takes the picture's place on the display, as the frontend
+   * flip below does: VRAM src_x, src_y lands at x - src_x2, y. */
   gpu->state.dims_changed = 0;
   if (gpu_async_enabled(gpu))
-    return gpu_async_present(gpu, src_x, src_y);
-  return renderer_present_frame(gpu, src_x, src_y);
+    return gpu_async_present(gpu, src_x, src_y, x - src_x2, y, w + src_x2, h);
+  return renderer_present_frame(gpu, src_x, src_y, x - src_x2, y, w + src_x2, h);
 #endif
   if (gpu->state.enhancement_active) {
     if (!gpu->state.enhancement_was_active)

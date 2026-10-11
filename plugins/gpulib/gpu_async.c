@@ -137,11 +137,12 @@ struct cmd_break
 // before it, so its present goes in the queue (it has no scanout to wait for).
 union cmd_present
 {
-  uint32_t u32s[4];
+  uint32_t u32s[6];
   struct {
     uint32_t cmd;
     short src_x, src_y;
     short w, h;
+    short pic_x, pic_y, pic_w, pic_h;
     int rgb24;
   };
 };
@@ -585,7 +586,8 @@ static STRHEAD_RET_TYPE gpu_async_thread(void *unused)
 #ifdef GPU_VITA_CTR
         case FAKECMD_PRESENT: {
           const union cmd_present *p = list;
-          renderer_present_frame_rect(p->src_x, p->src_y, p->w, p->h, p->rgb24);
+          renderer_present_frame_rect(p->src_x, p->src_y, p->w, p->h,
+              p->pic_x, p->pic_y, p->pic_w, p->pic_h, p->rgb24);
           done += sizeof(*p) / 4;
           renderer_dirty = 0;
           break;
@@ -678,7 +680,8 @@ void gpu_async_set_interlace(struct psx_gpu *gpu, int enable, int is_odd)
 }
 
 #ifdef GPU_VITA_CTR
-int gpu_async_present(struct psx_gpu *gpu, int src_x, int src_y)
+int gpu_async_present(struct psx_gpu *gpu, int src_x, int src_y,
+    int pic_x, int pic_y, int pic_w, int pic_h)
 {
   struct psx_gpu_async *agpu = gpu->async;
   union cmd_present cmd;
@@ -687,12 +690,16 @@ int gpu_async_present(struct psx_gpu *gpu, int src_x, int src_y)
   if (!renderer_present_size(gpu, &w, &h))
     return 0;
   if (RDPOS(agpu->idle) && agpu->pos_added == RDPOS(agpu->pos_used))
-    return renderer_present_frame(gpu, src_x, src_y);
+    return renderer_present_frame(gpu, src_x, src_y, pic_x, pic_y, pic_w, pic_h);
   cmd.cmd = HTOLE32(FAKECMD_PRESENT << 24);
   cmd.src_x = src_x;
   cmd.src_y = src_y;
   cmd.w = w;
   cmd.h = h;
+  cmd.pic_x = pic_x;
+  cmd.pic_y = pic_y;
+  cmd.pic_w = pic_w;
+  cmd.pic_h = pic_h;
   cmd.rgb24 = !!(gpu->status & PSX_GPU_STATUS_RGB24);
   do_add_with_wait(agpu, cmd.u32s, sizeof(cmd) / 4);
   run_thread(agpu);

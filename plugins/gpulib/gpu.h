@@ -180,9 +180,15 @@ void renderer_notify_screen_change(const struct psx_gpu_screen *screen);
 #ifdef GPU_VITA_CTR
 void renderer_barrier(void);
 void renderer_sync_vram_to_cpu(int x, int y, int w, int h);
-int  renderer_present_frame(struct psx_gpu *gpu, int src_x, int src_y);
+/* Presents the hres x vres display whose top left is VRAM src_x, src_y.
+ * The picture covers pic_w x pic_h of it from pic_x, pic_y (vout_update's
+ * x, y, w, h, moved left by the columns it cut off): VRAM src_x, src_y is
+ * at pic_x, pic_y, and the rest is black, the console's border. */
+int  renderer_present_frame(struct psx_gpu *gpu, int src_x, int src_y,
+       int pic_x, int pic_y, int pic_w, int pic_h);
 int  renderer_present_size(const struct psx_gpu *gpu, int *width, int *height);
-int  renderer_present_frame_rect(int src_x, int src_y, int width, int height, int rgb24);
+int  renderer_present_frame_rect(int src_x, int src_y, int width, int height,
+       int pic_x, int pic_y, int pic_w, int pic_h, int rgb24);
 void gpu_sync_renderer(void);
 void renderer_present_blank(void);
 #endif

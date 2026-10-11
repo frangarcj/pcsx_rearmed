@@ -4702,6 +4702,68 @@ void NativeRenderer_UpdateVRAM(void)
 
 }
 
+/* Where the display goes in the presentation viewport. The viewport holds
+ * the whole hres x vres display; DISPENV screen is the picture on it, as
+ * gpulib's vout_update places it (shifted by the display range, narrower
+ * than hres). Outside the picture the console shows its black border. */
+struct NativePresentPicture
+{
+	int active;      /* 0: the picture is the whole display, as drawn before */
+	int viewport[4]; /* the display, moved so its VRAM origin lands where the picture starts */
+	int scissor[4];  /* the picture's part of the viewport */
+};
+
+internal struct NativePresentPicture NativeRenderer_PresentPicture(void)
+{
+	const DISPENV *display = NativeGpu_GetRenderDispEnv();
+	struct NativePresentPicture picture;
+	const int cw = display->disp.w, ch = display->disp.h;
+	const int vx = s_presentViewport.x, vy = s_presentViewport.y;
+	const int vw = s_presentViewport.w, vh = s_presentViewport.h;
+
+	SDL_memset(&picture, 0, sizeof(picture));
+	if (cw <= 0 || ch <= 0 || display->screen.w <= 0 || display->screen.h <= 0)
+		return picture;
+	const int x0 = SDL_max(display->screen.x, 0), y0 = SDL_max(display->screen.y, 0);
+	const int x1 = SDL_max(x0, SDL_min(display->screen.x + display->screen.w, cw));
+	const int y1 = SDL_max(y0, SDL_min(display->screen.y + display->screen.h, ch));
+	if (display->screen.x == 0 && display->screen.y == 0 && x1 == cw && y1 == ch)
+		return picture;
+	picture.active = 1;
+	picture.viewport[0] = vx + display->screen.x * vw / cw;
+	picture.viewport[1] = vy - display->screen.y * vh / ch;
+	picture.viewport[2] = vw;
+	picture.viewport[3] = vh;
+	/* GL rows count up from the bottom of the viewport. */
+	picture.scissor[0] = vx + x0 * vw / cw;
+	picture.scissor[1] = vy + vh - y1 * vh / ch;
+	picture.scissor[2] = vx + x1 * vw / cw - picture.scissor[0];
+	picture.scissor[3] = vy + vh - y0 * vh / ch - picture.scissor[1];
+	return picture;
+}
+
+/* Clears the display's viewport to the border's black, then limits drawing
+ * to the picture and moves the viewport onto it. */
+internal void NativeRenderer_BeginPresentPicture(const struct NativePresentPicture *picture)
+{
+	GLfloat previousClearColor[4];
+	glGetFloatv(GL_COLOR_CLEAR_VALUE, previousClearColor);
+	glEnable(GL_SCISSOR_TEST);
+	glScissor(s_presentViewport.x, s_presentViewport.y, s_presentViewport.w, s_presentViewport.h);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glClearColor(previousClearColor[0], previousClearColor[1], previousClearColor[2], previousClearColor[3]);
+	glScissor(picture->scissor[0], picture->scissor[1], picture->scissor[2], picture->scissor[3]);
+	NativeRenderer_SetViewPort(picture->viewport[0], picture->viewport[1], picture->viewport[2], picture->viewport[3]);
+}
+
+internal void NativeRenderer_EndPresentPicture(void)
+{
+	glDisable(GL_SCISSOR_TEST);
+	s_previousScissorState = 0;
+	NativeRenderer_InvalidateScissorRectCache();
+}
+
 void NativeRenderer_PresentVRAMRect(int displayX, int displayY, int displayW, int displayH)
 {
 	NATIVE_GPU_LABEL(2, "present-vram", 0);
@@ -4722,7 +4784,12 @@ void NativeRenderer_PresentVRAMRect(int displayX, int displayY, int displayW, in
 	const GLboolean previousStencilEnabled = glIsEnabled(GL_STENCIL_TEST);
 	glDisable(GL_STENCIL_TEST);
 
+	const struct NativePresentPicture picture = NativeRenderer_PresentPicture();
+	if (picture.active)
+		NativeRenderer_BeginPresentPicture(&picture);
 	NativeRenderer_DrawVRAMRegion(displayX, displayY, displayW, displayH);
+	if (picture.active)
+		NativeRenderer_EndPresentPicture();
 	if (previousStencilEnabled)
 	{
 		glEnable(GL_STENCIL_TEST);
@@ -4757,7 +4824,8 @@ void NativeRenderer_PresentBlank(void)
 	s_lastBoundTexture = (TextureID)-1;
 }
 /* Draws the main render target into a host viewport rectangle. */
-internal void NativeRenderer_DrawMainTarget(const struct NativeRenderTarget *target, int x, int y, int w, int h, int clearBars)
+internal void NativeRenderer_DrawMainTarget(const struct NativeRenderTarget *target, int x, int y, int w, int h, int clearBars,
+                                           const int *scissor)
 {
 	NATIVE_GPU_LABEL(0, "present-target", 0);
 	NativeRenderer_SetViewPort(x, y, w, h);
@@ -4789,6 +4857,11 @@ internal void NativeRenderer_DrawMainTarget(const struct NativeRenderTarget *tar
 #endif
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, target->texture);
+	if (scissor)
+	{
+		glEnable(GL_SCISSOR_TEST);
+		glScissor(scissor[0], scissor[1], scissor[2], scissor[3]);
+	}
 #if !defined(__vita__) && !defined(PCSX_NATIVE_VITA_PATH)
 	// FXAA uses subpixel samples from the final native-resolution render target.
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -4801,6 +4874,8 @@ internal void NativeRenderer_DrawMainTarget(const struct NativeRenderTarget *tar
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 #endif
 
+	if (scissor)
+		NativeRenderer_EndPresentPicture();
 	if (previousStencilEnabled)
 	{
 		glEnable(GL_STENCIL_TEST);
@@ -4820,7 +4895,8 @@ void NativeRenderer_PresentMainRenderTarget(void)
 	{
 		return;
 	}
-	NativeRenderer_DrawMainTarget(&s_mainRenderTarget, s_presentViewport.x, s_presentViewport.y, s_presentViewport.w, s_presentViewport.h, 1);
+	NativeRenderer_DrawMainTarget(&s_mainRenderTarget, s_presentViewport.x, s_presentViewport.y, s_presentViewport.w, s_presentViewport.h, 1,
+	                              NULL);
 }
 
 #if defined(__vita__) || defined(PCSX_NATIVE_VITA_PATH)
@@ -4834,13 +4910,17 @@ internal int NativeRenderer_OverlayTarget(const struct NativeRenderTarget *targe
 	    r->x < displayX || r->y < displayY ||
 	    r->x + r->w > displayX + displayW || r->y + r->h > displayY + displayH)
 		return 0;
-	const int vx = s_presentViewport.x, vy = s_presentViewport.y;
+	/* Where the display lands: moved onto the picture, cut to it. */
+	const struct NativePresentPicture picture = NativeRenderer_PresentPicture();
+	const int vx = picture.active ? picture.viewport[0] : s_presentViewport.x;
+	const int vy = picture.active ? picture.viewport[1] : s_presentViewport.y;
 	const int vw = s_presentViewport.w, vh = s_presentViewport.h;
 	const int x0 = vx + (r->x - displayX) * vw / displayW;
 	const int x1 = vx + (r->x + r->w - displayX) * vw / displayW;
 	const int top = (r->y - displayY) * vh / displayH;
 	const int bottom = (r->y + r->h - displayY) * vh / displayH;
-	NativeRenderer_DrawMainTarget(target, x0, vy + vh - bottom, x1 - x0, bottom - top, 0);
+	NativeRenderer_DrawMainTarget(target, x0, vy + vh - bottom, x1 - x0, bottom - top, 0,
+	                              picture.active ? picture.scissor : NULL);
 	return 1;
 }
 
@@ -5180,6 +5260,11 @@ void NativeRenderer_PresentStreamingTexture(TextureID texture, int contentHeight
 	const int viewportH = (s_presentViewport.h * contentHeight + displayHeight / 2) / displayHeight;
 	const int viewportY = s_presentViewport.y + (s_presentViewport.h - viewportH) / 2;
 	NativeRenderer_SetViewPort(s_presentViewport.x, viewportY, s_presentViewport.w, viewportH);
+	/* A whole 24-bit display: placed as the 15-bit one is. */
+	const struct NativePresentPicture picture = contentHeight == displayHeight ? NativeRenderer_PresentPicture()
+	                                                                           : (struct NativePresentPicture){ 0 };
+	if (picture.active)
+		NativeRenderer_BeginPresentPicture(&picture);
 
 	glUseProgram(s_presentRgbaShader);
 	glUniform1f(s_presentRgbaFlipYLoc, 1.0f);
@@ -5187,6 +5272,8 @@ void NativeRenderer_PresentStreamingTexture(TextureID texture, int contentHeight
 	glBindTexture(GL_TEXTURE_2D, texture);
 	glBindVertexArray(s_vramQuadVAO);
 	NativeRenderer_DrawTriangles(0, 2);
+	if (picture.active)
+		NativeRenderer_EndPresentPicture();
 
 	if (previousStencilEnabled)
 	{

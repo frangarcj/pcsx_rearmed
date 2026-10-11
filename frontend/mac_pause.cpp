@@ -99,7 +99,7 @@ extern "C" int mac_pause_run(const char *game, const char *script, const char *s
 	const ShelfMenus menus = { pcsx_shelf_options, pcsx_shelf_option_count, NULL, get_option, set_option, 0, NULL };
 	int fb_width = 960, fb_height = 544;
 	SDL_GetWindowSizeInPixels(g_window, &fb_width, &fb_height);
-	const ShelfConfig config = { "PCSX", "ReArcade", ".", "", 960, 544, NULL, 0, &menus, fb_width, fb_height };
+	const ShelfConfig config = { "PCSX", "ReArcade", ".", "", 960, 544, NULL, 0, &menus, NULL, fb_width, fb_height };
 	int result = MAC_PAUSE_RESUME;
 
 	if (!shelf_init(&config)) {

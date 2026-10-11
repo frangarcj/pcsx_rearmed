@@ -58,7 +58,8 @@ static void gp0_roi_trace_dump(void);
 void Platform_Log(const char *fmt, ...);
 
 extern int ParseTaglessPrimitive(u32 *command);
-extern void VitaCtrNativeGpu_SetDisplayEnv(int x, int y, int w, int h, int depth24);
+extern void VitaCtrNativeGpu_SetDisplayEnv(int x, int y, int w, int h, int pic_x, int pic_y, int pic_w, int pic_h,
+    int depth24);
 extern void VitaCtrNativeRenderer_SetPresentationAspect(int width, int height);
 extern void VitaCtrNativeRenderer_SetAspectMode(int mode);
 extern int VitaCtrNativeRenderer_GetAspectMode(void);
@@ -819,7 +820,7 @@ static int init_context(void)
         return 0;
     }
 
-    VitaCtrNativeGpu_SetDisplayEnv(0, 0, 320, 240, 0);
+    VitaCtrNativeGpu_SetDisplayEnv(0, 0, 320, 240, 0, 0, 320, 240, 0);
     NativeGpu_BeginFrontendFrame();
     s_frame_started = 1;
     s_context_ready = 1;
@@ -1103,25 +1104,27 @@ int renderer_present_size(const struct psx_gpu *psx_gpu, int *width, int *height
     return *width > 0 && *height > 0;
 }
 
-int renderer_present_frame(struct psx_gpu *psx_gpu, int src_x, int src_y)
+int renderer_present_frame(struct psx_gpu *psx_gpu, int src_x, int src_y,
+    int pic_x, int pic_y, int pic_w, int pic_h)
 {
     int width;
     int height;
 
     if (!renderer_present_size(psx_gpu, &width, &height))
         return 0;
-    return renderer_present_frame_rect(src_x, src_y, width, height,
+    return renderer_present_frame_rect(src_x, src_y, width, height, pic_x, pic_y, pic_w, pic_h,
         !!(psx_gpu->status & PSX_GPU_STATUS_RGB24));
 }
 
 /* The present of renderer_present_frame, from values taken when it was
  * requested: gpulib's GPU thread runs it in order with the commands. */
-int renderer_present_frame_rect(int src_x, int src_y, int width, int height, int rgb24)
+int renderer_present_frame_rect(int src_x, int src_y, int width, int height,
+    int pic_x, int pic_y, int pic_w, int pic_h, int rgb24)
 {
     if (!s_context_ready)
         return 0;
 
-    VitaCtrNativeGpu_SetDisplayEnv(src_x, src_y, width, height, rgb24);
+    VitaCtrNativeGpu_SetDisplayEnv(src_x, src_y, width, height, pic_x, pic_y, pic_w, pic_h, rgb24);
     NativeGpu_SetFrontendDisplayBlank(0);
     if (!s_frame_started) {
         NativeGpu_BeginFrontendFrame();
