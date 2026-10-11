@@ -600,9 +600,18 @@ void NativeGpu_SyncBackend(void)
 #endif
 }
 
+/* Which synchronous tasks ran and how long the caller waited for each, by
+ * task function (the frontend's progress lines print them). */
+#define NATIVE_GPU_TASK_STATS 8
+void *pcsx_vita_ctr_task_fn[NATIVE_GPU_TASK_STATS];
+unsigned pcsx_vita_ctr_task_n[NATIVE_GPU_TASK_STATS];
+unsigned long long pcsx_vita_ctr_task_us[NATIVE_GPU_TASK_STATS];
+
 void NativeGpu_RunBackendTaskSync(NativeGpuBackendTaskFn task, void *arg)
 {
 #ifdef __vita__
+	SceUInt64 taskStart;
+	int stat;
 	if (task == NULL)
 	{
 		return;
@@ -612,6 +621,13 @@ void NativeGpu_RunBackendTaskSync(NativeGpuBackendTaskFn task, void *arg)
 		task(arg);
 		return;
 	}
+	taskStart = sceKernelGetProcessTimeWide();
+	for (stat = 0; stat < NATIVE_GPU_TASK_STATS - 1; stat++)
+	{
+		if (pcsx_vita_ctr_task_fn[stat] == (void *)task || pcsx_vita_ctr_task_fn[stat] == NULL)
+			break;
+	}
+	pcsx_vita_ctr_task_fn[stat] = (void *)task;
 	NativeGpu_BackendLock();
 	NativeGpu_BackendWaitIdleTimed(NATIVE_GPU_WAIT_TASK_PREVIOUS);
 	s_gpuBackendTask = task;
@@ -622,6 +638,8 @@ void NativeGpu_RunBackendTaskSync(NativeGpuBackendTaskFn task, void *arg)
 	sceKernelSignalLwCond(&s_gpuBackendCond);
 	NativeGpu_BackendWaitIdleTimed(NATIVE_GPU_WAIT_TASK);
 	NativeGpu_BackendUnlock();
+	pcsx_vita_ctr_task_n[stat]++;
+	pcsx_vita_ctr_task_us[stat] += sceKernelGetProcessTimeWide() - taskStart;
 #else
 	if (task != NULL)
 	{

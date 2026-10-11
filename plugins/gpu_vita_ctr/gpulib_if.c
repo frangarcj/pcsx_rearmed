@@ -1066,6 +1066,11 @@ void renderer_barrier(void)
     NativeGpu_SyncBackend();
 }
 
+/* The last rect read back from the renderer (before tile rounding), and
+ * how many reads there were: the frontend's progress lines print them. */
+int pcsx_vita_ctr_read_rect[4];
+unsigned pcsx_vita_ctr_read_n;
+
 void renderer_sync_vram_to_cpu(int x, int y, int w, int h)
 {
     VitaCtrVramTask task;
@@ -1075,6 +1080,16 @@ void renderer_sync_vram_to_cpu(int x, int y, int w, int h)
      * CPU wrote: no flush, no wait for the renderer thread. */
     if (!NativeGpu_GuestVRAMStale(x, y, w, h))
         return;
+    pcsx_vita_ctr_read_rect[0] = x;
+    pcsx_vita_ctr_read_rect[1] = y;
+    pcsx_vita_ctr_read_rect[2] = w;
+    pcsx_vita_ctr_read_rect[3] = h;
+    pcsx_vita_ctr_read_n++;
+#ifndef __vita__
+    if (getenv("PCSX_TRACE_READS")) {
+        fprintf(stderr, "read-trace %d,%d %dx%d caller=%p\n", x, y, w, h, __builtin_return_address(0));
+    }
+#endif
 
     /* Read back whole 64x64 tiles, so later reads near this one find the
      * guest copy current (a few draws at boot otherwise keep the whole VRAM

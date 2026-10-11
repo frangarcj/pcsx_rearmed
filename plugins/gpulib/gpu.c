@@ -877,8 +877,11 @@ int do_vram_copy(uint16_t *vram, const uint32_t *ex_regs, const uint32_t *params
   uint32_t x, y;
 
 #ifdef GPU_VITA_CTR
+  /* Only the source is read: the copy overwrites the whole destination (no
+   * mask test here), and a destination overlapping the source is in the
+   * source's read. Reading the destination back cost Soul Calibur's throws
+   * a renderer sync and readback every other frame (37-40 fps on the Vita). */
   renderer_sync_vram_to_cpu(sx, sy, w, h);
-  renderer_sync_vram_to_cpu(dx, dy, w, h);
 #else
   renderer_flush_queues();
 #endif

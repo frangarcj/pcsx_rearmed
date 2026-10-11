@@ -1271,7 +1271,7 @@ static void print_wait_stats(unsigned runs)
     static unsigned long long last_vblank_us;
     static unsigned last_vblank_n, last_runs;
     const unsigned frames = runs - last_runs;
-    char line[512];
+    char line[1024];
     int at = 0;
     if (!frames)
         return;
@@ -1283,6 +1283,31 @@ static void print_wait_stats(unsigned runs)
         WAIT_FIELD(names[i], pcsx_vita_ctr_wait_us[i] - last_us[i], pcsx_vita_ctr_wait_n[i] - last_n[i]);
         last_us[i] = pcsx_vita_ctr_wait_us[i];
         last_n[i] = pcsx_vita_ctr_wait_n[i];
+    }
+#endif
+#if defined(STANDALONE_VITAGL) && defined(VITA_DEBUG_SHOT)
+    {
+        extern void *pcsx_vita_ctr_task_fn[8];
+        extern unsigned pcsx_vita_ctr_task_n[8];
+        extern unsigned long long pcsx_vita_ctr_task_us[8];
+        static unsigned last_task_n[8];
+        static unsigned long long last_task_us[8];
+        extern int pcsx_vita_ctr_read_rect[4];
+        extern unsigned pcsx_vita_ctr_read_n;
+        static unsigned last_read_n;
+        if (pcsx_vita_ctr_read_n != last_read_n)
+            at += snprintf(line + at, sizeof(line) - at, " read=%u@%d,%d,%dx%d", pcsx_vita_ctr_read_n - last_read_n,
+                pcsx_vita_ctr_read_rect[0], pcsx_vita_ctr_read_rect[1], pcsx_vita_ctr_read_rect[2], pcsx_vita_ctr_read_rect[3]);
+        last_read_n = pcsx_vita_ctr_read_n;
+        for (int i = 0; i < 8 && pcsx_vita_ctr_task_fn[i]; i++) {
+            char name[24];
+            if (pcsx_vita_ctr_task_n[i] == last_task_n[i])
+                continue;
+            snprintf(name, sizeof(name), "t%p", pcsx_vita_ctr_task_fn[i]);
+            WAIT_FIELD(name, pcsx_vita_ctr_task_us[i] - last_task_us[i], pcsx_vita_ctr_task_n[i] - last_task_n[i]);
+            last_task_n[i] = pcsx_vita_ctr_task_n[i];
+            last_task_us[i] = pcsx_vita_ctr_task_us[i];
+        }
     }
 #endif
 #ifdef REARCADE_NEON
@@ -1482,11 +1507,11 @@ static int run_ui_game(const char *game_path)
             if (++runs % 60 == 0)
                 sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
 #ifdef VITA_DEBUG_SHOT
-            if (runs % 300 == 0) {
+            if (runs % 60 == 0) {
                 static SceUInt64 last;
                 const SceUInt64 now = sceKernelGetProcessTimeWide();
-                if (last && runs > 300)
-                    sceClibPrintf("pcsx-vita: frame %u: %.2f fps\n", runs, 300e6 / (double)(now - last));
+                if (last && runs > 60)
+                    sceClibPrintf("pcsx-vita: frame %u: %.2f fps\n", runs, 60e6 / (double)(now - last));
                 last = now;
                 print_wait_stats(runs);
             }
