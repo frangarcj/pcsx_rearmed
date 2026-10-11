@@ -2253,6 +2253,16 @@ extern "C" int VitaRomSelector_Run(char *out_path, size_t out_size)
     return task.result;
 }
 
+extern "C" void VitaRomSelector_ListRoms(VitaRomCallback callback, void *user)
+{
+    std::vector<RomEntry> roms;
+    std::vector<CoverEntry> covers;
+    scan_roms(roms);
+    scan_cover_index(covers);
+    for (size_t i = 0; i < roms.size(); ++i)
+        callback(user, roms[i].path.c_str(), roms[i].title.c_str(), resolve_rom_cover(roms[i], covers).c_str());
+}
+
 extern "C" int VitaPauseMenu_Run(const char *game_path, int start_in_save_states)
 {
     PauseMenuTask task;

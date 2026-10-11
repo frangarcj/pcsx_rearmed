@@ -9,6 +9,11 @@ extern "C" {
 
 int VitaRomSelector_Run(char *out_path, size_t out_size);
 
+/* The games the selector shows, sorted by title: path, file title and the
+ * cover each resolves to (a path in the covers folder, or ""). */
+typedef void (*VitaRomCallback)(void *user, const char *path, const char *title, const char *cover_path);
+void VitaRomSelector_ListRoms(VitaRomCallback callback, void *user);
+
 enum VitaPauseMenuResult {
     VITA_PAUSE_RESUME = 0,
     VITA_PAUSE_RESTART = 1,

@@ -1,5 +1,6 @@
 #include "arcade_catalog.h"
 
+#include <ctype.h>
 #include <string.h>
 #include <algorithm>
 
@@ -23,6 +24,9 @@ const ShelfSystemStyle arcade_catalog_styles[] = {
 	  COLOUR(250, 150, 40), COLOUR(40, 160, 90) },
 	{ "Taito G-Net", COLOUR(110, 44, 140), COLOUR(200, 200, 210), COLOUR(84, 32, 110), COLOUR(36, 12, 50),
 	  COLOUR(200, 80, 240), COLOUR(90, 40, 180) },
+	/* Discs: only the generated label uses it. */
+	{ "PlayStation", COLOUR(60, 60, 66), COLOUR(170, 170, 178), COLOUR(40, 40, 46), COLOUR(18, 18, 22),
+	  COLOUR(70, 80, 110), COLOUR(30, 34, 48) },
 };
 const int arcade_catalog_style_count = sizeof(arcade_catalog_styles) / sizeof(arcade_catalog_styles[0]);
 
@@ -62,7 +66,7 @@ void ArcadeCatalog::build(const std::string &rompath, bool demo)
 		split_description(info->description, &title, &label);
 		auto game = std::find_if(entries_.begin(), entries_.end(), [&](const Game &g) { return g.key == key; });
 		if (game == entries_.end()) {
-			entries_.push_back(Game{ key, title, {}, {}, {}, {}, {} });
+			entries_.push_back(Game{ key, title, SHELF_CABINET, {}, {}, {}, {}, {}, {} });
 			game = entries_.end() - 1;
 		}
 		/* The parent first: its title names the game. */
@@ -72,15 +76,69 @@ void ArcadeCatalog::build(const std::string &rompath, bool demo)
 		game->ids.insert(game->ids.begin() + at, info->name);
 		game->labels.insert(game->labels.begin() + at, label);
 		game->launches.insert(game->launches.begin() + at, rompath + "/" + info->name + ".zip");
+		game->arts.insert(game->arts.begin() + at, "");
 		game->years.insert(game->years.begin() + at, info->year);
 	}
 	std::sort(entries_.begin(), entries_.end(), [](const Game &a, const Game &b) { return a.title < b.title; });
-	/* The strings are final now: point the shelf records at them. */
+	link();
+}
+
+/* "Ridge Racer Type 4 (Europe) (Disc 1)" -> "Ridge Racer Type 4" and
+ * "Europe, Disc 1". */
+static void split_file_title(const std::string &file_title, std::string *title, std::string *label)
+{
+	const size_t tags = file_title.find(" (");
+	*title = file_title.substr(0, tags);
+	/* "R4 - Ridge Racer Type 4": the short name goes, as in the covers. */
+	const size_t dash = title->find(" - ");
+	if (dash != std::string::npos && dash <= 5 && dash + 3 < title->size() &&
+		std::all_of(title->begin(), title->begin() + dash, [](char c) { return isupper(c) || isdigit(c); }))
+		title->erase(0, dash + 3);
+	label->clear();
+	if (tags == std::string::npos)
+		return;
+	for (char c : file_title.substr(tags + 1)) {
+		if (c == '(')
+			continue;
+		if (c == ')')
+			c = ',';
+		label->push_back(c);
+	}
+	while (!label->empty() && (label->back() == ',' || label->back() == ' '))
+		label->pop_back();
+}
+
+void ArcadeCatalog::add_disc(const std::string &path, const std::string &file_title, const std::string &cover_art)
+{
+	std::string title, label;
+	split_file_title(file_title, &title, &label);
+	/* Discs come after the arcade games, sorted by title. */
+	auto game = std::find_if(entries_.begin(), entries_.end(),
+		[&](const Game &g) { return g.kind == SHELF_DISC && g.key == title; });
+	if (game == entries_.end()) {
+		auto at = std::find_if(entries_.begin(), entries_.end(),
+			[&](const Game &g) { return g.kind == SHELF_DISC && title < g.title; });
+		game = entries_.insert(at, Game{ title, title, SHELF_DISC, {}, {}, {}, {}, {}, {} });
+	}
+	const size_t slash = path.find_last_of("/\\");
+	game->ids.push_back(slash == std::string::npos ? path : path.substr(slash + 1));
+	game->labels.push_back(label);
+	game->launches.push_back(path);
+	game->arts.push_back(cover_art);
+	game->years.push_back(0);
+	link();
+}
+
+void ArcadeCatalog::link()
+{
+	games_.clear();
 	for (Game &game : entries_) {
+		game.versions.clear();
 		for (size_t v = 0; v < game.ids.size(); v++)
 			game.versions.push_back(ShelfVersion{ game.ids[v].c_str(), game.labels[v].c_str(),
-				game.launches[v].c_str(), game.years[v] });
-		games_.push_back(ShelfGame{ game.key.c_str(), game.title.c_str(), "Namco System 12", SHELF_CABINET,
+				game.launches[v].c_str(), game.years[v], game.arts[v].c_str() });
+		games_.push_back(ShelfGame{ game.key.c_str(), game.title.c_str(),
+			game.kind == SHELF_DISC ? "PlayStation" : "Namco System 12", game.kind,
 			game.versions.data(), (int)game.versions.size() });
 	}
 }

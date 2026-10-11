@@ -29,6 +29,9 @@
 #include "vita_gpuprof.h"
 #ifdef STANDALONE_VITAGL
 #include "rom_selector.h"
+#ifdef ARCADE_SHELF
+#include "shelf_selector.h"
+#endif
 #include "settings.h"
 #include "savestates.h"
 /* gpulib: drains the GPU thread and the renderer (plugins/gpulib/gpu.c). */
@@ -1396,7 +1399,11 @@ static int run_ui(void)
     int ret;
 
     for (;;) {
+#ifdef ARCADE_SHELF
+        ret = VitaShelfSelector_Run(game_path, sizeof(game_path));
+#else
         ret = VitaRomSelector_Run(game_path, sizeof(game_path));
+#endif
         if (ret <= 0) {
             sceClibPrintf("pcsx-vita: ROM selector %s\n", ret < 0 ? "failed" : "closed");
             return ret < 0 ? 2 : 0;

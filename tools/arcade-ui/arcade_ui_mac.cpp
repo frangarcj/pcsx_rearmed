@@ -1,10 +1,12 @@
 /* PCSX ReArcade's selector on macOS: arcade-shelf with the System 12 sets
  * of a rompath (frontend/arcade_catalog.cpp), to preview it without a Vita.
  *
- *   build/arcade-ui/arcade-ui [--rompath DIR] [--data DIR] [--demo]
+ *   build/arcade-ui/arcade-ui [--rompath DIR] [--data DIR] [--demo] [--disc FILE]...
  *       [--script STEPS] [--step-frames N] [--shot FILE.png] [--shots DIR] [--headless]
  *
- * --demo lists every supported set, with or without its zips. Keys,
+ * --demo lists every supported set, with or without its zips. --disc adds a
+ * PlayStation disc, as the Vita lists them: its cover is
+ * <data>/covers/<file name without extension>.png. Keys,
  * scripts and screenshots work as in arcade-shelf's viewer
  * (deps/arcade-shelf/examples/viewer/viewer.cpp).
  */
@@ -130,12 +132,14 @@ int main(int argc, char **argv)
 	const char *rompath = "roms", *data = "build/arcade-ui/data", *shot = NULL, *shots = NULL;
 	std::vector<unsigned> script;
 	std::vector<std::pair<float, float> > script_sticks;
+	std::vector<std::string> discs;
 	int step_frames = 15, headless = 0, demo = 0, result = 0;
 	for (int i = 1; i < argc; i++) {
 		const std::string arg = argv[i];
 		const bool has_value = i + 1 < argc;
 		if (arg == "--rompath" && has_value) rompath = argv[++i];
 		else if (arg == "--demo") demo = 1;
+		else if (arg == "--disc" && has_value) discs.push_back(argv[++i]);
 		else if (arg == "--data" && has_value) data = argv[++i];
 		else if (arg == "--headless") headless = 1;
 		else if (arg == "--shot" && has_value) shot = argv[++i];
@@ -196,6 +200,12 @@ int main(int argc, char **argv)
 	ArcadeCatalog catalogue;
 	const std::string hint = std::string("Copy MAME romset zips (soulclbr.zip, tekken3.zip...) to ") + rompath;
 	catalogue.build(rompath, demo != 0);
+	for (const std::string &disc : discs) {
+		const size_t slash = disc.find_last_of('/');
+		std::string title = slash == std::string::npos ? disc : disc.substr(slash + 1);
+		title = title.substr(0, title.find_last_of('.'));
+		catalogue.add_disc(disc, title, title);
+	}
 	ShelfConfig config = { "PCSX", "ReArcade", data, hint.c_str(), WIDTH, HEIGHT,
 		arcade_catalog_styles, arcade_catalog_style_count };
 	if (!shelf_init(&config)) {
