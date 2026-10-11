@@ -43,5 +43,5 @@ void CALLBACK SPUschedule(unsigned int cycles_after) {
 }
 
 void spuUpdate() {
-	SPU_async(psxRegs.cycle, 0);
+	if (SPU_async) SPU_async(psxRegs.cycle, 0);
 }

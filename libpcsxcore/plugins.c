@@ -180,6 +180,51 @@ static void CALLBACK SPU__setCDvol(unsigned char ll, unsigned char lr,
 #define LoadSpuSymN(dest, name) \
 	LoadSym(SPU_##dest, SPU##dest, name, FALSE);
 
+/* Arcade boards without the PlayStation SPU (MAME maps none on System 11,
+ * System 12 and Konami GQ; their sound is the board's own): its registers
+ * read 0 and take no writes, its DMA moves nothing, it is never mixed. The
+ * board says so with psxSetSpuPresent(); the plugin's functions return
+ * when it is unloaded. */
+static int spu_absent;
+static SPUwriteRegister spu_real_writeRegister;
+static SPUreadRegister spu_real_readRegister;
+static SPUwriteDMAMem spu_real_writeDMAMem;
+static SPUreadDMAMem spu_real_readDMAMem;
+static SPUasync spu_real_async;
+
+static void CALLBACK spu_none_writeRegister(unsigned long reg, unsigned short val, unsigned int cycles) {}
+static unsigned short CALLBACK spu_none_readRegister(unsigned long reg, unsigned int cycles) { return 0; }
+static void CALLBACK spu_none_writeDMAMem(unsigned short *mem, int size, unsigned int cycles) {}
+static void CALLBACK spu_none_readDMAMem(unsigned short *mem, int size, unsigned int cycles) {}
+
+static void spu_apply(void) {
+	if (SPU_writeRegister != spu_none_writeRegister) {
+		spu_real_writeRegister = SPU_writeRegister;
+		spu_real_readRegister = SPU_readRegister;
+		spu_real_writeDMAMem = SPU_writeDMAMem;
+		spu_real_readDMAMem = SPU_readDMAMem;
+		spu_real_async = SPU_async;
+	}
+	if (spu_absent) {
+		SPU_writeRegister = spu_none_writeRegister;
+		SPU_readRegister = spu_none_readRegister;
+		SPU_writeDMAMem = spu_none_writeDMAMem;
+		SPU_readDMAMem = spu_none_readDMAMem;
+		SPU_async = NULL;
+	} else if (spu_real_writeRegister) {
+		SPU_writeRegister = spu_real_writeRegister;
+		SPU_readRegister = spu_real_readRegister;
+		SPU_writeDMAMem = spu_real_writeDMAMem;
+		SPU_readDMAMem = spu_real_readDMAMem;
+		SPU_async = spu_real_async;
+	}
+}
+
+void psxSetSpuPresent(int present) {
+	spu_absent = !present;
+	spu_apply();
+}
+
 static int LoadSPUplugin(const char *SPUdll) {
 	void *drv;
 
@@ -204,6 +249,7 @@ static int LoadSPUplugin(const char *SPUdll) {
 	LoadSpuSymN(async, "SPUasync");
 	LoadSpuSymN(playCDDAchannel, "SPUplayCDDAchannel");
 	LoadSpuSym0(setCDvol, "SPUsetCDvol");
+	spu_apply();
 
 	return 0;
 }

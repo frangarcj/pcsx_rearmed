@@ -1316,6 +1316,9 @@ int system12_load_regions(const system12_desc *desc, u8 *main, u8 *banked, u8 *s
         result = -1;
     if (result)
         system12_unload();
+    else
+        /* System 12 has no PlayStation SPU: the C352 is its sound. */
+        psxSetSpuPresent(0);
     return result;
 }
 
@@ -1323,6 +1326,7 @@ void system12_unload(void)
 {
     /* Call after psxShutdown(): sizes are needed to unmap the core. */
     system12_board_thread_stop();
+    psxSetSpuPresent(1);
     bus_trace_cb = NULL;
     bus_trace_opaque = NULL;
     edge_trace_cb = NULL;

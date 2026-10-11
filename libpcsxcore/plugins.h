@@ -122,6 +122,9 @@ extern SPUregisterCallback SPU_registerCallback;
 extern SPUregisterScheduleCb SPU_registerScheduleCb;
 extern SPUasync            SPU_async;
 extern SPUplayCDDAchannel  SPU_playCDDAchannel;
+/* Whether the machine has the PlayStation SPU (arcade boards without it
+ * call this with 0 when they load, 1 when they unload). */
+void psxSetSpuPresent(int present);
 extern SPUsetCDvol         SPU_setCDvol;
 
 // PAD Functions

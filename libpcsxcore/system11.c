@@ -1,4 +1,5 @@
 /* GPL-2.0-or-later. Native host wiring for MAME-derived System 11 devices. */
+#include "plugins.h"
 #include "system11.h"
 #include "system12.h"
 #include "systemtaito.h"
@@ -154,6 +155,8 @@ int system11_load(const char *directory)
     board.device = namcos11_create(cfg);
     if (!board.device || gpu_set_model(namcos11_gpu_model(board.device)) || gpu_set_vram_height(1024)) goto bad;
     psxRamSize = 0x400000; psxRomSize = 0x400000;
+    /* System 11 has no PlayStation SPU: the C352 is its sound. */
+    psxSetSpuPresent(0);
     return 0;
 bad:
     fprintf(stderr, "System11: board initialization failed\n"); system11_unload(); return -1;
@@ -161,6 +164,7 @@ bad:
 void system11_unload(void)
 {
     unsigned i;
+    psxSetSpuPresent(1);
     pcm_wav_close(&board.wav); namcos11_destroy(board.device);
     for (i = 0; i < 5; i++) free(board.regions[i]);
     memset(&board, 0, sizeof(board));
