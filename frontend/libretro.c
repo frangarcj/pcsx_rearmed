@@ -37,6 +37,7 @@
 #include "../libpcsxcore/cheat.h"
 #include "../libpcsxcore/r3000a.h"
 #include "../libpcsxcore/system12_profile.h"
+#include "../libpcsxcore/gte.h"
 #include "../libpcsxcore/gpu.h"
 #ifdef ARCADE_SYSTEM12
 #include "../libpcsxcore/psxmem.h"
@@ -234,6 +235,7 @@ static void retro_system12_restore_console(void);
 #ifdef PCSX_SYSTEM_GNET
 static void retro_systemgnet_restore_console(void);
 #endif
+static void disk_init(void);
 void retro_unload_game(void)
 {
 #ifdef PCSX_SYSTEM_GNET
@@ -242,6 +244,14 @@ void retro_unload_game(void)
 #ifdef ARCADE_SYSTEM12
    retro_system12_restore_console();
 #endif
+   if (plugins_opened)
+   {
+      ClosePlugins();
+      plugins_opened = 0;
+   }
+   disk_init();
+   CdromId[0] = '\0';
+   CdromLabel[0] = '\0';
 }
 static int vout_open(void) { return 0; }
 static void vout_close(void) {}
@@ -723,7 +733,7 @@ static int init_vita_mmap()
    void *tmpaddr;
    int ret;
 
-   vita_map_block = sceKernelAllocMemBlock("pcsx-vita-mmap",
+   vita_map_block = sceKernelAllocMemBlock("pcsx-awo-mmap",
       SCE_KERNEL_MEMBLOCK_TYPE_USER_RW, 64 * 1024 * 1024, NULL);
    if (vita_map_block < 0) {
       SysPrintf("vita mmap: memblock allocation failed: %08x\n", vita_map_block);
@@ -1286,7 +1296,11 @@ void retro_get_system_info(struct retro_system_info *info)
 #define GIT_VERSION ""
 #endif
    memset(info, 0, sizeof(*info));
+#ifdef VITA
+   info->library_name     = "PCSX AwO";
+#else
    info->library_name     = "PCSX-ReARMed";
+#endif
    info->library_version  = "r26" GIT_VERSION;
    info->valid_extensions = "bin|cue|img|mdf|pbp|toc|cbn|m3u|chd|iso|exe";
    info->need_fullpath    = true;
@@ -2014,6 +2028,8 @@ static void retro_set_audio_buff_status_cb(void)
 
 static void update_variables(bool in_flight);
 static void load_memcards(void);
+static bool get_bios_config_hle(void);
+static void prepare_bios(bool use_hle);
 
 static int get_bool_variable(const char *key)
 {
@@ -2536,6 +2552,7 @@ bool retro_load_game(const struct retro_game_info *info)
 
    load_memcards();
    plugin_call_rearmed_cbs();
+   prepare_bios(get_bios_config_hle());
    SysReset();
 
    if (is_exe)
@@ -2657,6 +2674,9 @@ static float GunconAdjustRatioY = 1;
 static void update_variables(bool in_flight)
 {
    struct retro_variable var;
+#ifdef VITA
+   int old_widescreen_hack = gte_widescreen_hack;
+#endif
 #ifdef GPU_PEOPS
    // Always enable GPU_PEOPS_OLD_FRAME_SKIP flag
    // (this is set in standalone, with no option
@@ -3148,6 +3168,18 @@ static void update_variables(bool in_flight)
       else // auto
          Config.AlternativeFlip = -1;
    }
+
+#ifdef VITA
+   var.value = NULL;
+   var.key = "vita_aspect_ratio";
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+      gteSetWidescreenHack(strcmp(var.value, "16:9_unstretched") == 0);
+   else
+      gteSetWidescreenHack(0);
+
+   if (in_flight && old_widescreen_hack != gte_widescreen_hack && psxCpu != &psxInt)
+      ndrc_clear_full();
+#endif
 
    var.value = NULL;
    var.key = "pcsx_rearmed_screen_centering";
@@ -3893,9 +3925,6 @@ static void print_internal_fps(void)
       }
    }
 }
-
-static bool get_bios_config_hle(void);
-static void prepare_bios(bool use_hle);
 
 void retro_run(void)
 {

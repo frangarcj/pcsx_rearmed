@@ -3762,6 +3762,8 @@ internal int ProcessFlatPoly(P_TAG *polyTag)
 internal int ProcessGouraudPoly(P_TAG *polyTag)
 {
 	const bool shadeTexOn = true;
+	// GP0 bit 0 requests a raw texture: GT3/GT4 must bypass vertex colour modulation.
+	const bool texturedShadeTexOn = (polyTag->code & 1) == 0;
 	const bool semiTrans = (polyTag->code & 2);
 	const int primSubType = polyTag->code & 0x0C;
 
@@ -3792,7 +3794,7 @@ internal int ProcessGouraudPoly(P_TAG *polyTag)
 		GrVertex *firstVertex = &s_gpu.vertexBuffer[s_gpu.vertexIndex];
 		MakeVertexTriangle(firstVertex, &poly->x0, &poly->x1, &poly->x2);
 		MakeTexcoordTriangle(firstVertex, &poly->u0, &poly->u1, &poly->u2, poly->tpage, poly->clut, GET_TPAGE_DITHER(activeDrawEnv.tpage) || activeDrawEnv.dtd);
-		MakeColourTriangle(firstVertex, shadeTexOn, &poly->r0, &poly->r1, &poly->r2);
+		MakeColourTriangle(firstVertex, texturedShadeTexOn, &poly->r0, &poly->r1, &poly->r2);
 		if (((u32)poly->tpage & NATIVE_GPU_TPAGE_SUPER_TURBO_TINT) != 0)
 		{
 			MakeColourSuperTurboTint(firstVertex, 3);
@@ -3830,7 +3832,7 @@ internal int ProcessGouraudPoly(P_TAG *polyTag)
 		MakeVertexQuad(firstVertex, &poly->x0, &poly->x1, &poly->x3, &poly->x2);
 		MakeTexcoordQuad(firstVertex, &poly->u0, &poly->u1, &poly->u3, &poly->u2, poly->tpage, poly->clut,
 		                 GET_TPAGE_DITHER(activeDrawEnv.tpage) || activeDrawEnv.dtd);
-		MakeColourQuad(firstVertex, shadeTexOn, &poly->r0, &poly->r1, &poly->r3, &poly->r2);
+		MakeColourQuad(firstVertex, texturedShadeTexOn, &poly->r0, &poly->r1, &poly->r3, &poly->r2);
 		if (((u32)poly->tpage & NATIVE_GPU_TPAGE_SUPER_TURBO_TINT) != 0)
 		{
 			MakeColourSuperTurboTint(firstVertex, 4);

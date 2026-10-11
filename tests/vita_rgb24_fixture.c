@@ -22,6 +22,11 @@ int main(void)
     assert(rgba[0] == 0x11 && rgba[1] == 0x22 && rgba[2] == 0x33 && rgba[3] == 255);
     psx_vita_rgb24_row(vram, 0, 512, 0, 1, 512, rgba);
     assert(rgba[0] == 0x11 && rgba[1] == 0x22 && rgba[2] == 0x33 && rgba[3] == 255);
-    puts("Vita RGB24 upper row and 512/1024 vertical wrap: PASS");
+    /* A pixel straddling the row end takes its last bytes from x = 0. */
+    vram[3 * 1024 + 1023] = 0xbbaa;
+    vram[3 * 1024] = 0x00cc;
+    psx_vita_rgb24_row(vram, 2046, 3, 0, 1, 1024, rgba);
+    assert(rgba[0] == 0xaa && rgba[1] == 0xbb && rgba[2] == 0xcc && rgba[3] == 255);
+    puts("Vita RGB24 upper row, 512/1024 vertical and 2048-byte row wrap: PASS");
     return 0;
 }

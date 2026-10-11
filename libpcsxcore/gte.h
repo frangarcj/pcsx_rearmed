@@ -69,6 +69,11 @@ typedef void (gte_handler)(psxCP2Regs *regs, u32 code);
 gte_handler *gteGetHandler(u32 code);
 gte_handler *gteGetHandler_nf(u32 code);
 
+extern int gte_widescreen_hack;
+void gteSetWidescreenHack(int enabled);
+void gteWidescreenRTPS(psxCP2Regs *regs);
+void gteWidescreenRTPT(psxCP2Regs *regs);
+
 // used by asm/drc
 void gteRTPS_sf1lm0(psxCP2Regs *regs, u32 code);
 void gteMVMVA_generic(psxCP2Regs *regs, u32 code);

@@ -1523,7 +1523,11 @@ long GPUfreeze(uint32_t type, GPUFreeze_t *freeze, uint16_t **vram_ptr)
         GPUwriteStatus((i << 24) | freeze->ulControl[i]);
       gput_sync(&gpu.timing, gpu.ex_regs);
       renderer_sync_ecmds(gpu.ex_regs);
+      /* The Vita renderer copies guest VRAM when this is called: LoadState
+       * refreshes it after the saved VRAM has been read in. */
+#ifndef GPU_VITA_CTR
       renderer_update_caches(0, 0, 1024, gpu_vram_height, 0);
+#endif
       gpu_async_sync_ecmds(&gpu);
       break;
   }

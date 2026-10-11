@@ -2125,6 +2125,13 @@ static void c2op_assemble(struct compile_state *st, int i, const struct regstat 
         emit_movimm(st->source[i],1); // opcode
         //emit_writeword(1,&psxRegs.code);
         emit_far_call(handler);
+        if (gte_widescreen_hack && (c2op == GTEOP_RTPS || c2op == GTEOP_RTPT)) {
+          emit_addimm(FP, (char *)&psxRegs.CP2D.r[0] - (char *)&dynarec_local, 0);
+          if (c2op == GTEOP_RTPS)
+            emit_far_call(gteWidescreenRTPS);
+          else
+            emit_far_call(gteWidescreenRTPT);
+        }
         break;
     }
     c2op_epilogue(c2op, reglist);

@@ -5190,11 +5190,21 @@ static void NativeRenderer_PresentRGB24(const DISPENV *display)
 		return;
 	const int x = display->disp.x & 1023;
 	const int y = display->disp.y & (VRAM_HEIGHT - 1);
-	const int packedWidth = SDL_min((width * 3 + 1) / 2, VRAM_WIDTH - x);
+	/* A line runs past the row end back to x = 0 (psx_vita_rgb24_row):
+	 * sync both parts of the row. */
+	const int packedWords = SDL_min((width * 3 + 1) / 2, VRAM_WIDTH);
+	const int firstWords = SDL_min(packedWords, VRAM_WIDTH - x);
+	const int wrappedWords = packedWords - firstWords;
 	const int firstHeight = SDL_min(height, VRAM_HEIGHT - y);
-	NativeRenderer_SyncGpuVRAMToCPU(x, y, packedWidth, firstHeight);
+	NativeRenderer_SyncGpuVRAMToCPU(x, y, firstWords, firstHeight);
+	if (wrappedWords > 0)
+		NativeRenderer_SyncGpuVRAMToCPU(0, y, wrappedWords, firstHeight);
 	if (firstHeight < height)
-		NativeRenderer_SyncGpuVRAMToCPU(x, 0, packedWidth, height - firstHeight);
+	{
+		NativeRenderer_SyncGpuVRAMToCPU(x, 0, firstWords, height - firstHeight);
+		if (wrappedWords > 0)
+			NativeRenderer_SyncGpuVRAMToCPU(0, 0, wrappedWords, height - firstHeight);
+	}
 	if (textureWidth != width || textureHeight != height)
 	{
 		NativeRenderer_DestroyStreamingTexture(texture);
@@ -5203,7 +5213,7 @@ static void NativeRenderer_PresentRGB24(const DISPENV *display)
 		textureHeight = height;
 	}
 	for (int row = 0; row < height; ++row)
-		psx_vita_rgb24_row(s_vram.cpuPixels, x, y, row, width, VRAM_HEIGHT,
+		psx_vita_rgb24_row(s_vram.cpuPixels, x * 2, y, row, width, VRAM_HEIGHT,
 		                   s_vitaVramTransferPixels + (size_t)row * width * 4u);
 	NativeRenderer_UpdateStreamingTexture(texture, width, height, s_vitaVramTransferPixels);
 	NativeRenderer_PresentStreamingTexture(texture, height, height);

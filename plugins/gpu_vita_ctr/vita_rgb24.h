@@ -3,24 +3,19 @@
 
 #include <stdint.h>
 
-static inline void psx_vita_rgb24_row(const uint16_t *vram, uint32_t display_x,
+/* One scanline of a 24-bit display, from its byte offset in the VRAM row.
+ * Scanout wraps within the 2048-byte row, as the GPU's X address does. */
+static inline void psx_vita_rgb24_row(const uint16_t *vram, uint32_t display_byte_x,
                                     uint32_t display_y, uint32_t row,
                                     uint32_t width, uint32_t vram_height, uint8_t *rgba) {
-    const uint32_t byte_x = (display_x & 1023u) * 2u;
+    const uint32_t byte_x = display_byte_x & 2047u;
     const uint32_t physical_y = (display_y + row) & (vram_height - 1u);
-    const uint32_t available = (2048u - byte_x) / 3u;
-    const uint32_t pixels = width < available ? width : available;
-    const uint8_t *source = (const uint8_t *)(vram + physical_y * 1024u) + byte_x;
-    for (uint32_t x = 0; x < pixels; ++x) {
-        rgba[x * 4u] = source[x * 3u];
-        rgba[x * 4u + 1u] = source[x * 3u + 1u];
-        rgba[x * 4u + 2u] = source[x * 3u + 2u];
-        rgba[x * 4u + 3u] = 255;
-    }
-    for (uint32_t x = pixels; x < width; ++x) {
-        rgba[x * 4u] = 0;
-        rgba[x * 4u + 1u] = 0;
-        rgba[x * 4u + 2u] = 0;
+    const uint8_t *source = (const uint8_t *)(vram + physical_y * 1024u);
+    for (uint32_t x = 0; x < width; ++x) {
+        const uint32_t byte = (byte_x + x * 3u) & 2047u;
+        rgba[x * 4u] = source[byte];
+        rgba[x * 4u + 1u] = source[(byte + 1u) & 2047u];
+        rgba[x * 4u + 2u] = source[(byte + 2u) & 2047u];
         rgba[x * 4u + 3u] = 255;
     }
 }

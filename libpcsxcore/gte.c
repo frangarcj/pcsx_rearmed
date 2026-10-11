@@ -170,6 +170,34 @@
 #define gteZSF4 (regs->CP2C.p[30].sw.l)
 #define gteFLAG (regs->CP2C.r[31])
 
+#ifndef FLAGLESS
+int gte_widescreen_hack;
+
+static inline s16 gteWidescreenScaleX(psxCP2Regs *regs, s16 x)
+{
+	s32 center = gteOFX >> 16;
+	s32 delta = (s32)x - center;
+	return (s16)(center + (delta * 3) / 4);
+}
+
+void gteSetWidescreenHack(int enabled)
+{
+	gte_widescreen_hack = enabled != 0;
+}
+
+void gteWidescreenRTPS(psxCP2Regs *regs)
+{
+	gteSX2 = gteWidescreenScaleX(regs, gteSX2);
+}
+
+void gteWidescreenRTPT(psxCP2Regs *regs)
+{
+	gteSX0 = gteWidescreenScaleX(regs, gteSX0);
+	gteSX1 = gteWidescreenScaleX(regs, gteSX1);
+	gteSX2 = gteWidescreenScaleX(regs, gteSX2);
+}
+#endif
+
 #define GTE_SF(op) ((op >> 19) & 1)
 #define GTE_MX(op) ((op >> 17) & 3)
 #define GTE_V(op) ((op >> 15) & 3)
@@ -1263,8 +1291,19 @@ gte_handler * NM(gteGetHandler)(u32 code)
 void gteDispatch(psxCP2Regs *regs, u32 code)
 {
 	gte_handler *h = gteGetHandler(code);
-	if (h)
+	if (h) {
 		h(regs, code);
+		if (gte_widescreen_hack) {
+			switch (code & 0x3f) {
+			case GTEOP_RTPS:
+				gteWidescreenRTPS(regs);
+				break;
+			case GTEOP_RTPT:
+				gteWidescreenRTPT(regs);
+				break;
+			}
+		}
+	}
 	else
 		log_unhandled("unhandled gte op %08x\n", code);
 }

@@ -37,6 +37,10 @@
 #include "zlib_wrapper.h"
 #include "revision.h"
 
+#ifdef GPU_VITA_CTR
+extern void renderer_update_caches(int x, int y, int w, int h, int state_changed);
+#endif
+
 #ifdef USE_LIBRETRO_VFS
 #include <streams/file_stream_transforms.h>
 #endif
@@ -961,6 +965,9 @@ int LoadState(const char *file) {
 	GPU_freeze(0, &u.gpu_hdr, &vram);
 	assert(vram);
 	SaveFuncs.read(f, vram, 1024*512*2);
+#ifdef GPU_VITA_CTR
+	renderer_update_caches(0, 0, 1024, 512, 0);
+#endif
 	gpuSyncPluginSR();
 
 	// spu

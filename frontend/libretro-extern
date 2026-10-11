@@ -23,3 +23,5 @@ retro_set_input_state
 retro_set_video_refresh
 retro_unload_game
 retro_unserialize
+NativeGpu_InitBackend
+NativeGpu_RunBackendTaskSync
