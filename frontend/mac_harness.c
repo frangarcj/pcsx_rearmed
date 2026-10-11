@@ -13,6 +13,7 @@
 #endif
 #include "../libpcsxcore/r3000a.h"
 #include "../libpcsxcore/psxinterpreter.h"
+#include "../libpcsxcore/gte.h"
 #include "../libpcsxcore/misc.h"
 #include "../libpcsxcore/psxcounters.h"
 #include "../libpcsxcore/spu.h"
@@ -312,7 +313,7 @@ static void usage(const char *name)
     "[--trace FILE --trace-blocks N] [--cycle-snapshots FILE "
     "--snapshot-start CYCLES --snapshot-interval N] "
     "[--board-bus-trace FILE] [--system12-edge-trace FILE] [--system12-trace-shared-writes | --system12-trace-shared-accesses] "
-    "[--max-blocks N] [--icache] [--drc] [--interactive [--pause-at N [--pause-script STEPS] [--pause-shot FILE.ppm]]] [--system12-vblank-sync-only] [--system12-source-step] [--frontend-loop]\n"
+    "[--max-blocks N] [--icache] [--widescreen] [--drc] [--interactive [--pause-at N [--pause-script STEPS] [--pause-shot FILE.ppm]]] [--system12-vblank-sync-only] [--system12-source-step] [--frontend-loop]\n"
     "       %s (--gpu-type1-test | --gpu-type1-test-1m)\n", name, name);
 }
 
@@ -583,6 +584,7 @@ int main(int argc, char **argv)
   int board_load_result = 0;
   int board_family = 12;
   int icache = 0;
+  int widescreen = 0;
   int use_drc = 0;
   int capture_gl = 0;
   int interactive = 0;
@@ -705,6 +707,9 @@ int main(int argc, char **argv)
     else if (!strcmp(argv[i], "--board-test")) board_test = 1;
     else if (!strcmp(argv[i], "--verify-smoke")) verify = 1;
     else if (!strcmp(argv[i], "--icache")) icache = 1;
+    /* The Vita's 16:9 widescreen hook: the GTE squeezes the scene and the
+     * vitagl-like renderer widens frames the GPU drew. */
+    else if (!strcmp(argv[i], "--widescreen")) widescreen = 1;
     else { usage(argv[0]); return 2; }
   }
   if (source_step) {
@@ -870,6 +875,18 @@ int main(int argc, char **argv)
     fprintf(stderr, "Arcade DRC validation currently covers System 12 only.\n"); return 2;
   }
   Config.icache_emulation = icache;
+  if (widescreen && use_drc) {
+    /* Only the interpreter and the 32-bit ARM recompiler (the Vita's) call the hook. */
+    fprintf(stderr, "--widescreen needs the interpreter on macOS\n");
+    return 2;
+  }
+  gteSetWidescreenHack(widescreen);
+#ifdef GPU_VITA_CTR
+  {
+    extern void VitaCtrNativeRenderer_SetAspectMode(int mode);
+    if (widescreen) VitaCtrNativeRenderer_SetAspectMode(2);
+  }
+#endif
   Config.cycle_multiplier = CYCLE_MULT_DEFAULT;
   Config.PreciseExceptions = source_step;
   /* The MAME source charges no MULT/DIV/GTE latency. */

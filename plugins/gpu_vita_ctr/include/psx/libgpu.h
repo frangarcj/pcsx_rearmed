@@ -636,7 +636,8 @@ typedef struct
 	RECT16 screen; /* display start point */
 	u8 isinter;    /* interlace 0: off 1: on */
 	u8 isrgb24;    /* RGB24 bit mode */
-	u8 pad0, pad1; /* reserved */
+	u8 pad0;       /* PCSX: a 3D frame of the GTE widescreen hook (widened) */
+	u8 pad1;       /* reserved */
 } DISPENV;
 
 CTR_STATIC_ASSERT(sizeof(DRAWENV) == 0x5c);

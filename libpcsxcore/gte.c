@@ -185,13 +185,17 @@ void gteSetWidescreenHack(int enabled)
 	gte_widescreen_hack = enabled != 0;
 }
 
+unsigned gte_widescreen_ops;
+
 void gteWidescreenRTPS(psxCP2Regs *regs)
 {
+	gte_widescreen_ops++;
 	gteSX2 = gteWidescreenScaleX(regs, gteSX2);
 }
 
 void gteWidescreenRTPT(psxCP2Regs *regs)
 {
+	gte_widescreen_ops++;
 	gteSX0 = gteWidescreenScaleX(regs, gteSX0);
 	gteSX1 = gteWidescreenScaleX(regs, gteSX1);
 	gteSX2 = gteWidescreenScaleX(regs, gteSX2);

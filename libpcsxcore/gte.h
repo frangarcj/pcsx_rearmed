@@ -70,6 +70,9 @@ gte_handler *gteGetHandler(u32 code);
 gte_handler *gteGetHandler_nf(u32 code);
 
 extern int gte_widescreen_hack;
+/* Projections the hack has squeezed so far: the renderer widens a frame
+ * while they keep coming (3D), and leaves 2D screens and movies at 4:3. */
+extern unsigned gte_widescreen_ops;
 void gteSetWidescreenHack(int enabled);
 void gteWidescreenRTPS(psxCP2Regs *regs);
 void gteWidescreenRTPT(psxCP2Regs *regs);

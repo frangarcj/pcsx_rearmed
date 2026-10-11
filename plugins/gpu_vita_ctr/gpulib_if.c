@@ -59,7 +59,8 @@ void Platform_Log(const char *fmt, ...);
 
 extern int ParseTaglessPrimitive(u32 *command);
 extern void VitaCtrNativeGpu_SetDisplayEnv(int x, int y, int w, int h, int pic_x, int pic_y, int pic_w, int pic_h,
-    int depth24);
+    int depth24, int wide3d);
+extern unsigned gte_widescreen_ops;
 extern void VitaCtrNativeRenderer_SetPresentationAspect(int width, int height);
 extern void VitaCtrNativeRenderer_SetAspectMode(int mode);
 extern int VitaCtrNativeRenderer_GetAspectMode(void);
@@ -820,7 +821,7 @@ static int init_context(void)
         return 0;
     }
 
-    VitaCtrNativeGpu_SetDisplayEnv(0, 0, 320, 240, 0, 0, 320, 240, 0);
+    VitaCtrNativeGpu_SetDisplayEnv(0, 0, 320, 240, 0, 0, 320, 240, 0, 0);
     NativeGpu_BeginFrontendFrame();
     s_frame_started = 1;
     s_context_ready = 1;
@@ -1118,13 +1119,31 @@ int renderer_present_frame(struct psx_gpu *psx_gpu, int src_x, int src_y,
 
 /* The present of renderer_present_frame, from values taken when it was
  * requested: gpulib's GPU thread runs it in order with the commands. */
+/* Whether the frame shows 3D for the GTE widescreen hook: it squeezed a
+ * projection within the last 30 presents (half a second; a 30 fps game
+ * shows each frame twice). Only reads the CPU's counter: with gpulib's GPU
+ * thread this runs there. */
+static int widescreen_3d_frame(void)
+{
+    static unsigned seen, presents_since = 1000;
+    const unsigned ops = gte_widescreen_ops;
+    if (ops != seen) {
+        seen = ops;
+        presents_since = 0;
+    }
+    else if (presents_since < 1000)
+        presents_since++;
+    return presents_since < 30;
+}
+
 int renderer_present_frame_rect(int src_x, int src_y, int width, int height,
     int pic_x, int pic_y, int pic_w, int pic_h, int rgb24)
 {
     if (!s_context_ready)
         return 0;
 
-    VitaCtrNativeGpu_SetDisplayEnv(src_x, src_y, width, height, pic_x, pic_y, pic_w, pic_h, rgb24);
+    VitaCtrNativeGpu_SetDisplayEnv(src_x, src_y, width, height, pic_x, pic_y, pic_w, pic_h, rgb24,
+        widescreen_3d_frame());
     NativeGpu_SetFrontendDisplayBlank(0);
     if (!s_frame_started) {
         NativeGpu_BeginFrontendFrame();

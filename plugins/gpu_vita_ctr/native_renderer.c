@@ -461,6 +461,9 @@ extern int gNativeDitheringEnabled;
 global_variable int s_presentAspectW = 4;
 global_variable int s_presentAspectH = 3;
 global_variable SDL_Rect s_presentViewport = {0, 0, 0, 0};
+/* The viewport of the frame being presented: s_presentViewport, or 4:3 for
+ * a 2D frame in the widescreen-hook mode (NativeRenderer_FrameViewport). */
+global_variable SDL_Rect s_frameViewport = {0, 0, 0, 0};
 
 int g_dbg_wireframeMode = 0;
 int g_dbg_texturelessMode = 0;
@@ -895,6 +898,7 @@ internal void NativeRenderer_UpdatePresentationViewport(void)
 		s_presentViewport.y = 0;
 		s_presentViewport.w = g_windowWidth;
 		s_presentViewport.h = g_windowHeight;
+		s_frameViewport = s_presentViewport;
 		return;
 	}
 
@@ -920,6 +924,7 @@ internal void NativeRenderer_UpdatePresentationViewport(void)
 	s_presentViewport.h = viewportH;
 	s_presentViewport.x = (g_windowWidth - viewportW) / 2;
 	s_presentViewport.y = (g_windowHeight - viewportH) / 2;
+	s_frameViewport = s_presentViewport;
 }
 
 /* 0 = 4:3, 1 = 16:9 stretched, 2 = 16:9 with the GTE widescreen hook: both
@@ -1290,15 +1295,15 @@ internal void NativeRenderer_ClearPresentationBars(void)
 	GLint previousScissorBox[4];
 	GLfloat previousClearColor[4];
 	const GLboolean previousScissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
-	const int viewportRight = s_presentViewport.x + s_presentViewport.w;
-	const int viewportTop = s_presentViewport.y + s_presentViewport.h;
+	const int viewportRight = s_frameViewport.x + s_frameViewport.w;
+	const int viewportTop = s_frameViewport.y + s_frameViewport.h;
 
 	if ((g_windowWidth <= 0) || (g_windowHeight <= 0))
 	{
 		return;
 	}
 
-	if ((s_presentViewport.x == 0) && (s_presentViewport.y == 0) && (s_presentViewport.w == g_windowWidth) && (s_presentViewport.h == g_windowHeight))
+	if ((s_frameViewport.x == 0) && (s_frameViewport.y == 0) && (s_frameViewport.w == g_windowWidth) && (s_frameViewport.h == g_windowHeight))
 	{
 		return;
 	}
@@ -1309,10 +1314,10 @@ internal void NativeRenderer_ClearPresentationBars(void)
 	glEnable(GL_SCISSOR_TEST);
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
-	NativeRenderer_ClearHostRect(0, 0, s_presentViewport.x, g_windowHeight);
+	NativeRenderer_ClearHostRect(0, 0, s_frameViewport.x, g_windowHeight);
 	NativeRenderer_ClearHostRect(viewportRight, 0, g_windowWidth - viewportRight, g_windowHeight);
-	NativeRenderer_ClearHostRect(s_presentViewport.x, 0, s_presentViewport.w, s_presentViewport.y);
-	NativeRenderer_ClearHostRect(s_presentViewport.x, viewportTop, s_presentViewport.w, g_windowHeight - viewportTop);
+	NativeRenderer_ClearHostRect(s_frameViewport.x, 0, s_frameViewport.w, s_frameViewport.y);
+	NativeRenderer_ClearHostRect(s_frameViewport.x, viewportTop, s_frameViewport.w, g_windowHeight - viewportTop);
 
 	if (previousScissorEnabled)
 	{
@@ -4702,6 +4707,46 @@ void NativeRenderer_UpdateVRAM(void)
 
 }
 
+#if defined(__vita__) || defined(PCSX_NATIVE_VITA_PATH)
+/* Whether a host-resolution target covers a rect r inside the display. */
+internal int NativeRenderer_TargetCovers(const struct NativeRenderTarget *target, const RECT16 *r,
+                                         int displayX, int displayY, int displayW, int displayH)
+{
+	return target->texture != 0 && target->width > 0 && target->height > 0 && displayW > 0 && displayH > 0 &&
+	       r->w > 0 && r->h > 0 && r->x >= displayX && r->y >= displayY && r->x + r->w <= displayX + displayW &&
+	       r->y + r->h <= displayY + displayH;
+}
+
+#endif
+
+/* The window's 4:3 rect. */
+internal SDL_Rect NativeRenderer_FourThreeViewport(void)
+{
+	SDL_Rect viewport;
+	int w = g_windowWidth, h = (g_windowWidth * 3) / 4;
+	if (h > g_windowHeight)
+	{
+		h = g_windowHeight;
+		w = (h * 4) / 3;
+	}
+	viewport.w = w > 0 ? w : 1;
+	viewport.h = h > 0 ? h : 1;
+	viewport.x = (g_windowWidth - viewport.w) / 2;
+	viewport.y = (g_windowHeight - viewport.h) / 2;
+	return viewport;
+}
+
+/* The viewport of the frame being presented. In the widescreen-hook mode (2)
+ * the GTE squeezes 3D for 16:9: a frame showing it is widened, and 2D
+ * screens and movies keep 4:3 (DISPENV pad0, from gpulib_if.c). The base
+ * and its overlay share it, so they stay aligned. */
+internal SDL_Rect NativeRenderer_FrameViewport(void)
+{
+	if (s_presentAspectMode == 2 && !NativeGpu_GetRenderDispEnv()->pad0)
+		return NativeRenderer_FourThreeViewport();
+	return s_presentViewport;
+}
+
 /* Where the display goes in the presentation viewport. The viewport holds
  * the whole hres x vres display; DISPENV screen is the picture on it, as
  * gpulib's vout_update places it (shifted by the display range, narrower
@@ -4718,8 +4763,8 @@ internal struct NativePresentPicture NativeRenderer_PresentPicture(void)
 	const DISPENV *display = NativeGpu_GetRenderDispEnv();
 	struct NativePresentPicture picture;
 	const int cw = display->disp.w, ch = display->disp.h;
-	const int vx = s_presentViewport.x, vy = s_presentViewport.y;
-	const int vw = s_presentViewport.w, vh = s_presentViewport.h;
+	const int vx = s_frameViewport.x, vy = s_frameViewport.y;
+	const int vw = s_frameViewport.w, vh = s_frameViewport.h;
 
 	SDL_memset(&picture, 0, sizeof(picture));
 	if (cw <= 0 || ch <= 0 || display->screen.w <= 0 || display->screen.h <= 0)
@@ -4749,7 +4794,7 @@ internal void NativeRenderer_BeginPresentPicture(const struct NativePresentPictu
 	GLfloat previousClearColor[4];
 	glGetFloatv(GL_COLOR_CLEAR_VALUE, previousClearColor);
 	glEnable(GL_SCISSOR_TEST);
-	glScissor(s_presentViewport.x, s_presentViewport.y, s_presentViewport.w, s_presentViewport.h);
+	glScissor(s_frameViewport.x, s_frameViewport.y, s_frameViewport.w, s_frameViewport.h);
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
 	glClearColor(previousClearColor[0], previousClearColor[1], previousClearColor[2], previousClearColor[3]);
@@ -4774,7 +4819,8 @@ void NativeRenderer_PresentVRAMRect(int displayX, int displayY, int displayW, in
 
 	NativeRenderer_UpdateVRAM();
 
-	NativeRenderer_SetViewPort(s_presentViewport.x, s_presentViewport.y, s_presentViewport.w, s_presentViewport.h);
+	s_frameViewport = NativeRenderer_FrameViewport();
+	NativeRenderer_SetViewPort(s_frameViewport.x, s_frameViewport.y, s_frameViewport.w, s_frameViewport.h);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	NativeRenderer_ClearPresentationBars();
 
@@ -4905,16 +4951,13 @@ void NativeRenderer_PresentMainRenderTarget(void)
 internal int NativeRenderer_OverlayTarget(const struct NativeRenderTarget *target, const RECT16 *r,
                                           int displayX, int displayY, int displayW, int displayH)
 {
-	if (target->texture == 0 || target->width <= 0 || target->height <= 0 ||
-	    displayW <= 0 || displayH <= 0 || r->w <= 0 || r->h <= 0 ||
-	    r->x < displayX || r->y < displayY ||
-	    r->x + r->w > displayX + displayW || r->y + r->h > displayY + displayH)
+	if (!NativeRenderer_TargetCovers(target, r, displayX, displayY, displayW, displayH))
 		return 0;
 	/* Where the display lands: moved onto the picture, cut to it. */
 	const struct NativePresentPicture picture = NativeRenderer_PresentPicture();
-	const int vx = picture.active ? picture.viewport[0] : s_presentViewport.x;
-	const int vy = picture.active ? picture.viewport[1] : s_presentViewport.y;
-	const int vw = s_presentViewport.w, vh = s_presentViewport.h;
+	const int vx = picture.active ? picture.viewport[0] : s_frameViewport.x;
+	const int vy = picture.active ? picture.viewport[1] : s_frameViewport.y;
+	const int vw = s_frameViewport.w, vh = s_frameViewport.h;
 	const int x0 = vx + (r->x - displayX) * vw / displayW;
 	const int x1 = vx + (r->x + r->w - displayX) * vw / displayW;
 	const int top = (r->y - displayY) * vh / displayH;
@@ -5257,9 +5300,10 @@ void NativeRenderer_PresentStreamingTexture(TextureID texture, int contentHeight
 
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
-	const int viewportH = (s_presentViewport.h * contentHeight + displayHeight / 2) / displayHeight;
-	const int viewportY = s_presentViewport.y + (s_presentViewport.h - viewportH) / 2;
-	NativeRenderer_SetViewPort(s_presentViewport.x, viewportY, s_presentViewport.w, viewportH);
+	s_frameViewport = NativeRenderer_FrameViewport();
+	const int viewportH = (s_frameViewport.h * contentHeight + displayHeight / 2) / displayHeight;
+	const int viewportY = s_frameViewport.y + (s_frameViewport.h - viewportH) / 2;
+	NativeRenderer_SetViewPort(s_frameViewport.x, viewportY, s_frameViewport.w, viewportH);
 	/* A whole 24-bit display: placed as the 15-bit one is. */
 	const struct NativePresentPicture picture = contentHeight == displayHeight ? NativeRenderer_PresentPicture()
 	                                                                           : (struct NativePresentPicture){ 0 };

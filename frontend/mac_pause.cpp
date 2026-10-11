@@ -16,6 +16,7 @@ extern "C" SDL_Window *g_window;
 extern "C" void VitaCtrNativeRenderer_PresentCurrentFrame(void);
 extern "C" void VitaCtrNativeRenderer_SetAspectMode(int mode);
 extern "C" void NativeRenderer_SwapWindow(void);
+extern "C" void gteSetWidescreenHack(int enabled);
 extern "C" int PCSXMacVitaGL_CaptureCurrentFrame(void);
 extern "C" int PCSXMacVitaGL_WriteCapturePpm(const char *path);
 
@@ -44,9 +45,13 @@ static void set_option(void *, const char *key, const char *value)
 	for (auto &entry : settings)
 		if (entry.first == key)
 			entry.second = value;
-	if (!strcmp(key, "vita_aspect_ratio"))
+	if (!strcmp(key, "vita_aspect_ratio")) {
+		/* 16:9 Unstretched also squeezes the GTE's projection (the harness
+		 * interprets: no recompiled code to flush). */
 		VitaCtrNativeRenderer_SetAspectMode(!strcmp(value, "16:9_stretched") ? 1 :
 			!strcmp(value, "16:9_unstretched") ? 2 : 0);
+		gteSetWidescreenHack(!strcmp(value, "16:9_unstretched"));
+	}
 }
 
 /* Arrows; Enter or Z = cross; Escape, X or Backspace = circle (resume,
