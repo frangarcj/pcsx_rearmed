@@ -49,6 +49,11 @@ static const ShelfChoice k_arcade_functions[] = {
 };
 static const int k_arcade_function_count = sizeof(k_arcade_functions) / sizeof(k_arcade_functions[0]);
 
+static const ShelfChoice k_volume_choices[] = {
+	{ "100", "100% (MAME)" }, { "200", "200%" }, { "300", "300%" }, { "400", "400%" },
+	{ "600", "600%" }, { "800", "800%" }
+};
+
 static const struct
 {
 	int scope;
@@ -101,6 +106,8 @@ static const struct
 	  "pcsx_rearmed_arcade_l2", k_arcade_functions, k_arcade_function_count, 0, 0, NULL } },
 	{ SCOPE_ARCADE, { "ARCADE CONTROLS", "R2 (PS TV)", "What R2 does on an arcade board, on a PS TV or a Vita with rear touch mapped to it.",
 	  "pcsx_rearmed_arcade_r2", k_arcade_functions, k_arcade_function_count, 0, 0, NULL } },
+	{ SCOPE_ARCADE, { "ARCADE", "Volume", "Amplifies the board's sound, as a cabinet's amplifier does: 100% is the sound chip's own level, the one MAME plays. Very loud scenes can clip above 400%.",
+	  "pcsx_rearmed_arcade_volume", k_volume_choices, 6, 0, 0, NULL } },
 	{ SCOPE_ARCADE_PAUSE, { "ARCADE", "Test Switch", "The board's test switch: On opens the game's test menu (input and sound tests, settings, bookkeeping). Turn it Off and leave the menu to play. Off again for every new game.",
 	  "pcsx_rearmed_arcade_test", k_toggle_choices, 2, 0, 0, NULL } },
 };

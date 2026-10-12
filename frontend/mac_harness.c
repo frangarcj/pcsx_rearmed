@@ -395,6 +395,7 @@ static int open_interactive_audio(void)
       &spec, NULL, NULL);
   if (!interactive_audio) return -1;
   system12_set_audio_output(interactive_audio_cb, NULL);
+  system12_set_volume(400); /* the pause menu's default Volume */
   SDL_ResumeAudioStreamDevice(interactive_audio);
   return 0;
 }

@@ -293,6 +293,20 @@ int system12_close_audio(void)
     return failed ? -1 : 0;
 }
 
+/* Not board state: savestates keep the listener's volume. */
+static volatile int audio_gain_q8 = 256;
+
+void system12_set_volume(unsigned percent)
+{
+    audio_gain_q8 = (int)(percent > 1000 ? 1000 : percent) * 256 / 100;
+}
+
+static int16_t audio_gain(int16_t sample, int gain_q8)
+{
+    const int32_t v = (int32_t)sample * gain_q8 >> 8;
+    return (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+}
+
 void system12_set_audio_output(system12_audio_cb callback, void *opaque)
 {
     board_drain();
@@ -611,9 +625,10 @@ static void pcm_generate_to(u64 target)
         uint64_t pcm_started = pcsx_profile_begin(PCSX_PROF_PCM, 1);
         c352_generate(board.pcm, samples, frames);
         pcsx_profile_end(PCSX_PROF_PCM, pcm_started);
+        const int gain_q8 = audio_gain_q8;
         for (i = 0; i < frames; i++) {
-            stereo[i * 2] = samples[i * 4];
-            stereo[i * 2 + 1] = samples[i * 4 + 1];
+            stereo[i * 2] = audio_gain(samples[i * 4], gain_q8);
+            stereo[i * 2 + 1] = audio_gain(samples[i * 4 + 1], gain_q8);
         }
         uint64_t audio_started = pcsx_profile_begin(PCSX_PROF_BOARD_AUDIO, 1);
         board_audio_out(stereo, frames);

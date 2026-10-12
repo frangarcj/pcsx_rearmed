@@ -2723,6 +2723,11 @@ static void system12_update_mapping(void)
    var.value = NULL;
    system12_test = environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value &&
       !strcmp(var.value, "enabled");
+   /* The C352's own level (MAME's) is very low: a cabinet amplifies it. */
+   var.key = "pcsx_rearmed_arcade_volume";
+   var.value = NULL;
+   system12_set_volume(environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value ?
+      (unsigned)atoi(var.value) : 400);
 }
 
 /* One player's pad through the arcade options' layout. */

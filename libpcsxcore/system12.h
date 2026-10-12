@@ -75,6 +75,9 @@ int system12_close_audio(void);
 /* Optional 88.2 kHz stereo output; the WAV capture path can run at once.
  * Called synchronously from device advancement; must not re-enter/reset core. */
 void system12_set_audio_output(system12_audio_cb callback, void *opaque);
+/* Gain of that output, in percent (100: the C352's level, as in MAME), the
+ * cabinet's amplifier; saturating. The WAV capture keeps the C352's level. */
+void system12_set_volume(unsigned percent);
 /* Optional board thread (SYSTEM12_BOARD_THREAD builds): runs the H8 and C352
  * on another core with identical results. Audio from that thread is
  * delivered by system12_audio_pump(), which the frontend calls on its own
