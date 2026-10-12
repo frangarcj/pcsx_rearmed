@@ -170,26 +170,35 @@ core: vita-gl
 $(BUILD_DIR):
 	mkdir -p $@
 
-$(STANDALONE_OBJ): frontend/vita/standalone.c frontend/vita/validation.h frontend/vita/input_csv_reader.h Makefile.vita | $(BUILD_DIR)
+# The frontend objects follow the flags as well as the sources: the same
+# BUILD_DIR serves builds with and without VITA_DEBUG_SHOT, RELEASE, etc.
+FLAGS_STAMP := $(BUILD_DIR)/compile-flags.txt
+$(FLAGS_STAMP): FORCE
+	@mkdir -p $(BUILD_DIR)
+	@printf '%s\n' '$(CC) $(CXX) $(CFLAGS)' > $@.tmp
+	@cmp -s $@.tmp $@ || cp $@.tmp $@
+	@rm -f $@.tmp
+
+$(STANDALONE_OBJ): frontend/vita/standalone.c frontend/vita/validation.h frontend/vita/input_csv_reader.h Makefile.vita $(FLAGS_STAMP) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
-$(BUILD_DIR)/rom_selector.o: frontend/vita/rom_selector.cpp Makefile.vita | $(BUILD_DIR)
+$(BUILD_DIR)/rom_selector.o: frontend/vita/rom_selector.cpp Makefile.vita $(FLAGS_STAMP) | $(BUILD_DIR)
 	$(CXX) $(CFLAGS) -std=gnu++11 -MMD -MP -c $< -o $@
 
-$(BUILD_DIR)/shelf_selector.o $(BUILD_DIR)/shelf_common.o $(BUILD_DIR)/shelf_pause.o: $(BUILD_DIR)/%.o: frontend/vita/%.cpp Makefile.vita | $(BUILD_DIR)
+$(BUILD_DIR)/shelf_selector.o $(BUILD_DIR)/shelf_common.o $(BUILD_DIR)/shelf_pause.o: $(BUILD_DIR)/%.o: frontend/vita/%.cpp Makefile.vita $(FLAGS_STAMP) | $(BUILD_DIR)
 	$(CXX) $(CFLAGS) -std=gnu++11 -MMD -MP -c $< -o $@
 
-$(BUILD_DIR)/arcade_catalog.o $(BUILD_DIR)/shelf_options.o $(BUILD_DIR)/shelf_snapshot.o: $(BUILD_DIR)/%.o: frontend/%.cpp Makefile.vita | $(BUILD_DIR)
+$(BUILD_DIR)/arcade_catalog.o $(BUILD_DIR)/shelf_options.o $(BUILD_DIR)/shelf_snapshot.o: $(BUILD_DIR)/%.o: frontend/%.cpp Makefile.vita $(FLAGS_STAMP) | $(BUILD_DIR)
 	$(CXX) $(CFLAGS) -std=gnu++11 -MMD -MP -c $< -o $@
 
 # arcade-shelf has its own makefile; it rebuilds only what changed.
 $(SHELF_LIB): FORCE
 	$(MAKE) -C $(SHELF_DIR) vita IMGUI=system VITAGL_DIR=$(abspath $(VITAGL_DIR))
 
-$(BUILD_DIR)/%.o: frontend/vita/%.c Makefile.vita | $(BUILD_DIR)
+$(BUILD_DIR)/%.o: frontend/vita/%.c Makefile.vita $(FLAGS_STAMP) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
-$(GPUPROF_OBJ): frontend/vita/vita_gpuprof.c frontend/vita/vita_gpuprof.h Makefile.vita | $(BUILD_DIR)
+$(GPUPROF_OBJ): frontend/vita/vita_gpuprof.c frontend/vita/vita_gpuprof.h Makefile.vita $(FLAGS_STAMP) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
 $(TARGET).elf: core $(STANDALONE_OBJ) $(GPUPROF_OBJ) $(UI_OBJS) $(if $(filter 1,$(REARCADE)),$(SHELF_LIB),)
