@@ -120,8 +120,8 @@ struct H8CPU {
     }
     u16 read16_bus(u32 a);
     __attribute__((always_inline)) u16 read16i(u32 a) {return read16(a);}
-    void write16(u32 a,u16 v) {
-        m_icount-=2;a&=0xfffffe;
+    void write16(u32 a,u16 v) {m_icount-=2;write16_bus(a&0xfffffe,v);}
+    void write16_bus(u32 a,u16 v) {
         if(a<0xfffd10&&config.write16){config.write16(config.opaque,a,v);return;}
         if(a>=0xffff60&&a<=0xffff9e) {
             timers.writeWord(a&255,v,0xffff,h8_current_cycle(this)-cycle_epoch);
@@ -457,19 +457,11 @@ bool H8CPU::skip_spin(u64 target) {
  * event at the bound as before. As in the single-state loop, the bound is
  * recomputed at a state boundary after peripheral state changed. Returns 0 if
  * nothing ran, 1 after a commit, -1 when cycles past the deadline remain. */
+static void h8_fast_run(H8CPU *cpu);
 int H8CPU::run_batch(u64 target) {
-    const int clock_cap=-1000000; // well under one second of H8 cycles
     if(m_inst_substate||m_icount<=m_bcount||spin_candidate()) return 0;
     executing_state=true;
-    do {
-        if(m_inst_state<0x10000) {
-            // Possible spin loops take the single-state path and its skip.
-            if(spin_candidate()) break;
-            m_PPC=m_NPC;instructions++;h8_perf_batch++;
-        }
-        exec_full();
-        if(!next_event_valid) refresh_bcount();
-    } while(!m_inst_substate&&!m_sleeping&&!halted&&m_icount>m_bcount&&m_icount>clock_cap);
+    h8_fast_run(this);
     executing_state=false;
     u64 used=m_icount<0?u64(-int64_t(m_icount)):0;
     if(!used) return 0;
@@ -492,11 +484,180 @@ void H8CPU::tick_events() {
 #include "h8_dispatch.inc"
 H8CPU::Thunk H8CPU::full_table[0x10000];
 
+/* run_batch's loop with the CPU state in a local copy the compiler can keep
+ * in registers. The generated bodies (h8_fast.inc) are the full-state
+ * handlers, bus checkpoints included, written on that copy. It goes back to
+ * the H8CPU before anything that can observe or change CPU state: bus
+ * accesses outside the code ROM and internal RAM, the IRQ choice when its
+ * inputs may have changed, handlers it does not model, and the exit. */
+#define H8_FAST_INLINE __attribute__((always_inline)) inline
+struct H8Fast {
+    enum { F_I=H8CPU::F_I,F_UI=H8CPU::F_UI,F_H=H8CPU::F_H,F_U=H8CPU::F_U,
+           F_N=H8CPU::F_N,F_Z=H8CPU::F_Z,F_V=H8CPU::F_V,F_C=H8CPU::F_C };
+    // The H8/300H configuration H8CPU always has.
+    static constexpr bool m_has_hc=true,m_has_mac=false,m_mode_advanced=true;
+    H8CPU *cpu;
+    const u8 *rom;
+    u32 rom_size;
+    u32 m_PC,m_NPC,m_PPC,m_TMP1,m_TMP2,m_inst_state,executed;
+    u16 m_PIR,m_IR[5];
+    int m_icount,m_bcount,limit;
+    u8 m_CCR,irq_ccr;
+    // A call outside the copy happened: the IRQ inputs, the next internal
+    // event and m_bcount may have changed.
+    bool resync;
+    H8_FAST_INLINE void load() {
+        rom=cpu->config.rom;rom_size=cpu->config.rom_size;
+        m_PC=cpu->m_PC;m_NPC=cpu->m_NPC;m_PPC=cpu->m_PPC;
+        m_TMP1=cpu->m_TMP1;m_TMP2=cpu->m_TMP2;m_inst_state=u32(cpu->m_inst_state);
+        m_PIR=cpu->m_PIR;std::memcpy(m_IR,cpu->m_IR,sizeof(m_IR));
+        m_icount=cpu->m_icount;m_bcount=cpu->m_bcount;m_CCR=cpu->m_CCR;
+        irq_ccr=cpu->irq_key_ccr;executed=0;resync=true;
+    }
+    // What callbacks and the h8_* API can see.
+    H8_FAST_INLINE void sync_out() {
+        cpu->m_PC=m_PC;cpu->m_NPC=m_NPC;cpu->m_PPC=m_PPC;
+        cpu->m_CCR=m_CCR;cpu->m_icount=m_icount;
+        cpu->instructions+=executed;h8_perf_batch+=executed;executed=0;
+    }
+    H8_FAST_INLINE void store() {
+        sync_out();
+        cpu->m_TMP1=m_TMP1;cpu->m_TMP2=m_TMP2;cpu->m_inst_state=int(m_inst_state);
+        cpu->m_PIR=m_PIR;std::memcpy(cpu->m_IR,m_IR,sizeof(m_IR));
+    }
+    // After a bus callback: as in the original, later checkpoints of the same
+    // state compare against an m_bcount the callback may have refreshed.
+    H8_FAST_INLINE void after_call() {m_bcount=cpu->m_bcount;resync=true;}
+    H8_FAST_INLINE static bool internal_ram(u32 a) {return a-0xfffd10<0x200;}
+    H8_FAST_INLINE u16 read16(u32 a) {
+        m_icount-=2;a&=0xfffffe;
+        if(__builtin_expect(a<rom_size,1)) return (u16(rom[a])<<8)|rom[a+1];
+        if(internal_ram(a)) return (u16(cpu->ram[a-0xfffd10])<<8)|cpu->ram[a-0xfffd10+1];
+        sync_out();u16 v=cpu->read16_bus(a);after_call();return v;
+    }
+    H8_FAST_INLINE u16 read16i(u32 a) {return read16(a);}
+    H8_FAST_INLINE u8 read8(u32 a) {
+        m_icount-=2;a&=0xffffff;
+        if(a<rom_size) return rom[a];
+        if(internal_ram(a)) return cpu->ram[a-0xfffd10];
+        sync_out();u8 v=cpu->bus_read(a);after_call();return v;
+    }
+    H8_FAST_INLINE void write8(u32 a,u8 v) {
+        m_icount-=2;a&=0xffffff;
+        if(internal_ram(a)) {cpu->ram[a-0xfffd10]=v;return;}
+        sync_out();cpu->bus_write(a,v);after_call();
+    }
+    H8_FAST_INLINE void write16(u32 a,u16 v) {
+        m_icount-=2;a&=0xfffffe;
+        if(internal_ram(a)) {cpu->ram[a-0xfffd10]=u8(v>>8);cpu->ram[a-0xfffd10+1]=u8(v);return;}
+        sync_out();cpu->write16_bus(a,v);after_call();
+    }
+    H8_FAST_INLINE void internal(int n) {m_icount-=n+1;}
+    H8_FAST_INLINE void prefetch_switch(u32 pc,u16 ir) {m_NPC=pc&0xffffff;m_PC=pc+2;m_PIR=ir;}
+    H8_FAST_INLINE u8 r8_r(int r) const {return cpu->r8_r(r);}
+    H8_FAST_INLINE void r8_w(int r,u8 v) {cpu->r8_w(r,v);}
+    H8_FAST_INLINE u16 r16_r(int r) const {return cpu->r16_r(r);}
+    H8_FAST_INLINE void r16_w(int r,u16 v) {cpu->r16_w(r,v);}
+    H8_FAST_INLINE u32 r32_r(int r) const {return cpu->r32_r(r);}
+    H8_FAST_INLINE void r32_w(int r,u32 v) {cpu->r32_w(r,v);}
+#define H8_FAST_DECLARATIONS
+#include "h8_fast.inc"
+#undef H8_FAST_DECLARATIONS
+};
+#define H8CPU H8Fast
+#include "h8_arithmetic.inc"
+#undef H8CPU
+#define H8_FAST_INDEX
+#include "h8_fast.inc"
+#undef H8_FAST_INDEX
+static const void *h8_fast_table[0x10000];
+static const void *h8_fast_spin_next[16];
+// One first-level state: the bookkeeping run_batch did before exec_full().
+#define H8_FAST_COUNT (f.m_PPC=f.m_NPC,f.executed++)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-label"
+/* With cpu NULL, fills the dispatch table instead. Otherwise runs the states
+ * run_batch would run: at least one, then while the state stays whole, the
+ * CPU awake and m_icount above both m_bcount and the clock cap. */
+static void h8_fast_run(H8CPU *cpu)
+{
+    static const void *const labels[]={
+#define H8_FAST_LABELS
+#include "h8_fast.inc"
+#undef H8_FAST_LABELS
+    };
+    const int clock_cap=-1000000; // well under one second of H8 cycles
+    if(!cpu) {
+        for(u32 op=0;op<0x10000;op++) h8_fast_table[op]=labels[h8_fast_index(op)];
+        // Possible spin loops take the single-state path and its skip.
+        for(u32 op=0;op<16;op++) {
+            h8_fast_spin_next[op]=h8_fast_table[0x6a20|op];
+            h8_fast_table[0x6a20|op]=&&spin;
+        }
+        return;
+    }
+    H8Fast f;
+    f.cpu=cpu;
+    f.load();
+    f.limit=f.m_bcount; // the first state runs unconditionally
+    goto dispatch;
+fetch_next:
+    // prefetch_done(): the IRQ choice only changes with its inputs.
+    if(f.resync||(f.m_CCR&(H8CPU::F_I|H8CPU::F_UI))!=f.irq_ccr) {
+        f.sync_out();
+        if(cpu->irq_regs_dirty||cpu->pending!=cpu->irq_key_pending||
+           (f.m_CCR&(H8CPU::F_I|H8CPU::F_UI))!=cpu->irq_key_ccr)
+            cpu->update_irq_filter();
+        f.irq_ccr=cpu->irq_key_ccr;
+        if(cpu->m_irq_vector) {
+            f.m_inst_state=H8CPU::STATE_IRQ;
+            cpu->m_taken_irq_vector=cpu->m_irq_vector;cpu->m_sleeping=false;
+            goto end_of_state;
+        }
+    }
+fetch_next_noirq:
+    f.m_inst_state=f.m_IR[0]=f.m_PIR;
+end_of_state:
+    if(f.resync) {
+        if(!cpu->next_event_valid) cpu->refresh_bcount();
+        f.m_bcount=cpu->m_bcount;f.resync=false;
+        f.limit=std::max(f.m_bcount,clock_cap);
+    }
+    if(f.m_icount<=f.limit) goto out;
+dispatch:
+    if(f.m_inst_state<0x10000) goto *h8_fast_table[f.m_inst_state];
+    goto second_level;
+spin:
+    if(cpu->config.peek8&&cpu->spin.rejected[(f.m_NPC>>1)&63]!=f.m_NPC) goto out;
+    goto *h8_fast_spin_next[f.m_inst_state&15];
+#define H8_FAST_BODIES
+#include "h8_fast.inc"
+#undef H8_FAST_BODIES
+slow_first:
+    H8_FAST_COUNT;
+slow:
+    f.store();
+    cpu->exec_full();
+    f.load();
+    if(cpu->m_inst_substate||cpu->m_sleeping||cpu->halted) return;
+    goto end_of_state;
+suspend:
+    // A checkpoint set m_inst_substate: the partial handler resumes from here.
+    f.store();
+    return;
+out:
+    f.store();
+}
+#pragma GCC diagnostic pop
+#undef H8_FAST_COUNT
+
 extern "C" {
 H8CPU *h8_create(const H8Config *config) {
     if(!config)return nullptr;
-    if(!H8CPU::full_table[0])
+    if(!H8CPU::full_table[0]) {
         for(u32 op=0;op<0x10000;op++) H8CPU::full_table[op]=H8CPU::resolve_full(op);
+        h8_fast_run(nullptr);
+    }
     H8CPU *cpu=new(std::nothrow) H8CPU(*config);
     if(cpu)h8_reset(cpu);
     return cpu;

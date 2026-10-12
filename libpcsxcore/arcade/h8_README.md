@@ -9,6 +9,8 @@ The opcode source and generator, instruction semantics, arithmetic flags,
 register organization and reset/interrupt sequences derive from Olivier
 Galibert's BSD-3-Clause MAME implementation. See `h8_LICENSE.txt`. Run
 `python3 libpcsxcore/arcade/h8_generate.py` to regenerate instruction files.
+`h8_fast.inc`, also generated, holds the same full-state bodies for
+`h8_run_until`'s batch loop, which keeps the CPU state in registers.
 
 Bus callbacks see big-endian logical H8 bytes. The prepared System 12
 `sub.bin` is already in that order: its reset vector is 0x000100.

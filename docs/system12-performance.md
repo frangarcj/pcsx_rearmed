@@ -1741,3 +1741,43 @@ Every vitaGL run's report equals the NEON build's. Profiled before the fixes
 scenes and 138 draws a frame, 67% of fragment time in the cached 4-bit
 polygon shader (ALU-bound), which the texture-window and opaque variants
 now trim. A profile with the fixes is the next step.
+
+## H8 batch loop with the CPU state in registers (2026-10-12)
+
+Soul Calibur's lake attract stage (frames ~6480-7680) executes ~15,000 H8
+instructions a frame. In that window 106 handlers run; 30 cover 88% of the
+instructions, 60 cover 99%. Data accesses are ~0.3 a instruction to shared
+RAM/C352 (callbacks) and ~0.4 to internal RAM/registers. The interpreter, not
+the callbacks, held the time: every field of `H8CPU` was loaded and stored
+around each handler call, `prefetch_done()` filtered IRQs on every
+instruction and a 32-bit ER took two 16-bit loads.
+
+- `ERn` is one host-order u32 (`m_R[2n]`/`m_R[2n+1]`); 8/16/32-bit register
+  accesses are single loads/stores. System 12 savestates move to version 2.
+- `h8_generate.py` also writes `h8_fast.inc`: the same MAME full-state bodies,
+  with their bus checkpoints and substate numbers, written on a local copy of
+  the CPU state (`H8Fast`) inside one function with computed-goto dispatch.
+  The copy goes back to `H8CPU` before bus accesses outside code ROM and
+  internal RAM, the IRQ choice when its inputs may have changed, handlers it
+  does not model (CCR loads, rte, trapa, sleep, eepmov, divides, IRQ/reset
+  states, illegal encodings: the original handlers run them) and the exit. A
+  checkpoint leaves the state the partial handlers resume.
+
+Exactness: the 12,000-frame `--frontend-loop` attract and a 3,000-frame
+sliced run keep PPM, WAV and System 12 report byte-identical; H8 tests pass
+under clang, GCC 15 `-O3 -std=gnu++11` and UBSan; the MAME H8 oracle, peripheral
+(SCI included) and SCI timer gates pass. The production RTC gate fails with
+the previous H8 too, with identical stores (pre-existing, cycles +12/+24).
+
+| H8, attract | Before | After |
+| --- | ---: | ---: |
+| Mac M1, ns/instruction (frontend loop) | 20.1 | 15.3 |
+| Vita, lake stage, b_h8 ms/frame | 7.86 | 7.08 |
+| Vita, lake stage, ns/instruction | 518 | 467 |
+| Vita, rest of attract, ns/instruction | 386 | 337 |
+| Vita, lake stage fps (one run each) | 57.2 | 58.7 |
+
+Executed H8 instructions per frame are equal on the Vita (15,164 in the lake
+window). GCC still spills part of the copy to the stack in that large
+function (the hottest body is ~75 ARM instructions, from 103 before the
+helpers were forced inline); the remaining H8 options are lazy flags or a DRC.

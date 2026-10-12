@@ -8,17 +8,17 @@ TIMESTAMP_TARGET := $(BUILD)/h8-timestamp
 SOFT_RESET_TARGET := $(BUILD)/h8-soft-reset
 .PHONY: all test spin-skip-test spin-skip-ubsan-test irq-test rom-test deadline-test deadline-ubsan-test cycle-clock-test cycle-clock-ubsan-test sci-sync-timer-test sci-sync-timer-ubsan-test clean
 all: $(TARGET)
-$(TARGET): libpcsxcore/arcade/h8.cpp $(PERIPHERALS) $(PERIPHERAL_HEADERS) libpcsxcore/arcade/h8.h libpcsxcore/arcade/h8_instructions.inc libpcsxcore/arcade/h8_dispatch.inc libpcsxcore/arcade/h8_arithmetic.inc tests/h8_standalone.cpp
+$(TARGET): libpcsxcore/arcade/h8.cpp $(PERIPHERALS) $(PERIPHERAL_HEADERS) libpcsxcore/arcade/h8.h libpcsxcore/arcade/h8_instructions.inc libpcsxcore/arcade/h8_dispatch.inc libpcsxcore/arcade/h8_fast.inc libpcsxcore/arcade/h8_arithmetic.inc tests/h8_standalone.cpp
 	@mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) libpcsxcore/arcade/h8.cpp $(PERIPHERALS) tests/h8_standalone.cpp -o $@
-$(TIMESTAMP_TARGET): libpcsxcore/arcade/h8.cpp $(PERIPHERALS) $(PERIPHERAL_HEADERS) libpcsxcore/arcade/h8.h libpcsxcore/arcade/h8_instructions.inc libpcsxcore/arcade/h8_dispatch.inc libpcsxcore/arcade/h8_arithmetic.inc tests/h8_timestamp.cpp
+$(TIMESTAMP_TARGET): libpcsxcore/arcade/h8.cpp $(PERIPHERALS) $(PERIPHERAL_HEADERS) libpcsxcore/arcade/h8.h libpcsxcore/arcade/h8_instructions.inc libpcsxcore/arcade/h8_dispatch.inc libpcsxcore/arcade/h8_fast.inc libpcsxcore/arcade/h8_arithmetic.inc tests/h8_timestamp.cpp
 	@mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) libpcsxcore/arcade/h8.cpp $(PERIPHERALS) tests/h8_timestamp.cpp -o $@
-$(SOFT_RESET_TARGET): libpcsxcore/arcade/h8.cpp $(PERIPHERALS) $(PERIPHERAL_HEADERS) libpcsxcore/arcade/h8.h libpcsxcore/arcade/h8_instructions.inc libpcsxcore/arcade/h8_dispatch.inc libpcsxcore/arcade/h8_arithmetic.inc tests/h8_soft_reset.cpp
+$(SOFT_RESET_TARGET): libpcsxcore/arcade/h8.cpp $(PERIPHERALS) $(PERIPHERAL_HEADERS) libpcsxcore/arcade/h8.h libpcsxcore/arcade/h8_instructions.inc libpcsxcore/arcade/h8_dispatch.inc libpcsxcore/arcade/h8_fast.inc libpcsxcore/arcade/h8_arithmetic.inc tests/h8_soft_reset.cpp
 	@mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) libpcsxcore/arcade/h8.cpp $(PERIPHERALS) tests/h8_soft_reset.cpp -o $@
 DEADLINE_TARGET := $(BUILD)/h8-deadline
-$(DEADLINE_TARGET): libpcsxcore/arcade/h8.cpp $(PERIPHERALS) $(PERIPHERAL_HEADERS) libpcsxcore/arcade/h8.h libpcsxcore/arcade/h8_instructions.inc libpcsxcore/arcade/h8_dispatch.inc libpcsxcore/arcade/h8_arithmetic.inc tests/h8_deadline.cpp
+$(DEADLINE_TARGET): libpcsxcore/arcade/h8.cpp $(PERIPHERALS) $(PERIPHERAL_HEADERS) libpcsxcore/arcade/h8.h libpcsxcore/arcade/h8_instructions.inc libpcsxcore/arcade/h8_dispatch.inc libpcsxcore/arcade/h8_fast.inc libpcsxcore/arcade/h8_arithmetic.inc tests/h8_deadline.cpp
 	@mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) libpcsxcore/arcade/h8.cpp $(PERIPHERALS) tests/h8_deadline.cpp -o $@
 CYCLE_CLOCK_TARGET := $(BUILD)/h8-cycle-clock
@@ -28,13 +28,13 @@ $(CYCLE_CLOCK_TARGET): libpcsxcore/arcade/h8_cycle_clock.cpp libpcsxcore/arcade/
 cycle-clock-test: $(CYCLE_CLOCK_TARGET)
 	$(CYCLE_CLOCK_TARGET)
 SCI_SYNC_TIMER_TARGET := $(BUILD)/h8-sci-sync-timer
-$(SCI_SYNC_TIMER_TARGET): libpcsxcore/arcade/h8.cpp $(PERIPHERALS) $(PERIPHERAL_HEADERS) libpcsxcore/arcade/h8.h libpcsxcore/arcade/h8_instructions.inc libpcsxcore/arcade/h8_dispatch.inc libpcsxcore/arcade/h8_arithmetic.inc tests/h8_sci_sync_timer.cpp
+$(SCI_SYNC_TIMER_TARGET): libpcsxcore/arcade/h8.cpp $(PERIPHERALS) $(PERIPHERAL_HEADERS) libpcsxcore/arcade/h8.h libpcsxcore/arcade/h8_instructions.inc libpcsxcore/arcade/h8_dispatch.inc libpcsxcore/arcade/h8_fast.inc libpcsxcore/arcade/h8_arithmetic.inc tests/h8_sci_sync_timer.cpp
 	@mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) libpcsxcore/arcade/h8.cpp $(PERIPHERALS) tests/h8_sci_sync_timer.cpp -o $@
 sci-sync-timer-test: $(SCI_SYNC_TIMER_TARGET)
 	$(SCI_SYNC_TIMER_TARGET)
 SPIN_SKIP_TARGET := $(BUILD)/h8-spin-skip
-$(SPIN_SKIP_TARGET): libpcsxcore/arcade/h8.cpp $(PERIPHERALS) $(PERIPHERAL_HEADERS) libpcsxcore/arcade/h8.h libpcsxcore/arcade/h8_instructions.inc libpcsxcore/arcade/h8_dispatch.inc libpcsxcore/arcade/h8_arithmetic.inc tests/h8_spin_skip.cpp
+$(SPIN_SKIP_TARGET): libpcsxcore/arcade/h8.cpp $(PERIPHERALS) $(PERIPHERAL_HEADERS) libpcsxcore/arcade/h8.h libpcsxcore/arcade/h8_instructions.inc libpcsxcore/arcade/h8_dispatch.inc libpcsxcore/arcade/h8_fast.inc libpcsxcore/arcade/h8_arithmetic.inc tests/h8_spin_skip.cpp
 	@mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) libpcsxcore/arcade/h8.cpp $(PERIPHERALS) tests/h8_spin_skip.cpp -o $@
 spin-skip-test: $(SPIN_SKIP_TARGET)
@@ -52,7 +52,7 @@ test: $(TARGET) $(TIMESTAMP_TARGET) $(SOFT_RESET_TARGET) $(DEADLINE_TARGET) $(CY
 	$(CYCLE_CLOCK_TARGET)
 	$(SCI_SYNC_TIMER_TARGET)
 IRQ_TARGET := $(BUILD)/h8-irq-filter
-$(IRQ_TARGET): libpcsxcore/arcade/h8.cpp $(PERIPHERALS) $(PERIPHERAL_HEADERS) libpcsxcore/arcade/h8.h libpcsxcore/arcade/h8_instructions.inc libpcsxcore/arcade/h8_dispatch.inc libpcsxcore/arcade/h8_arithmetic.inc tests/h8_irq_filter.cpp
+$(IRQ_TARGET): libpcsxcore/arcade/h8.cpp $(PERIPHERALS) $(PERIPHERAL_HEADERS) libpcsxcore/arcade/h8.h libpcsxcore/arcade/h8_instructions.inc libpcsxcore/arcade/h8_dispatch.inc libpcsxcore/arcade/h8_fast.inc libpcsxcore/arcade/h8_arithmetic.inc tests/h8_irq_filter.cpp
 	@mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) tests/h8_irq_filter.cpp $(PERIPHERALS) -o $@
 irq-test: $(IRQ_TARGET)
@@ -80,7 +80,7 @@ sci-sync-timer-ubsan-test:
 	$(CXX) $(SAN_FLAGS) libpcsxcore/arcade/h8.cpp $(PERIPHERALS) tests/h8_sci_sync_timer.cpp -o $(SAN_DIR)/h8-sci-sync-timer
 	$(SAN_DIR)/h8-sci-sync-timer
 SYNC_FIXTURE_TARGET := $(BUILD)/h8-sync-timer-fixture
-$(SYNC_FIXTURE_TARGET): tests/h8_sync_timer_fixture.cpp libpcsxcore/arcade/h8.cpp $(PERIPHERALS) $(PERIPHERAL_HEADERS) libpcsxcore/arcade/h8.h libpcsxcore/arcade/h8_instructions.inc libpcsxcore/arcade/h8_dispatch.inc libpcsxcore/arcade/h8_arithmetic.inc
+$(SYNC_FIXTURE_TARGET): tests/h8_sync_timer_fixture.cpp libpcsxcore/arcade/h8.cpp $(PERIPHERALS) $(PERIPHERAL_HEADERS) libpcsxcore/arcade/h8.h libpcsxcore/arcade/h8_instructions.inc libpcsxcore/arcade/h8_dispatch.inc libpcsxcore/arcade/h8_fast.inc libpcsxcore/arcade/h8_arithmetic.inc
 	@mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) tests/h8_sync_timer_fixture.cpp $(PERIPHERALS) -o $@
 .PHONY: sci-sync-timer-fixture

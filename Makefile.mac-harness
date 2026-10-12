@@ -146,6 +146,8 @@ $(BUILD)/compile-flags.txt: FORCE
 $(BUILD)/%.o: %.c $(BUILD)/revision.h $(BUILD)/compile-flags.txt
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+# Extra flags for the H8 core alone (measurements), as in the main Makefile.
+$(BUILD)/libpcsxcore/arcade/h8.o: CFLAGS += $(H8_CFLAGS)
 $(BUILD)/%.o: %.cpp $(BUILD)/revision.h $(BUILD)/compile-flags.txt
 	@mkdir -p $(dir $@)
 	$(CXX) $(filter-out -std=gnu99,$(CFLAGS)) -std=c++17 -MMD -MP -c $< -o $@
