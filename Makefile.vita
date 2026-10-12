@@ -56,6 +56,10 @@ PACK_EXTRA := $(if $(SMOKE_EXE),-a $(SMOKE_EXE)=smoke.exe,)
 # PCSX ReArcade's LiveArea icon: an arcade-shelf cabinet, 128x128 8-bit.
 PACK_EXTRA += $(if $(filter 1,$(ARCADE_SHELF)),-a frontend/vita/sce_sys/icon0.png=sce_sys/icon0.png,)
 GIT_VERSION := $(shell git rev-parse --short HEAD)
+# Releases pass the tag (VERSION=v0.1, shown on the About panel) and its
+# param.sfo version (APP_VER=00.10); other builds show the commit.
+VERSION ?= $(GIT_VERSION)
+APP_VER ?= 00.10
 
 PREFIX := arm-vita-eabi-
 CC := $(PREFIX)gcc
@@ -153,7 +157,7 @@ ifeq ($(REARCADE)$(VITA_DEBUG_SHOT),11)
 CFLAGS += -DVITA_DEBUG_SHOT
 endif
 ifeq ($(REARCADE),1)
-CFLAGS += -DPCSX_REARCADE -DPCSX_GIT_VERSION='"$(GIT_VERSION)"' -I$(SHELF_DIR)/include
+CFLAGS += -DPCSX_REARCADE -DPCSX_GIT_VERSION='"$(VERSION)"' -I$(SHELF_DIR)/include
 UI_OBJS += $(BUILD_DIR)/shelf_common.o $(BUILD_DIR)/shelf_pause.o $(BUILD_DIR)/arcade_catalog.o \
 	$(BUILD_DIR)/shelf_options.o $(BUILD_DIR)/shelf_snapshot.o
 UI_LIBS := $(SHELF_LIB) $(UI_LIBS)
@@ -224,7 +228,7 @@ endif
 
 $(TARGET).vpk: $(TARGET).velf $(NEON_EBOOT)
 	vita-make-fself -c -s -na $< $(BUILD_DIR)/eboot.bin
-	vita-mksfoex -s TITLE_ID=$(TITLE_ID) -d ATTRIBUTE2=12 "$(TITLE)" $(BUILD_DIR)/param.sfo
+	vita-mksfoex -s TITLE_ID=$(TITLE_ID) -s APP_VER=$(APP_VER) -d ATTRIBUTE2=12 "$(TITLE)" $(BUILD_DIR)/param.sfo
 	vita-pack-vpk -s $(BUILD_DIR)/param.sfo -b $(BUILD_DIR)/eboot.bin $(PACK_EXTRA) $@
 
 clean:

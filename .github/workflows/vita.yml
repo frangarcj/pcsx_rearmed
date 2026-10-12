@@ -1,5 +1,7 @@
 name: Vita
 # PCSX ReArcade's VPK (vitaGL selector + NEON executable), release flags.
+# A v* tag also publishes it as a GitHub Release, with the notes in
+# docs/releases/<tag>.md.
 # ROM-based gates (byte-identical replays, MAME comparisons) cannot run here:
 # tests/run_local_gates.sh runs them on a machine with the ROMs.
 on:
@@ -14,6 +16,8 @@ concurrency:
 jobs:
   vpk:
     runs-on: ubuntu-24.04
+    outputs:
+      short: ${{ steps.rev.outputs.short }}
     container:
       # Pinned: a new SDK can change code generation (the H8 batch loop is
       # sensitive to it). Move the tag on purpose.
@@ -38,7 +42,14 @@ jobs:
           path: build/vita-deps/vitaGL
           key: vitagl-2026.08-20260925-${{ hashFiles('tools/vita-harness/build_vitagl.py', 'tools/vita-harness/patches/vitagl-*.patch') }}
       - name: Build
-        run: make -f Makefile.vita ARCADE_SYSTEM12=1 RELEASE=1 -j"$(nproc)"
+        run: |
+          # A tag vX.Y names the build and gives param.sfo APP_VER 0X.Y0.
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            v=${GITHUB_REF_NAME#v}; major=${v%%.*}; minor=${v#*.}; minor=${minor%%.*}
+            set -- VERSION="$GITHUB_REF_NAME" \
+              APP_VER="$(printf '%02d' "$major").$(printf '%-2s' "$minor" | tr ' ' 0)"
+          fi
+          make -f Makefile.vita ARCADE_SYSTEM12=1 RELEASE=1 "$@" -j"$(nproc)"
       - name: Short commit
         id: rev
         run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
@@ -47,3 +58,22 @@ jobs:
           name: pcsx-rearcade-${{ steps.rev.outputs.short }}
           path: pcsx-rearcade.vpk
           if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: vpk
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: pcsx-rearcade-${{ needs.vpk.outputs.short }}
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" pcsx-rearcade.vpk \
+            --title "PCSX ReArcade $GITHUB_REF_NAME" \
+            --notes-file "docs/releases/$GITHUB_REF_NAME.md"
