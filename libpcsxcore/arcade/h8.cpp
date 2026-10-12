@@ -12,13 +12,16 @@
 #include <new>
 using u8=uint8_t; using u16=uint16_t; using u32=uint32_t; using u64=uint64_t;
 using s8=int8_t; using s16=int16_t; using s32=int32_t; using s64=int64_t;
+static_assert(__BYTE_ORDER__==__ORDER_LITTLE_ENDIAN__,"H8 register file assumes a little-endian host");
 
 struct H8CPU {
     enum { F_I=0x80,F_UI=0x40,F_H=0x20,F_U=0x10,F_N=8,F_Z=4,F_V=2,F_C=1,
            EXR_I=7,EXR_NC=0x78, STATE_RESET=0x10000,STATE_IRQ=0x10001 };
     H8Config config;
     u32 m_PC=0,m_NPC=0,m_PPC=0,m_TMP1=0,m_TMP2=0;
-    u16 m_PIR=0,m_IR[5]={},m_R[16]={};
+    u16 m_PIR=0,m_IR[5]={};
+    // ERn is the host-order u32 at m_R[2n]: Rn = m_R[2n], En = m_R[2n+1].
+    alignas(4) u16 m_R[16]={};
     u8 m_CCR=0,m_EXR=0;
     bool m_has_hc=true,m_has_mac=false,m_mode_advanced=true;
     int m_inst_state=STATE_RESET,m_inst_substate=0,m_icount=0,m_bcount=0,m_irq_vector=0,m_taken_irq_vector=0;
@@ -127,15 +130,17 @@ struct H8CPU {
         bus_write(a,v>>8);bus_write(a+1,v);
     }
     void internal(int n) {m_icount-=n+1;}
-    void r8_w(int r,u8 v) {
-        if(r&8)m_R[r&7]=(m_R[r&7]&0xff00)|v;
-        else m_R[r&7]=(m_R[r&7]&0xff)|(u16(v)<<8);
-    }
-    u8 r8_r(int r) {return (r&8)?m_R[r&7]:m_R[r&7]>>8;}
-    void r16_w(int r,u16 v) {m_R[r&15]=v;}
-    u16 r16_r(int r) {return m_R[r&15];}
-    void r32_w(int r,u32 v) {m_R[r&7]=v;m_R[(r&7)|8]=v>>16;}
-    u32 r32_r(int r) const {return m_R[r&7]|(u32(m_R[(r&7)|8])<<16);}
+    // RnH/RnL are r8 0-7/8-15, Rn/En are r16 0-7/8-15.
+#define H8_REG __attribute__((always_inline))
+    static unsigned r8_index(int r) {return ((r&7)<<2)|(((r>>3)&1)^1);}
+    static unsigned r16_index(int r) {return ((r&7)<<1)|((r>>3)&1);}
+    H8_REG void r8_w(int r,u8 v) {reinterpret_cast<u8 *>(m_R)[r8_index(r)]=v;}
+    H8_REG u8 r8_r(int r) const {return reinterpret_cast<const u8 *>(m_R)[r8_index(r)];}
+    H8_REG void r16_w(int r,u16 v) {m_R[r16_index(r)]=v;}
+    H8_REG u16 r16_r(int r) const {return m_R[r16_index(r)];}
+    H8_REG void r32_w(int r,u32 v) {std::memcpy(&m_R[(r&7)<<1],&v,4);}
+    H8_REG u32 r32_r(int r) const {u32 v;std::memcpy(&v,&m_R[(r&7)<<1],4);return v;}
+#undef H8_REG
     void do_exec_full();
     void do_exec_partial();
     // First-level opcodes dispatch through a table built from the generated

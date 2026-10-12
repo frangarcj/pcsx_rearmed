@@ -971,7 +971,7 @@ static void board_audio_out(const int16_t *stereo, unsigned frames)
 /* ---- savestates ---- */
 
 #define S12_STATE_MAGIC 0x53323153u /* "S12S" */
-#define S12_STATE_VERSION 1u
+#define S12_STATE_VERSION 2u
 
 size_t system12_freeze_size(void)
 {
