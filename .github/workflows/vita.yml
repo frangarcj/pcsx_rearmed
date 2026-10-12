@@ -1,0 +1,49 @@
+name: Vita
+# PCSX ReArcade's VPK (vitaGL selector + NEON executable), release flags.
+# ROM-based gates (byte-identical replays, MAME comparisons) cannot run here:
+# tests/run_local_gates.sh runs them on a machine with the ROMs.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: vita-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vpk:
+    runs-on: ubuntu-24.04
+    container:
+      # Pinned: a new SDK can change code generation (the H8 batch loop is
+      # sensitive to it). Move the tag on purpose.
+      image: vitasdk/vitasdk:2026.08-20260925
+      # The image's default user cannot write the runner's workspace mount.
+      options: --user root
+    steps:
+      - name: Host tools
+        # xxd: arcade-shelf embeds its font with it.
+        run: apt-get update -qq && apt-get install -y -qq --no-install-recommends xxd
+      - uses: actions/checkout@v5
+      - name: Submodules
+        run: |
+          # GIT_VERSION and the vitaGL build run git in the container.
+          git config --global --add safe.directory '*'
+          git submodule update --init --depth 1 deps/libchdr deps/libretro-common
+          # arcade-shelf builds its font from its own imgui submodule.
+          git submodule update --init --recursive --depth 1 deps/arcade-shelf
+      - name: vitaGL cache
+        uses: actions/cache@v4
+        with:
+          path: build/vita-deps/vitaGL
+          key: vitagl-2026.08-20260925-${{ hashFiles('tools/vita-harness/build_vitagl.py', 'tools/vita-harness/patches/vitagl-*.patch') }}
+      - name: Build
+        run: make -f Makefile.vita ARCADE_SYSTEM12=1 RELEASE=1 -j"$(nproc)"
+      - name: Short commit
+        id: rev
+        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pcsx-rearcade-${{ steps.rev.outputs.short }}
+          path: pcsx-rearcade.vpk
+          if-no-files-found: error
