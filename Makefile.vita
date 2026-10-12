@@ -63,7 +63,11 @@ CXX := $(PREFIX)g++
 CFLAGS := -O3 -g -Wall -Wextra -DVITA -mcpu=cortex-a9 -mtune=cortex-a9 -mfpu=neon -marm \
 	-fsingle-precision-constant -mword-relocations -ffast-math -fno-unwind-tables \
 	-fno-asynchronous-unwind-tables -I$(VITASDK)/include -Ideps/libretro-common/include -I$(VITAGL_DIR)/source
-LDFLAGS := -Wl,-q
+# Room after the code segment for vita-elf-create's SCE data: VitaSDK's
+# linker script (2026.08 on) otherwise lets the data segment start too close
+# ("Cannot allocate ... SCE data at end of segment 0; segment 1 overlaps").
+# Older linker scripts ignore the symbol.
+LDFLAGS := -Wl,-q -Wl,--defsym=__sce_headroom=0x10000
 VITAGL_LINK := $(VITAGL_DIR)/libvitaGL.a
 LIBS = -lSDL3 -lvita2d $(VITAGL_LINK) -lvitashark -lSceShaccCgExt -ltaihen_stub -lSceShaccCg_stub \
 	-lSceKernelDmacMgr_stub -lpthread -lc -lSceCommonDialog_stub -lSceAudio_stub \
