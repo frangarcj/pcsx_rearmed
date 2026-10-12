@@ -1766,8 +1766,9 @@ instruction and a 32-bit ER took two 16-bit loads.
 Exactness: the 12,000-frame `--frontend-loop` attract and a 3,000-frame
 sliced run keep PPM, WAV and System 12 report byte-identical; H8 tests pass
 under clang, GCC 15 `-O3 -std=gnu++11` and UBSan; the MAME H8 oracle, peripheral
-(SCI included) and SCI timer gates pass. The production RTC gate fails with
-the previous H8 too, with identical stores (pre-existing, cycles +12/+24).
+(SCI included), SCI timer and production RTC gates pass. The RTC gate needs a
+`DRC=1 SYSTEM12_TIMING=1` harness: console timing shifts its store cycles by
+12-24 H8 cycles, which the check now rejects up front.
 
 | H8, attract | Before | After |
 | --- | ---: | ---: |

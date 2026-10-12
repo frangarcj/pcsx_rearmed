@@ -41,6 +41,10 @@ def run_case(harness, directory, words, drc, coarse, vblank_only):
     if result.returncode or control.returncode:
         raise RuntimeError(result.stderr + control.stderr)
     for log in (result.stderr, control.stderr):
+        # MAME's store cycles hold only under the board's source timing; a
+        # console-timing harness shifts them by whole bus operations.
+        if 'timing=source-experiment' not in log:
+            raise RuntimeError('Rebuild the harness with SYSTEM12_TIMING=1 (and DRC=1).\n' + log)
         if 'overflow' in log or 'halted=1' in log:
             raise RuntimeError(log)
         h8 = re.search(r'illegal=([0-9a-f]+):([0-9a-f]+) unsupported=([0-9a-f]+)', log)

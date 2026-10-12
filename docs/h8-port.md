@@ -99,8 +99,9 @@ MAME reports 0.287; its binary identity with the pinned source is unverified.
 The production SCI1/RTC serial gate is reproducible with:
 
 ```sh
+make -f Makefile.mac-harness DRC=1 SYSTEM12_TIMING=1 BUILD=build/mac-harness-drc-timing
 python3 tests/check_mame_system12_rtc.py --output artifacts/validation/h8-rx-clock-20261005/mame-rtc.json
-python3 tests/check_system12_rtc.py --harness build/mac-system12-audio-time-20261005/pcsx-harness --mame artifacts/validation/h8-rx-clock-20261005/mame-rtc.json --output artifacts/validation/h8-rx-clock-20261005/native-rtc.json
+python3 tests/check_system12_rtc.py --harness build/mac-harness-drc-timing/pcsx-harness --mame artifacts/validation/h8-rx-clock-20261005/mame-rtc.json --output artifacts/validation/h8-rx-clock-20261005/native-rtc.json
 ```
 
 It drives port A.0/B.5, reads SCI1 with the actual board's inverted RTC CLK and
