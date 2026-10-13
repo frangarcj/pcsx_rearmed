@@ -54,8 +54,10 @@ completeness but cannot be prepared by this command.
 
 This produces verified raw memory regions and a declarative board profile.
 The native harness accepts the directory with `--system11`; its adapter
-connects the CPU, bank windows, C76, GPU and audio interfaces. Gameplay remains
-unverified. Tests use synthetic ROM regions for deterministic layout checks:
+connects the CPU, bank windows, C76, GPU and audio interfaces. Tekken, Tekken 2
+and Soul Edge passed short native Mac gameplay checks on 2026-10-13; see
+[System 11 Mac validation](system11-mac.md). Other sets remain unverified.
+Tests use synthetic ROM regions for deterministic layout checks:
 
 ```sh
 python3 -m unittest tests/test_system11_boards.py

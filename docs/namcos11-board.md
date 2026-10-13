@@ -49,9 +49,10 @@ the correct type-1/type-2 GPU before core initialization. All eight executable
 windows follow bank writes through physical, KSEG0 and KSEG1 aliases. CPU
 control addresses outside those aliases remain delegated to the PSX core.
 The [36-set packager](system11-boards.md) records the MAME board profiles and
-verifies actual C76 BIOS digests. Exact main CPU clock integration and real
-game validation remain pending. `fambowl`, marked not working upstream, is
-explicitly refused by the native loader.
+verifies actual C76 BIOS digests. Tekken, Tekken 2 and Soul Edge now have
+[short native Mac gameplay validation](system11-mac.md). Exact main CPU clock
+integration and broader game validation remain pending. `fambowl`, marked not
+working upstream, is explicitly refused by the native loader.
 
 Use a directory prepared from your own ROMs:
 
