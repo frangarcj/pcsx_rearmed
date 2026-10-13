@@ -201,6 +201,7 @@ static int sync_systemgv(u32 cycle) { return systemgv_sync(cycle); }
 #endif
 #ifdef PCSX_SYSTEM_GNET
 static int sync_systemgnet(u32 cycle) { return systemgnet_sync(cycle); }
+#include "../tests/gnet_spu_dma_fixture.h"
 #endif
 /* --system12 takes a prepared region directory or a MAME zip (<set>.zip). */
 static int load_system12(const char *path)
@@ -266,7 +267,7 @@ static const HarnessBoard boards[] = {
 #ifdef PCSX_SYSTEM_GNET
   {103, "GNet", systemgnet_load, systemgnet_unload, sync_systemgnet,
     systemgnet_set_input, systemgnet_selftest, systemgnet_report,
-    NULL, NULL, systemgnet_eeprom_import, systemgnet_eeprom_export},
+    systemgnet_open_audio, systemgnet_close_audio, systemgnet_eeprom_import, systemgnet_eeprom_export},
 #endif
   {100, "CapcomZN", systemzn_load, systemzn_unload, systemzn_sync,
     systemzn_set_input, systemzn_selftest, systemzn_report,
@@ -356,11 +357,11 @@ void SysRunGui(void) { interrupted = 1; }
 static void usage(const char *name)
 {
   fprintf(stderr, "usage: %s (--exe PS-X-EXE | --system12 REGION-DIR | --system11 REGION-DIR | --system10 REGION-DIR | --capcom-zn REGION-DIR | --taito-fx1 REGION-DIR | --system-gv REGION-DIR | --system-gnet REGION-DIR | --system-gnet-fixture) "
-    "[--frames N] [--output FRAME.ppm] [--capture-gl] [--dump-vram FILE] [--board-test] [--verify-smoke] "
+    "[--frames N] [--output FRAME.ppm] [--capture-gl] [--dump-vram FILE] [--dump-ram FILE] [--board-test] [--verify-smoke] "
     "[--inputs FILE.csv] [--audio FILE.wav] [--nvram FILE] "
     "[--audio-test-fixture] "
     "[--reset-at-cycle N] "
-    "[--trace FILE --trace-blocks N] [--cycle-snapshots FILE "
+    "[--trace FILE --trace-blocks N --trace-start CYCLES] [--cycle-snapshots FILE "
     "--snapshot-start CYCLES --snapshot-interval N] "
     "[--board-bus-trace FILE] [--system12-edge-trace FILE] [--system12-trace-shared-writes | --system12-trace-shared-accesses] "
     "[--max-blocks N] [--icache] [--widescreen] [--borderless] [--gpu-thread] [--save-state-at FRAME FILE] [--load-state FILE] [--drc] [--interactive [--art-dir DIR] [--pause-at N [--pause-script STEPS] [--pause-shot FILE.ppm]]...] [--system12-vblank-sync-only] [--system12-source-step] [--frontend-loop]\n"
@@ -573,12 +574,25 @@ typedef struct harness_input_event {
   int pressed;
 } harness_input_event;
 
+static unsigned input_analog_max(const char *name)
+{
+  if (!selected_board) return 0;
+  if (selected_board->family == 12) return system12_analog_max(name);
+#ifdef PCSX_SYSTEM_GNET
+  if (selected_board->family == 103) return systemgnet_analog_max(name);
+#endif
+  return 0;
+}
+
 static int input_control_known(const char *name)
 {
+#ifdef PCSX_SYSTEM_GNET
+  if (selected_board && selected_board->family == 103 && !strcmp(name, "jp1")) return 1;
+#endif
   /* Validate against the selected source input profile while every control
    * is still released, before the CPU begins executing CSV events. */
   return strlen(name) < sizeof(((harness_input_event *)0)->control) &&
-    selected_board && ((selected_board->family == 12 && system12_analog_max(name)) ||
+    selected_board && (input_analog_max(name) ||
       selected_board->set_input(name, 0) == 0);
 }
 
@@ -627,7 +641,7 @@ static int load_input_events(const char *path, harness_input_event **out,
       failed = 1; break;
     }
     errno = 0; pressed = strtoul(pressed_s, &end, 10);
-    unsigned maximum = selected_board && selected_board->family == 12 ? system12_analog_max(control) : 0;
+    unsigned maximum = input_analog_max(control);
     if (errno || end == pressed_s || *end || pressed > (maximum ? maximum : 1)) { failed = 1; break; }
     if (used == cap) {
       size_t newcap = cap ? cap * 2 : 32;
@@ -655,8 +669,12 @@ static int apply_input_events(const harness_input_event *events, size_t count,
                               size_t *next, uint64_t frame)
 {
   while (*next < count && events[*next].frame <= frame) {
-    int error = selected_board->family == 12 && system12_analog_max(events[*next].control)
+    int error = selected_board->family == 12 && input_analog_max(events[*next].control)
       ? system12_set_analog(events[*next].control, events[*next].pressed)
+#ifdef PCSX_SYSTEM_GNET
+      : selected_board->family == 103 && input_analog_max(events[*next].control)
+      ? systemgnet_set_analog(events[*next].control, events[*next].pressed)
+#endif
       : selected_board->set_input(events[*next].control, events[*next].pressed);
     if (error) {
       fprintf(stderr, "invalid arcade control: %s\n", events[*next].control);
@@ -676,6 +694,7 @@ int main(int argc, char **argv)
   harness_input_event *input_events = NULL;
   size_t input_event_count = 0, next_input_event = 0;
 #endif
+  const char *ram_path = NULL;
   const char *trace_path = NULL;
   FILE *trace = NULL;
   const char *snapshot_path = NULL;
@@ -693,6 +712,8 @@ int main(int argc, char **argv)
   unsigned int snapshot_count = 0;
   unsigned int frames = 3, start_frame, prev_cycle;
   uint64_t cycles = 0, cycle_limit;
+  unsigned long trace_count = 0;
+  uint64_t trace_start = 0;
   unsigned long blocks = 0, trace_blocks = 1000, max_blocks = 1000000000;
   int i, board_test = 0, audio_test_fixture = 0, verify = 0, result = 0, gpu_type1_test = 0;
   int gv_fixture = 0;
@@ -768,6 +789,7 @@ int main(int argc, char **argv)
     }
     else if (!strcmp(argv[i], "--output") && i + 1 < argc) output = argv[++i];
     else if (!strcmp(argv[i], "--capture-gl")) capture_gl = 1;
+    else if (!strcmp(argv[i], "--dump-ram") && i + 1 < argc) ram_path = argv[++i];
     else if (!strcmp(argv[i], "--dump-vram") && i + 1 < argc) vram_path = argv[++i];
     else if (!strcmp(argv[i], "--inputs") && i + 1 < argc) inputs_path = argv[++i];
     else if (!strcmp(argv[i], "--audio") && i + 1 < argc) audio_path = argv[++i];
@@ -825,11 +847,13 @@ int main(int argc, char **argv)
       if (errno || *tail || n == 0 || n > 0x100000000ULL) { usage(argv[0]); return 2; }
       snapshot_interval = n;
     }
-    else if (!strcmp(argv[i], "--snapshot-start") && i + 1 < argc) {
+    else if ((!strcmp(argv[i], "--snapshot-start") || !strcmp(argv[i], "--trace-start")) && i + 1 < argc) {
+      int tracing = !strcmp(argv[i], "--trace-start");
       char *tail; unsigned long long n;
       errno = 0; n = strtoull(argv[++i], &tail, 10);
       if (errno || *tail) { usage(argv[0]); return 2; }
-      snapshot_start = (uint64_t)n;
+      if (tracing) trace_start = (uint64_t)n;
+      else snapshot_start = (uint64_t)n;
     }
     else if (!strcmp(argv[i], "--frames") && i + 1 < argc) {
       char *tail; unsigned long n = strtoul(argv[++i], &tail, 10);
@@ -896,6 +920,14 @@ int main(int argc, char **argv)
     return 2;
 #endif
   }
+  if (ram_path) {
+    const char *paths[] = {exe, output, inputs_path, audio_path, nvram_path,
+                          trace_path, snapshot_path, bus_trace_path, edge_trace_path, vram_path};
+    for (unsigned path_i = 0; path_i < sizeof(paths) / sizeof(paths[0]); path_i++)
+      if (paths[path_i] && !strcmp(ram_path, paths[path_i])) {
+        fprintf(stderr, "--dump-ram must use a separate output path\n"); return 2;
+      }
+  }
   next_snapshot = snapshot_start ? snapshot_start : snapshot_interval;
   if (vram_path) {
     const char *paths[] = {exe, output, inputs_path, audio_path, nvram_path,
@@ -910,11 +942,11 @@ int main(int argc, char **argv)
   if ((!exe && !board && !gpu_type1_test) || (exe && board) ||
       (gpu_type1_test && (exe || board || verify || trace_path)) || (board_test && !board) ||
       ((inputs_path || audio_path || audio_test_fixture || nvram_path) && !board) ||
-      (snapshot_path && (!board || board_family != 12)) ||
+      (snapshot_path && !board) ||
       (bus_trace_path && (!board || board_family != 12)) ||
       (edge_trace_path && (!board || board_family != 12 || board_test)) ||
       (trace_shared_flags && !edge_trace_path) ||
-      (reset_at_cycle && (!board || board_family != 12 || board_test || interactive)) ||
+      (reset_at_cycle && (!board || board_test || interactive)) ||
       (inputs_path && !strcmp(inputs_path, output)) ||
       (trace_path && inputs_path && !strcmp(trace_path, inputs_path)) ||
       (nvram_path && ((!strcmp(nvram_path, output)) ||
@@ -1231,6 +1263,22 @@ int main(int argc, char **argv)
       result = 1;
     } else fprintf(stderr, "SystemGNet PCM sink disable: PASS\n");
     systemgnet_report(stderr);
+    if (harness_gnet_spu_dma_fixture()) result = 1;
+    /* The MB3773 callback defers the reset; MMIO remains usable until the
+     * frontend reaches its safe CPU boundary and acknowledges it. */
+    if (systemgnet_write(0x1fb40000, 1, 0x10) != 1) result = 1;
+    psxRegs.cycle += 5u * PSXCLK;
+    uint32_t reset_control = 0;
+    if (systemgnet_sync(psxRegs.cycle) <= 0 || !systemgnet_reset_requested() ||
+        systemgnet_read(0x1fb40000, 2, &reset_control) != 1) {
+      fprintf(stderr, "SystemGNet watchdog reset: FAIL\n"); result = 1;
+    } else {
+      systemgnet_reset();
+      if (systemgnet_reset_requested() ||
+          systemgnet_read(0x1fb40000, 2, &reset_control) != 1 || reset_control != 0xff10) {
+        fprintf(stderr, "SystemGNet watchdog reset: FAIL\n"); result = 1;
+      } else fprintf(stderr, "SystemGNet watchdog reset: PASS deferred=1 control=10\n");
+    }
     GPU_close(); SPU_close(); psxShutdown(); ReleasePlugins();
     systemgnet_unload();
     return result;
@@ -1355,7 +1403,8 @@ int main(int argc, char **argv)
     if (board && apply_input_events(input_events, input_event_count,
         &next_input_event, frame_counter - start_frame)) { result = 1; break; }
 #endif
-    if (trace && blocks < trace_blocks) {
+    if (trace && cycles >= trace_start && trace_count < trace_blocks) {
+      trace_count++;
       fprintf(trace, "%lu,%" PRIu64 ",%08x,%08x", blocks, cycles,
         psxRegs.pc, intFakeFetch(psxRegs.pc));
       for (i = 0; i < 32; i++) fprintf(trace, ",%08x", psxRegs.GPR.r[i]);
@@ -1510,6 +1559,14 @@ int main(int argc, char **argv)
     free(bus_trace_bins);
   }
 #endif
+  if (ram_path) {
+    FILE *dump = fopen(ram_path, "wb");
+    if (!dump) result = 1;
+    else {
+      if (fwrite(psxRegs.ptrs.psxM, 1, PSX_RAM_SIZE, dump) != PSX_RAM_SIZE) result = 1;
+      if (fclose(dump)) result = 1;
+    }
+  }
   if (harness_write_ppm(output, 0, 0)) result = 1;
   if (vram_path && harness_write_vram(vram_path)) result = 1;
   if (verify) {
@@ -1538,6 +1595,7 @@ int main(int argc, char **argv)
     frame_counter - start_frame, cycles, blocks, psxRegs.pc,
     flips, end.tv_sec - begin.tv_sec + (end.tv_nsec - begin.tv_nsec) * 1e-9, output);
 #ifdef PCSX_SYSTEM12
+  if (inputs_path) fprintf(stderr, "Arcade inputs: consumed=%zu/%zu\n", next_input_event, input_event_count);
   if (board) selected_board->report(stderr);
 #endif
   GPU_close(); SPU_close(); psxShutdown(); ReleasePlugins();

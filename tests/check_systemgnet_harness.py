@@ -29,6 +29,8 @@ def main() -> int:
         "SystemGNet PCM fixture: PASS",
         "finite=1 monotonic=1 nonzero=1",
         "SystemGNet PCM sink disable: PASS",
+        "SystemGNet SPU DMA fixture: PASS delayed_payload=1 ticks=24000 boundary_cycle=35431 madr_retained=1 read_wrap=1",
+        "SystemGNet watchdog reset: PASS deferred=1 control=10",
         "SystemGNet set=coh3002t model=ZN2 ram=4194304 vram=2097152 gpu=type2",
         "reads=2 writes=1 unsupported=0 bank=1 fault=0 execution_verified=false",
         "SystemGNet media bios=coh3002t option=v1 card=NONE chd=none auth_boot=false",

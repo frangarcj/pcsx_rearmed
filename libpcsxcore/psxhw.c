@@ -70,10 +70,26 @@ void psxHwWriteImask(u32 value)
 		psxRegs.CP0.n.Cause |= 0x400;
 }
 
+#ifdef PCSX_SYSTEM_GNET
+#include "systemgnet.h"
+static int gnet_dma4_chcr(u32 value)
+{
+    if (!systemgnet_active()) return 0;
+    HW_DMA4_CHCR = SWAPu32(value);
+    psxRegs.interrupt &= ~(1u << PSXINT_SPUDMA);
+    if ((value & 0x01000000) && (HW_DMA_PCR & SWAPu32(8u << 16)))
+        psxDma4(psxHu32(0x10c0), psxHu32(0x10c4), value);
+    return 1;
+}
+#else
+static int gnet_dma4_chcr(u32 value) { (void)value; return 0; }
+#endif
+
 #define make_dma_func(n, abort_func) \
 void psxHwWriteChcr##n(u32 value) \
 { \
 	u32 old = SWAPu32(HW_DMA##n##_CHCR); \
+    if (n == 4 && gnet_dma4_chcr(value)) return; \
 	if (n == 6) { value &= 0x51000002; value |= 2; } \
 	else        { value &= 0x71770703; } \
 	if (value == old) \
