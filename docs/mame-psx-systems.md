@@ -9,7 +9,7 @@ the installed listxml reports MAME 0.287.
 | MAME driver | Board family | MAME sets | Example sets | Board configurations and notable peripherals | Current project support |
 | --- | --- | ---: | --- | --- | --- |
 | `sony/psx.cpp` | Retail PlayStation | 4 | `psu`, `psj` | SCPH NTSC/PAL; controller and memory-card ports, parallel I/O, CD-ROM | Console core and native PS-X EXE smoke pass; full retail machine/BIOS/media validation remains pending |
-| `sony/zn.cpp` | Sony ZN-1/ZN-2; Capcom ZN; Tecmo TPS; Raizing ZN | 116 | `sfex`, `glpracr3`, `brvblade` | COH-1000/1001/1002 and COH-3002; variants include 1/2 MiB GPU memory, alternate sound CPUs, CAT702 security, and game I/O | Native synthetic Capcom COH1000C/1002C/3002C and Taito FX1S COH1000T MIPS/Z80, banks, SIO/MCU, EEPROM, inputs, GPU and sound pass; authentic games and other daughterboards remain unverified |
+| `sony/zn.cpp` | Sony ZN-1/ZN-2; Capcom ZN; Tecmo TPS; Raizing ZN | 116 | `sfex`, `glpracr3`, `brvblade` | COH-1000/1001/1002 and COH-3002; variants include 1/2 MiB GPU memory, alternate sound CPUs, CAT702 security, and game I/O | Native synthetic Capcom COH1000C/1002C/3002C and Taito FX1S COH1000T MIPS/Z80, banks, SIO/MCU, EEPROM, inputs, GPU and sound pass; Street Fighter EX, Star Gladiator and Rival Schools pass short Mac interpreter/GL gameplay with QSound capture; authentic FX1 games and other daughterboards remain unverified |
 | `sony/taitogn.cpp` | Taito G-Net (ZN-derived CPU/GPU) | 41 | `psyvaria`, `gdariusg`, `aerofgtsg` | COH-1002/3002 variants, Taito Zoom sound; CompactFlash and title-specific I/O on applicable sets | Native synthetic PSX interpreter/ARM64 DRC bus and storage execution fixtures pass. All 41 source profiles select BIOS/card/media identities; source ATA, PC Card and CHD composition fixtures pass, and the loader attaches verified CHD media. Source CPU timing is integrated; authentic games, event/vblank timing equivalence, sound output and title-specific I/O remain pending |
 | `konami/konamigv.cpp` | Konami System GV (Baby Phoenix) | 15 | `tmosh`, `weddingr` | CXD8530-class CPU; CXD8514/CXD8561 GPU variants, CD-ROM and game I/O | All 15 media profiles audited; seven common-map profiles have native integration and generated MIPS interpreter/DRC fixtures; authentic games and special I/O remain unverified |
 | `konami/konamigq.cpp` | Konami System GQ | 1 | `cryptklr` | CXD8530BQ/CXD8538Q; MC68000 and TMS57002 sound system | Complete source profile and local ROM/HDD preparation tested; native board execution pending |
@@ -34,13 +34,14 @@ family, including its declared peripherals and validation. They are not measured
 compatibility percentages, do not count a parsed registration as an implemented
 machine, and are not estimates of elapsed time. Shared PSX code is already
 available, so even families without a native board port do not start from zero.
-A real-game validation currently exists only for Soul Calibur Asia C; no entire
-family is considered finished.
+The original estimates began with only Soul Calibur Asia C validated. The
+evidence rows include later Mac checks; the remaining-work ranges have not
+all been recalibrated. No entire family is considered finished.
 
 | Family | Estimated remaining | Evidence and principal gaps |
 | --- | ---: | --- |
 | Retail PlayStation | 20–35% | Existing console core and native CPU/GPU smoke; native BIOS/disc, controller, sound and retail-game validation pending |
-| Sony ZN family (including Taito FX1) | 50–65% | Capcom and FX1S generated native guests pass; authentic games and Tecmo/Raizing/other daughterboards pending |
+| Sony ZN family (including Taito FX1) | 50–65% | Capcom and FX1S generated native guests pass; three Capcom games pass short Mac GL gameplay; authentic FX1 games and Tecmo/Raizing/other daughterboards pending |
 | Taito G-Net | 80–90% | Native PSX interpreter/DRC bus/storage fixtures and Zoom composition pass; all 41 source profiles and CHD/ATA/PC Card composition are implemented and component-tested. Source CPU timing is integrated; authentic games, event timing equivalence, frontend sound and title-specific I/O remain pending. The estimate has not been recalibrated from these additions. |
 | Konami System GV | 45–60% | Common native board MIPS interpreter/DRC, DMA5, IRQ10 and CHD fixture tested; authentic BIOS/CD execution, sound and special I/O pending |
 | Konami System GQ | 50–65% | HDD preparation, real CHD read/write NCR fixture, MC68000, TMS57002 and K056800/K054539 tested; complete board/gun wiring and real-game validation pending |
@@ -133,7 +134,9 @@ machine's assets does not imply that it boots.
   the [native Capcom adapter](capcom-zn-native.md) executes generated MIPS/Z80
   guests for all three board geometries, with fixed/banked ROM execution,
   SIO/MCU/IRQ, inputs, EEPROM persistence and nonzero QSound PCM. Instruction
-  cache and 1/2 MiB GPU tests pass. No authentic Capcom game boot claim.
+  cache and 1/2 MiB GPU tests pass. Street Fighter EX, Star Gladiator and
+  Rival Schools now have [short Mac interpreter/GL gameplay checks](capcom-zn-mac.md)
+  with QSound capture; ZN-2 sound/SIO clock conversion is corrected.
   The [PSX SIO0/SIO1](psx-sio-port.md) port tests baud deadlines, pin ordering,
   receive overruns and IRQs, including callback timestamps during catch-up.
   The [47-set Capcom registry and preparer](capcom-zn-boards.md) verifies media
@@ -255,7 +258,8 @@ machine's assets does not imply that it boots.
   tests connect all nine KEYCUS handlers, C352, shared RAM, ROM banks and IRQs;
   the native harness executes generated MIPS code from all eight banks and
   C76 firmware for inputs/ADC, shared RAM and nonzero audio. Exact EEPROM
-  persistence also passes. Actual game verification remains pending.
+  persistence also passes. Tekken, Tekken 2 and Soul Edge have
+  [short Mac gameplay validation](system11-mac.md), including type-1 GL.
 
 The complete family port remains active. The matrix distinguishes runnable
 board evidence from standalone device and media preparation work.

@@ -22,6 +22,10 @@ are `capcom_zn_state` candidates. The JSON records the exact machine/config mapp
 for every set. Registry generation fails if the inventory, pinned source commit,
 parser coverage, family count, or BIOS roots change unexpectedly.
 
+Street Fighter EX, Star Gladiator and Rival Schools now have
+[short Mac interpreter/GL gameplay validation](capcom-zn-mac.md), covering
+all three Capcom board geometries. Other sets remain unverified.
+
 ## Packageable media scope
 
 The current preparer accepts the 43 game profiles using `capcom_zn_state` and rejects both BIOS roots (which contain no game program) and both `glpracr_state` games (separate subclass/configuration). It also rejects any changed or additional region, disk/CHD requirement, required `NO_DUMP`, or source/profile mismatch. Supported packages contain the MAME regions `maincpu:rom`, `bankedroms`, `countryrom`, `audiocpu`, `qsound`, `cat702_1`, and `cat702_2`, plus the required QSound DSP firmware region.

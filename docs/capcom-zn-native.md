@@ -11,7 +11,7 @@ The loader accepts only the preparer's exact 14-key `board.ini`, one of those 43
 
 The two BIOS roots and two Gallop Racer `glpracr_state` games are rejected. The source config instantiates the ZNMCU rather than the separate undumped `upd78081`, so only the preparer's specifically reviewed, unused `upd78081` NO_DUMP block is omitted; no substitute firmware is generated. The source's 16-entry, 4 MiB bank selector is retained, with a read bounds fault whenever a complete selected window exceeds the actual declared banked-ROM region. No upper bytes are synthesized.
 
-The adapter configures the PSX main RAM size, BIOS image, GPU type 2 and VRAM geometry from the profile: COH1000C uses 1 MiB VRAM; COH1002C and COH3002C use 2 MiB. The source CPU rates (67.7376 MHz for ZN-1, 100 MHz for ZN-2) and GPU rate are validated from `board.ini`. The current host advances timed devices from the core's 33.8688 MHz `PSXCLK` cycle counter; this does not model either board CPU clock as the core's instruction rate.
+The adapter configures the PSX main RAM size, BIOS image, GPU type 2 and VRAM geometry from the profile: COH1000C uses 1 MiB VRAM; COH1002C and COH3002C use 2 MiB. The source CPU rates (67.7376 MHz for ZN-1, 100 MHz for ZN-2) and GPU rate are validated from `board.ini`. With generic arcade source timing enabled, `PSXCLK` is the source CPU input clock / 2: 33.8688 MHz for ZN-1 and 50 MHz for ZN-2. The adapter converts those cycles to the 8 MHz Z80 budget and fixed 33.8688 MHz SIO time with retained fractional remainders. SIO callbacks and MCU/EEPROM deadlines share the fixed serial time domain. Exact whole-machine timing equivalence remains unverified.
 
 Both PSX SIO blocks are owned by this adapter and mapped at `0x1f801040..0x1f80105f`. SIO0 SCK and TXD drive the common CAT702/ZNMCU lines. SIO0 RXD is the wired-AND of CAT702 0, CAT702 1 and MCU TXD, matching MAME's `update_sio0_rxd`; the MCU DSR output is returned to SIO0. SIO0 and SIO1 IRQ callbacks set their respective I_STAT requests. Each SIO output callback advances the MCU and AT28C16 to the SIO event cycle before changing a pin, then the final board sync advances them to the host cycle. MAME-default ZNMCU analog ports are `0xff`, DIP input is `0xff`, and trackball values are zero.
 
@@ -34,5 +34,8 @@ nonzero QSound PCM from ten executed commands. Separate checks cover both
 VRAM geometries, instruction-cache fetches, exact EEPROM data/ID persistence
 and rejection of malformed profiles before guest execution. All fixture
 ROMs, keys and coefficients are generated test data; authentic media is
-verified by the preparer. No authentic Capcom game boot or full CPU-clock
-accuracy claim, and the mainboard SPU audio mix remains pending.
+verified by the preparer. Street Fighter EX, Star Gladiator and Rival Schools
+now pass [short Mac interpreter/GL gameplay checks](capcom-zn-mac.md) with
+nonzero QSound capture. The fixtures also independently verify main CPU to
+Z80/SIO clock ratios. Full timing equivalence and the mainboard SPU audio mix
+remain pending.
