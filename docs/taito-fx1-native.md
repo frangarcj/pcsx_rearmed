@@ -130,3 +130,12 @@ passes instruction-driven MIPS/Z80 execution with and without instruction
 cache, including banked fetches, GPU, RAM, SIO/MCU/IRQ, sound packets, inputs,
 EEPROM persistence and nonzero YM2610B PCM. It does not establish authentic
 game compatibility.
+
+
+## Authentic Mac follow-up
+
+Psychic Force now has bounded PLAYER1 selection and combat evidence with
+interpreter/GL, exercised controls and nonzero YM2610B. Its runtime EEPROM matches
+an independently configured MAME image. An earlier coin timing still enters an
+IRQ-callback VSync wait and resets in both implementations. See
+[the commands, evidence and remaining checks](taito-fx1-mac.md).
