@@ -42,6 +42,11 @@
 #ifdef ARCADE_SYSTEM12
 #include "../libpcsxcore/psxmem.h"
 #include "../libpcsxcore/system12.h"
+#include "../libpcsxcore/system10.h"
+#include "../libpcsxcore/system11.h"
+#include "../libpcsxcore/systemzn.h"
+/* Keep the native report FILE type before libretro VFS remaps stdio. */
+typedef FILE ArcadeReportFile;
 #include "../libpcsxcore/arcade/system12_romset.h"
 #include <sys/stat.h>
 #endif
@@ -110,6 +115,43 @@
 static bool reset_pending = false;
 #ifdef ARCADE_SYSTEM12
 static int retro_system12_saved_cycle_multiplier = CYCLE_MULT_DEFAULT;
+static int retro_arcade_saved_cpu;
+typedef struct {
+   const char *format;
+   int (*load)(const char *);
+   void (*unload)(void);
+   int (*set_input)(const char *, int);
+   void (*set_audio)(void (*)(void *, const int16_t *, unsigned), void *);
+   void (*report)(ArcadeReportFile *);
+   int (*sync)(u32);
+   unsigned sample_rate;
+} RetroArcadeBoard;
+static const RetroArcadeBoard other_arcade_boards[] = {
+   {"pcsx-aow-system10-v1", system10_load, system10_unload, system10_set_input,
+      NULL, system10_report, system10_sync, 0},
+   {"pcsx-aow-system11-v1", system11_load, system11_unload, system11_set_input,
+      system11_set_audio_output, system11_report, system11_sync, 88200},
+   {"pcsx-aow-capcom-zn-v1", systemzn_load, systemzn_unload, systemzn_set_input,
+      systemzn_set_audio_output, systemzn_report, systemzn_sync, 24038},
+};
+static const RetroArcadeBoard *retro_other_arcade;
+static const RetroArcadeBoard *retro_find_other_arcade(const char *directory)
+{
+   char path[4096], line[128];
+   FILE *file;
+   unsigned i;
+   if (snprintf(path, sizeof(path), "%s/board.ini", directory) >= (int)sizeof(path))
+      return NULL;
+   file = fopen(path, "r");
+   if (!file) return NULL;
+   if (!fgets(line, sizeof(line), file)) line[0] = 0;
+   fclose(file);
+   line[strcspn(line, "\r\n")] = 0;
+   for (i = 0; i < sizeof(other_arcade_boards) / sizeof(other_arcade_boards[0]); i++)
+      if (!strncmp(line, "format=", 7) && !strcmp(line + 7, other_arcade_boards[i].format))
+         return &other_arcade_boards[i];
+   return NULL;
+}
 #endif
 static retro_video_refresh_t video_cb;
 static retro_input_poll_t input_poll_cb;
@@ -933,7 +975,7 @@ static void snd_feed(void *buf, int bytes)
 {
 #ifdef ARCADE_SYSTEM12
    /* System12 audio is delivered from the board's 88.2 kHz C352 stream. */
-   if (system12_active())
+   if (system12_active() || (retro_other_arcade && retro_other_arcade->set_audio))
       return;
 #endif
    if (audio_batch_cb != NULL)
@@ -1325,7 +1367,9 @@ void retro_get_system_av_info(struct retro_system_av_info *info)
    memset(info, 0, sizeof(*info));
    info->timing.fps              = psxGetFps();
 #ifdef ARCADE_SYSTEM12
-   info->timing.sample_rate      = system12_active() ? 88200.0 : 44100.0;
+   info->timing.sample_rate      = retro_other_arcade
+      ? (retro_other_arcade->sample_rate ? retro_other_arcade->sample_rate : PSXCLK / 768)
+      : (system12_active() ? 88200.0 : 44100.0);
 #else
    info->timing.sample_rate      = 44100.0;
 #endif
@@ -1339,6 +1383,9 @@ void retro_get_system_av_info(struct retro_system_av_info *info)
 /* savestates */
 size_t retro_serialize_size(void)
 {
+#ifdef ARCADE_SYSTEM12
+   if (retro_other_arcade) return 0; /* No board-state serialization yet. */
+#endif
 #ifdef PCSX_SYSTEM_GNET
    if (systemgnet_active())
       return 0;
@@ -1911,7 +1958,7 @@ static void set_retro_memmap(void)
 
 #if defined(ARCADE_SYSTEM12) || defined(PCSX_SYSTEM_GNET)
 #ifdef ARCADE_SYSTEM12
-   if (system12_active())
+   if (system12_active() || retro_other_arcade)
    {
       board_profile = true;
       descs[0].len = PSX_RAM_SIZE;
@@ -2131,7 +2178,7 @@ static void retro_update_system_av_info(void)
  * selected while letting the board choose PSX RAM/ROM sizes before psxInit. */
 static void retro_system12_restore_console(void)
 {
-   if (!system12_active())
+   if (!system12_active() && !retro_other_arcade)
       return;
    /* Finish board work and deliver its audio before the core goes away. */
    system12_board_thread_stop();
@@ -2140,9 +2187,18 @@ static void retro_system12_restore_console(void)
       ClosePlugins();
       plugins_opened = 0;
    }
+   /* Other boards can change GPU type and VRAM geometry. Their owned
+    * plugin buffers must be released before the next profile selects it. */
+   if (retro_other_arcade) ReleasePlugins();
    psxShutdown();
    system12_set_audio_output(NULL, NULL);
-   system12_unload();
+   if (retro_other_arcade) {
+      if (retro_other_arcade->set_audio) retro_other_arcade->set_audio(NULL, NULL);
+      retro_other_arcade->unload();
+      retro_other_arcade = NULL;
+      Config.Cpu = retro_arcade_saved_cpu;
+      psxCpu = Config.Cpu == CPU_INTERPRETER ? &psxInt : &psxRec;
+   } else system12_unload();
    Config.cycle_multiplier = retro_system12_saved_cycle_multiplier;
    if (psxInit() == -1)
       LogErr("failed to restore console PSX memory after System12\n");
@@ -2154,6 +2210,7 @@ static bool retro_load_system12_profile(const char *directory)
 {
    int load_result;
    unsigned i;
+   const RetroArcadeBoard *other = retro_find_other_arcade(directory);
 
 #ifdef PCSX_SYSTEM_GNET
    if (systemgnet_active())
@@ -2164,14 +2221,14 @@ static bool retro_load_system12_profile(const char *directory)
       ClosePlugins();
       plugins_opened = 0;
    }
-   if (system12_active())
+   if (system12_active() || retro_other_arcade)
       retro_system12_restore_console();
 
    disk_init();
    set_cd_image(NULL);
    retro_system12_saved_cycle_multiplier = Config.cycle_multiplier;
    psxShutdown();
-   load_result = system12_romset_is_zip(directory)
+   load_result = other ? other->load(directory) : system12_romset_is_zip(directory)
       ? system12_romset_load(directory) : system12_load(directory);
    if (load_result != 0)
    {
@@ -2183,18 +2240,34 @@ static bool retro_load_system12_profile(const char *directory)
       return false;
    }
 
+   if (other) {
+      retro_other_arcade = other;
+      retro_arcade_saved_cpu = Config.Cpu;
+      /* These board adapters currently have interpreter coverage. Do not
+       * enable an arcade DRC map without a code-span provider. */
+      Config.Cpu = CPU_INTERPRETER;
+      psxCpu = &psxInt;
+      LogWarn("Arcade profile %s: using interpreter\n", other->format);
+   }
+
    /* Core initialization selects the board's clock domain and multiplier.
     * The choice of CPU backend remains the one selected by the core options. */
    if (psxInit() == -1)
    {
       psxShutdown();
-      system12_unload();
+      if (retro_other_arcade) {
+         retro_other_arcade->unload(); retro_other_arcade = NULL;
+         Config.Cpu = retro_arcade_saved_cpu;
+         psxCpu = Config.Cpu == CPU_INTERPRETER ? &psxInt : &psxRec;
+      } else system12_unload();
       Config.cycle_multiplier = retro_system12_saved_cycle_multiplier;
       psxInit();
       return false;
    }
 
-   system12_set_audio_output(retro_system12_audio, NULL);
+   if (other) {
+      if (other->set_audio) other->set_audio(retro_system12_audio, NULL);
+   } else system12_set_audio_output(retro_system12_audio, NULL);
    if (LoadPlugins() == -1)
    {
       LogErr("could not open graphics/audio plugins for System12\n");
@@ -2259,7 +2332,7 @@ static bool retro_load_systemgnet_profile(const char *directory)
    unsigned i;
 
 #ifdef ARCADE_SYSTEM12
-   if (system12_active())
+   if (system12_active() || retro_other_arcade)
       retro_system12_restore_console();
 #endif
    if (systemgnet_active())
@@ -2398,7 +2471,7 @@ bool retro_load_game(const struct retro_game_info *info)
 #ifdef ARCADE_SYSTEM12
    if (system12_romset_is_zip(info->path) || retro_path_is_system12_profile(info->path))
       return retro_load_system12_profile(info->path);
-   if (system12_active())
+   if (system12_active() || retro_other_arcade)
       retro_system12_restore_console();
 #endif
 
@@ -2626,7 +2699,7 @@ size_t retro_get_memory_size(unsigned id)
    {
    case RETRO_MEMORY_SYSTEM_RAM:
 #ifdef ARCADE_SYSTEM12
-      if (system12_active())
+      if (system12_active() || retro_other_arcade)
          return PSX_RAM_SIZE;
 #endif
 #ifdef PCSX_SYSTEM_GNET
@@ -3040,6 +3113,9 @@ static void update_variables(bool in_flight)
       else if (strcmp(var.value, "enabled") == 0)
          Config.Cpu = CPU_DYNAREC;
 
+#ifdef ARCADE_SYSTEM12
+      if (retro_other_arcade) Config.Cpu = CPU_INTERPRETER;
+#endif
       psxCpu = (Config.Cpu == CPU_INTERPRETER) ? &psxInt : &psxRec;
       if (psxCpu != prev_cpu)
       {
@@ -4105,6 +4181,32 @@ void retro_run(void)
 
    update_input();
 #ifdef ARCADE_SYSTEM12
+   if (retro_other_arcade) {
+      static const struct { const char *name; unsigned id; } controls[] = {
+         {"up", RETRO_DEVICE_ID_JOYPAD_UP}, {"down", RETRO_DEVICE_ID_JOYPAD_DOWN},
+         {"left", RETRO_DEVICE_ID_JOYPAD_LEFT}, {"right", RETRO_DEVICE_ID_JOYPAD_RIGHT},
+         {"button1", RETRO_DEVICE_ID_JOYPAD_B}, {"button2", RETRO_DEVICE_ID_JOYPAD_A},
+         {"button3", RETRO_DEVICE_ID_JOYPAD_Y}, {"button4", RETRO_DEVICE_ID_JOYPAD_X},
+         {"button5", RETRO_DEVICE_ID_JOYPAD_L}, {"button6", RETRO_DEVICE_ID_JOYPAD_R},
+         {"start", RETRO_DEVICE_ID_JOYPAD_START},
+      };
+      unsigned port, i;
+      char name[32];
+      for (port = 0; port < 2; port++) {
+         for (i = 0; i < sizeof(controls) / sizeof(controls[0]); i++) {
+            snprintf(name, sizeof(name), "p%u%s", port + 1, controls[i].name);
+            retro_other_arcade->set_input(name,
+               input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, controls[i].id) != 0);
+         }
+         snprintf(name, sizeof(name), "coin%u", port + 1);
+         retro_other_arcade->set_input(name,
+            input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L3) != 0);
+      }
+      retro_other_arcade->set_input(systemzn_active() ? "service1" : "service",
+         input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT) != 0);
+      retro_other_arcade->set_input("test",
+         input_state_cb(1, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT) != 0);
+   }
    if (system12_active())
    {
 #define SYSTEM12_PAD_INPUT(name, port, id) \
@@ -4204,6 +4306,10 @@ system12_input_done:
 #endif
    uint64_t cpu_started = pcsx_profile_begin(PCSX_PROF_CPU, 1);
    psxCpu->Execute(&psxRegs);
+#ifdef ARCADE_SYSTEM12
+   if (retro_other_arcade && retro_other_arcade->sync(psxRegs.cycle))
+      LogErr("Arcade board device clock reported a fault\n");
+#endif
    pcsx_profile_end(PCSX_PROF_CPU, cpu_started);
 #ifdef PCSX_SYSTEM_GNET
    if (systemgnet_active() && systemgnet_sync(psxRegs.cycle) < 0)
@@ -4677,6 +4783,12 @@ void retro_deinit(void)
       systemgnet_unload();
 #endif
 #ifdef ARCADE_SYSTEM12
+   if (retro_other_arcade) {
+      if (retro_other_arcade->set_audio) retro_other_arcade->set_audio(NULL, NULL);
+      retro_other_arcade->unload(); retro_other_arcade = NULL;
+      Config.Cpu = retro_arcade_saved_cpu;
+      Config.cycle_multiplier = retro_system12_saved_cycle_multiplier;
+   }
    if (system12_active())
    {
       system12_set_audio_output(NULL, NULL);
@@ -4803,12 +4915,16 @@ int pcsx_vita_write_system12_report(const char *path)
 #if defined(ARCADE_SYSTEM12)
    FILE *out;
    int failed;
-   if (!path || !path[0] || !system12_active())
+   if (!path || !path[0] || (!system12_active() && !retro_other_arcade))
       return -1;
    out = fopen(path, "wb");
    if (!out)
       return -1;
-   system12_report(out);
+   if (retro_other_arcade) retro_other_arcade->report(out);
+   else system12_report(out);
+   fprintf(out, "Arcade frontend: cpu=%s rate=%u\n",
+      pcsx_vita_uses_dynarec() ? "ari64" : "interpreter",
+      retro_other_arcade ? (retro_other_arcade->sample_rate ? retro_other_arcade->sample_rate : PSXCLK / 768) : 88200);
    failed = ferror(out);
    if (fclose(out) != 0)
       failed = 1;
