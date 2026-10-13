@@ -121,7 +121,10 @@ def _load_set(set_name: str, source: Path, rompath: Path,
     regions, origins = assemble_verified(romset, rompath, parents, None, archive)
     if set(regions) != set(profiles.FX1S_REQUIRED_REGIONS):
         raise TaitoFX1PreparationError("assembled FX1S regions are incomplete")
-    media_sources = {romset.files[index].filename: origin for index, origin in origins.items()}
+    # The reviewed NO_DUMP removal leaves original source indices intact.
+    # They identify ROM declarations, not positions in the filtered list.
+    files_by_index = {spec.index: spec for spec in romset.files}
+    media_sources = {files_by_index[index].filename: origin for index, origin in origins.items()}
     return regions, {"romset": set_name, "parent_chain": mame._lineage(set_name, parents),
                      "media_origins": media_sources}
 

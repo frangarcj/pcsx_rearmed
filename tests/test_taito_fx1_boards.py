@@ -5,6 +5,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 import zlib
 from pathlib import Path
@@ -143,6 +144,20 @@ class TaitoFX1PackagingTests(unittest.TestCase):
         self.assertIn("cat702_2", filtered.regions)
         with self.assertRaises(prepare.TaitoFX1PreparationError):
             prepare._filter_reviewed_upd78081(sets["raystorm"], self.by_set["raystorm"])
+
+    def test_filtered_rom_origins_keep_source_indices(self):
+        source = (profiles.DEFAULT_SOURCE / "src/mame" / profiles.DRIVER).read_text()
+        sets, _, _ = mame.parse_driver(source, profiles.DRIVER)
+        filtered = prepare._filter_reviewed_upd78081(sets["psyforce"], self.by_set["psyforce"])
+        origins = {spec.index: f"archive-{spec.index}" for spec in filtered.files}
+        self.assertGreater(max(origins), len(filtered.files) - 1)
+        regions = {tag: b"" for tag in profiles.FX1S_REQUIRED_REGIONS}
+        with mock.patch.object(prepare, "assemble_verified", return_value=(regions, origins)):
+            _, metadata = prepare._load_set("psyforce", profiles.DEFAULT_SOURCE,
+                                            Path("unused"), self.by_set["psyforce"], None)
+        self.assertEqual(metadata["media_origins"],
+                         {spec.filename: f"archive-{spec.index}" for spec in filtered.files})
+        self.assertNotIn("78081g503.ic655", metadata["media_origins"])
 
     def test_synthetic_archive_resolves_clone_media_from_parent_and_checks_hashes(self):
         bios = b"BIOS"
