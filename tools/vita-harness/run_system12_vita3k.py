@@ -13,6 +13,8 @@ from prepare_system12_board.py.
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import importlib.util
 import json
 import hashlib
@@ -25,6 +27,50 @@ ROOT = Path(__file__).resolve().parents[2]
 HARNESS = ROOT / "tools/vita-harness/check_system12_gameplay_vita3k.py"
 CHECKER = ROOT / "tools/vita-harness/check_vita3k.py"
 GAME_FILES = ("board.cfg", "main.bin", "banked.bin", "sub.bin", "wave.bin")
+
+
+def canonical_replay(path: Path, frames: int) -> str:
+    """Preserve the final per-frame button states, in Vita's strict order.
+
+    Mac replays may order simultaneous independent controls differently.
+    All events at one frame are applied before execution, so only the last
+    value for a given control matters. Clip a longer replay to this run.
+    """
+    data = path.read_bytes()
+    if len(data) > 1024 * 1024 or b"\0" in data:
+        raise ValueError("invalid replay size or embedded NUL")
+    events = {}
+    previous = -1
+    count = 0
+    for row in csv.reader(data.decode("utf-8").splitlines()):
+        row = [field.strip() for field in row]
+        if not row or not row[0] or row[0].startswith("#"):
+            continue
+        if row == ["frame", "control", "pressed"]:
+            if count:
+                raise ValueError("replay header after events")
+            continue
+        if len(row) != 3 or not re.fullmatch(r"[0-9]+", row[0]) or row[2] not in ("0", "1"):
+            raise ValueError("expected frame,control,pressed replay rows")
+        frame, control, pressed = int(row[0]), row[1], int(row[2])
+        if not re.fullmatch(r"p[12](up|down|left|right|button[1-8]|start)|coin[12]|service|test", control):
+            raise ValueError(f"unknown replay control: {control}")
+        if frame < previous or frame >= 216000:
+            raise ValueError("replay frames must be ordered and below 216000")
+        previous = frame
+        count += 1
+        if count > 4096:
+            raise ValueError("replay exceeds 4096 events")
+        if frame < frames:
+            events[(frame, control)] = pressed
+    if not events:
+        raise ValueError("replay has no events within this run")
+    output = io.StringIO()
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(("frame", "control", "pressed"))
+    writer.writerows((frame, control, pressed)
+                     for (frame, control), pressed in sorted(events.items()))
+    return output.getvalue()
 
 
 def load(path: Path):
@@ -84,6 +130,13 @@ def main():
         parser.error(f"{name} declares unsupported devices: {cfg['unsupported']}")
     h = load(HARNESS)
     args.output_dir.mkdir(parents=True)
+    replay = None
+    if args.inputs:
+        replay = args.output_dir / "inputs.csv"
+        try:
+            replay.write_text(canonical_replay(args.inputs, args.frames))
+        except (ValueError, UnicodeError) as error:
+            parser.error(str(error))
     with tempfile.TemporaryDirectory(prefix="pcsx-vita-system12-run-") as temp:
         base = Path(temp)
         emulator, fs, portable = h.read_cli(base, args)
@@ -100,8 +153,8 @@ def main():
                                          if line.startswith("disable-surface-sync:") else line
                                          for line in text.splitlines()) + "\n")
         files = [(args.profile / f, f"{name}/{f}") for f in game_files]
-        if args.inputs:
-            files.append((args.inputs, f"{name}/inputs.csv"))
+        if replay:
+            files.append((replay, f"{name}/inputs.csv"))
         vpk = h.make_vpk(args.vpk.resolve(), args.vita_pack_vpk, args.vita_mksfoex,
                          base / f"{name}.vpk", base, h.TITLE_ID, f"PCSX Vita System12 {name}", files)
         log = args.output_dir / "vita3k.log"
@@ -160,6 +213,7 @@ def main():
                   "host_sha256": hashlib.sha256(h.emulator_executable(args.emulator).read_bytes()).hexdigest(),
                   "format": cfg.get("format", "system12"),
                   "cpu": "interpreter" if other_arcade else "ari64",
+                  "inputs_sha256": hashlib.sha256(replay.read_bytes()).hexdigest() if replay else None,
                   "audio": list(map(int, audio.groups())) if other_arcade and audio else None}
         (args.output_dir / "result.json").write_text(json.dumps(result, indent=2) + "\n")
         print(json.dumps(result, indent=2))
