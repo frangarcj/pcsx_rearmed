@@ -21,6 +21,24 @@ SPEC.loader.exec_module(GAMEPLAY)
 
 
 class System12VitaGameplayEvidenceTests(unittest.TestCase):
+    def test_invalid_csv_fails_before_waiting_for_completion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fragments = ("pcsx-vita: system12-report PASS",)
+            code = ("import time; print('pcsx-vita: invalid inputs CSV line=386',flush=True); "
+                    "print('Stopping -> Idle',flush=True); time.sleep(10)")
+            process = subprocess.Popen([sys.executable, "-u", "-c", code],
+                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            captured = GAMEPLAY.CapturedGuest(process, Path(directory) / "log", "bad CSV", fragments)
+            started = time.monotonic()
+            try:
+                self.assertFalse(captured.wait_for_messages(fragments, 3, stable=0.1))
+                self.assertLess(time.monotonic() - started, 2)
+                self.assertEqual(captured.issue_counts["pcsx-vita: invalid inputs CSV"], 1)
+            finally:
+                process.terminate()
+                process.wait(timeout=5)
+                captured.close()
+
     def test_csv_reader_rejects_nul_and_checks_eof_row_bounds(self):
         compiler = shutil.which("cc") or shutil.which("clang")
         if not compiler:

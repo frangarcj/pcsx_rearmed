@@ -116,6 +116,7 @@ class CapturedGuest:
                      b"Unpredictable instruction", b"pcsx-vita: system12-report FAIL",
                      b"pcsx-vita: system12-capture FAIL", b"pcsx-vita: display detach failed",
                      b"pcsx-vita: smoke FAIL", b"pcsx-vita: inputs replay FAIL",
+                     b"pcsx-vita: invalid inputs CSV",
                      b"pcsx-vita: vitaGL shutdown FAIL", b"pcsx-vita: vitaGL readback FAIL")
     KEY_WORDS = (b"pcsx-vita:", b"Stopping -> Idle", b"installed successfully!",
                  b"[InterpreterFallback] Unimplemented instruction", b"Unpredictable instruction",
