@@ -21,6 +21,7 @@ struct gnet_zoom_board {
     rf5c296_device_t *rf5c296 = nullptr;
     rf5c296_card_ops_t pc_card{};
     uint64_t last_cycle = 0;
+    uint64_t last_requested_cycle = 0;
     uint64_t fractional_25ths = 0;
     uint64_t watchdog_time_us = 0;
     unsigned bank = 0;
@@ -755,6 +756,10 @@ extern "C" int gnet_zoom_sync_to_cycle(gnet_zoom_board *b,
                                         uint64_t internal_cycle)
 {
     if (!b) return GNET_ZOOM_ARGUMENT;
+    /* Reject a caller time rewind, independently of the sound CPU's
+     * retained instruction overrun past the last requested boundary. */
+    if (internal_cycle < b->last_requested_cycle) return GNET_ZOOM_TIME;
+    b->last_requested_cycle = internal_cycle;
     int r = zoom_board_sync_to_cycle(b->zoom, internal_cycle);
     if (r != ZOOM_BOARD_OK) {
         if (!b->fault) b->fault = zoom_board_fault(b->zoom);
