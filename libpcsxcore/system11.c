@@ -42,6 +42,8 @@ static struct {
     uint32_t random, last_cycle;
     uint64_t fraction;
     PcmWav wav;
+    void (*audio_callback)(void *, const int16_t *, unsigned);
+    void *audio_opaque;
     int fault;
 } board;
 
@@ -68,6 +70,18 @@ static void audio_output(void *opaque, const int16_t *samples, size_t frames)
         if (amplitude > board.peak) board.peak = amplitude;
     }
     if (pcm_wav_append4(&board.wav, samples, frames)) board.fault = 1;
+    if (board.audio_callback) {
+        int16_t stereo[512];
+        while (frames) {
+            unsigned count = frames > 256 ? 256 : (unsigned)frames;
+            for (i = 0; i < count; i++) {
+                stereo[i * 2] = samples[i * 4];
+                stereo[i * 2 + 1] = samples[i * 4 + 1];
+            }
+            board.audio_callback(board.audio_opaque, stereo, count);
+            samples += count * 4; frames -= count;
+        }
+    }
 }
 static int read_config(const char *directory, const Profile **profile)
 {
@@ -223,6 +237,7 @@ int system11_read(u32 address, unsigned width, u32 *value)
 {
     int result;
     if (!board.device) return 0;
+    if (system11_sync(psxRegs.cycle)) board.fault = 1;
     result = namcos11_read(board.device, physical_address(address), width, value);
     if (result < 0) { board.fault = 1; *value = UINT32_MAX; }
     return result != 0;
@@ -231,6 +246,7 @@ int system11_write(u32 address, unsigned width, u32 value)
 {
     int result; u32 physical = physical_address(address);
     if (!board.device) return 0;
+    if (system11_sync(psxRegs.cycle)) board.fault = 1;
     result = namcos11_write(board.device, physical, width, value);
     if (result < 0) board.fault = 1;
     if (result > 0 && ((physical >= 0x1fa10020 && physical < 0x1fa10030) ||
@@ -253,6 +269,8 @@ int system11_set_input(const char *name, int pressed)
     }
     return -1;
 }
+void system11_set_audio_output(void (*callback)(void *, const int16_t *, unsigned), void *opaque)
+{ board.audio_callback = callback; board.audio_opaque = opaque; }
 int system11_open_audio(const char *path) { return pcm_wav_open(&board.wav, path, 88200); }
 int system11_close_audio(void) { return pcm_wav_close(&board.wav); }
 int system11_eeprom_import(const unsigned char *image, size_t size)

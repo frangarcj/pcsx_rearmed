@@ -21,6 +21,7 @@ int systemzn_set_input(const char *control, int pressed);
 int systemzn_eeprom_import(const unsigned char *image, size_t size);
 int systemzn_eeprom_export(unsigned char *image, size_t size);
 /* QSound-only capture at the source HLE's integer 24038 Hz rate. */
+void systemzn_set_audio_output(void (*callback)(void *, const int16_t *, unsigned), void *opaque);
 int systemzn_open_audio(const char *path);
 int systemzn_close_audio(void);
 int systemzn_selftest(void);

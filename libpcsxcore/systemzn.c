@@ -55,6 +55,10 @@ typedef struct SystemZn {
     unsigned peak;
     uint32_t faults;
     PcmWav wav;
+    void (*audio_callback)(void *, const int16_t *, unsigned);
+    void *audio_opaque;
+    int16_t audio_buffer[512];
+    unsigned audio_buffer_frames;
     int active;
 } SystemZn;
 static SystemZn board;
@@ -247,6 +251,14 @@ static void qsound_pcm(void *opaque, int16_t left, int16_t right, uint64_t frame
     if (l > board.peak) board.peak = l;
     if (r > board.peak) board.peak = r;
     if (pcm_wav_append4(&board.wav, sample, 1)) board.faults |= 2u;
+    if (board.audio_callback) {
+        unsigned index = board.audio_buffer_frames++ * 2;
+        board.audio_buffer[index] = left; board.audio_buffer[index + 1] = right;
+        if (board.audio_buffer_frames == 256) {
+            board.audio_callback(board.audio_opaque, board.audio_buffer, 256);
+            board.audio_buffer_frames = 0;
+        }
+    }
 }
 
 static void sio_bus_advance(psx_sio_t *sio, uint64_t cycle)
@@ -660,6 +672,8 @@ int systemzn_eeprom_import(const unsigned char *image, size_t size)
 { return board.active ? zn_board_eeprom_import(&board.common, image, size) : -1; }
 int systemzn_eeprom_export(unsigned char *image, size_t size)
 { return board.active ? zn_board_eeprom_export(&board.common, image, size) : -1; }
+void systemzn_set_audio_output(void (*callback)(void *, const int16_t *, unsigned), void *opaque)
+{ board.audio_callback = callback; board.audio_opaque = opaque; board.audio_buffer_frames = 0; }
 int systemzn_open_audio(const char *path)
 {
     if (!board.active || board.wav.file) return -1;
