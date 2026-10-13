@@ -47,7 +47,7 @@ typedef struct SystemZn {
     int mcu_dataout;
     int sio_irq[2];
     uint32_t last_psx_cycle;
-    uint64_t total_psx_cycles;
+    uint64_t sio_cycles, sio_fraction;
     uint64_t peripheral_cycles;
     uint64_t qsound_fraction;
     uint64_t sound_cycles;
@@ -472,16 +472,20 @@ int systemzn_sync(u32 psx_cycle)
     board.last_psx_cycle = psx_cycle;
     if (elapsed) {
         uint64_t numerator = (uint64_t)elapsed * CAPCOM_ZN_SOUND_CLOCK_HZ + board.qsound_fraction;
-        sound_cycles = numerator / SYSTEMZN_PSX_CLOCK;
-        board.qsound_fraction = numerator % SYSTEMZN_PSX_CLOCK;
-        board.total_psx_cycles += elapsed;
+        sound_cycles = numerator / PSXCLK;
+        board.qsound_fraction = numerator % PSXCLK;
+        /* SIO bit timers use the source's fixed 33.8688 MHz clock even on
+         * ZN-2. MCU/EEPROM callbacks share that absolute time domain. */
+        numerator = (uint64_t)elapsed * SYSTEMZN_PSX_CLOCK + board.sio_fraction;
+        board.sio_cycles += numerator / PSXCLK;
+        board.sio_fraction = numerator % PSXCLK;
         board.sound_cycles += sound_cycles;
         if (sound_cycles && capcom_zn_run_sound_cycles(board.capcom, sound_cycles) < 0)
             board.faults |= 8u;
     }
-    sio_bus_advance(board.sio[0], board.total_psx_cycles);
-    sio_bus_advance(board.sio[1], board.total_psx_cycles);
-    if (sync_peripherals_to_cycle(board.total_psx_cycles)) board.faults |= 1u;
+    sio_bus_advance(board.sio[0], board.sio_cycles);
+    sio_bus_advance(board.sio[1], board.sio_cycles);
+    if (sync_peripherals_to_cycle(board.sio_cycles)) board.faults |= 1u;
     if (qsound_hle_get_status(board.qsound, &status)) board.faults |= 2u;
     {
         capcom_zn_status_t cap_status;

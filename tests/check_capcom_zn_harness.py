@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import shutil
 import struct
 import subprocess
@@ -129,7 +130,7 @@ def run(harness: Path, directory: Path, *args: str) -> subprocess.CompletedProce
     return result
 
 
-def check_guest(result: subprocess.CompletedProcess, trace: Path, audio: Path) -> None:
+def check_guest(result: subprocess.CompletedProcess, trace: Path, audio: Path, set_name: str) -> None:
     result.check_returncode()
     with trace.open() as file:
         rows = list(csv.DictReader(file))
@@ -147,6 +148,19 @@ def check_guest(result: subprocess.CompletedProcess, trace: Path, audio: Path) -
     for reg, values in ((14, (0xef, 0xff)), (15, (0xfffffffe, 0xffffffff))):
         if any(not any(row[f"r{reg}"] == f"{value:08x}" for row in rows) for value in values):
             raise RuntimeError("guest did not observe input press/release")
+    # Independently derive elapsed time from main-CPU cycles. ZN-2 runs at
+    # 50 MHz while its SIO remains at 33.8688 MHz and its Z80 at 8 MHz.
+    log = result.stdout + result.stderr
+    cycles = int(re.search(r"host=.*? cycles=(\d+)", log)[1])
+    clock = PROFILES[set_name]["cpu_clock_hz"] // 2
+    expected_sio = cycles * 33868800 // clock
+    timing = re.search(r"time_us=(\d+) SIO0=(\d+) SIO1=(\d+)", log)
+    if tuple(map(int, timing.groups())) != (expected_sio * 1000000 // 33868800,
+                                            expected_sio, expected_sio):
+        raise RuntimeError("SIO/MCU time did not follow the source clock")
+    z80_cycles = int(re.search(r"Z80 cycles=(\d+)", log)[1])
+    if z80_cycles != cycles * 8000000 // clock:
+        raise RuntimeError("Z80 budget did not follow elapsed main CPU time")
     with wave.open(str(audio)) as wav:
         if wav.getnchannels() != 2 or wav.getsampwidth() != 2 or wav.getnframes() < 100:
             raise RuntimeError("invalid QSound stereo capture")
@@ -171,7 +185,7 @@ def main() -> None:
             result = run(harness, directory, "--board-test", "--frames", "3", "--inputs", str(inputs),
                          "--trace", str(trace), "--trace-blocks", "200000", "--audio", str(audio),
                          "--output", str(directory / "frame.ppm"))
-            check_guest(result, trace, audio)
+            check_guest(result, trace, audio, set_name)
         # KSEG0 bank helpers exercise the actual instruction cache refill.
         # Persistent EEPROM carries the full ID block through programming.
         directory = root / "sfex"
@@ -181,7 +195,7 @@ def main() -> None:
         result = run(harness, directory, "--board-test", "--icache", "--frames", "3",
                      "--inputs", str(inputs), "--trace", str(trace), "--trace-blocks", "200000",
                      "--audio", str(audio), "--nvram", str(nvram), "--output", str(directory / "cache.ppm"))
-        check_guest(result, trace, audio)
+        check_guest(result, trace, audio, "sfex")
         if nvram.read_bytes() != b"\x5a" + initial[1:]:
             raise RuntimeError("persistent AT28C16 data/ID did not preserve exact contents")
         valid = root / "sfex2"
