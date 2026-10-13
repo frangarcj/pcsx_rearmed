@@ -33,6 +33,7 @@
 
 #include <limits.h>
 #include <stdlib.h>
+#include <string.h>
 
 enum flash_mode {
     MODE_ARRAY,
@@ -41,6 +42,7 @@ enum flash_mode {
     MODE_INTEL_PROGRAM,
     MODE_INTEL_ERASE_CONFIRM,
     MODE_INTEL_SET_MASTER,
+    MODE_INTEL_BUFFER_COUNT, MODE_INTEL_BUFFER_DATA,
     MODE_AMD_UNLOCK1,
     MODE_AMD_UNLOCK2,
     MODE_AMD_ID,
@@ -77,6 +79,9 @@ struct nor_flash {
     uint8_t toggle;
     size_t dirty_start, dirty_end;
     int dirty_valid;
+    uint8_t write_buffer[32];
+    uint32_t buffer_start;
+    unsigned buffer_count, buffer_used;
 };
 
 static void mark_dirty(nor_flash_t *flash, size_t start, size_t length)
@@ -304,6 +309,8 @@ int nor_flash_read(nor_flash_t *flash, uint32_t address, uint16_t *value)
             default: result = 0; break;
             }
             break;
+        case MODE_INTEL_BUFFER_COUNT: result = 0x80; break;
+        case MODE_INTEL_BUFFER_DATA:
         case MODE_INTEL_STATUS: result = flash->status; break;
         case MODE_ARRAY:
         case MODE_INTEL_PROGRAM:
@@ -361,6 +368,33 @@ static int intel_write(nor_flash_t *flash, uint32_t address, uint16_t value)
         command != 0xf0 && command != 0xff && command != 0x70)
         return NOR_FLASH_ERR_BUSY;
     switch (flash->mode) {
+    case MODE_INTEL_BUFFER_COUNT:
+        flash->buffer_count = (value < 15 ? value : 15) + 1;
+        flash->buffer_used = 0; flash->status = 0x80;
+        flash->mode = MODE_INTEL_BUFFER_DATA;
+        return NOR_FLASH_OK;
+    case MODE_INTEL_BUFFER_DATA:
+        if (flash->buffer_used < flash->buffer_count) {
+            if (!flash->buffer_used) flash->buffer_start = address;
+            if (address >= flash->buffer_start + flash->buffer_count ||
+                flash->buffer_start + flash->buffer_count > bus_size(flash)) {
+                flash->status = 0x30; flash->mode = MODE_INTEL_STATUS;
+                return NOR_FLASH_OK; /* device sequence error, not a host bus fault */
+            }
+            flash->write_buffer[flash->buffer_used * 2] = value >> 8;
+            flash->write_buffer[flash->buffer_used * 2 + 1] = value;
+            flash->buffer_used++;
+        } else {
+            if (command == 0xd0) {
+                uint32_t start = image_offset(flash, flash->buffer_start);
+                /* MAME FM_WRITEBUFFER2 commits its big-endian byte buffer. */
+                memcpy(flash->image + start, flash->write_buffer, flash->buffer_count * 2);
+                mark_dirty(flash, start, flash->buffer_count * 2);
+                flash->status = 0x80;
+            } else flash->status = 0x30;
+            flash->mode = MODE_INTEL_STATUS;
+        }
+        return NOR_FLASH_OK;
     case MODE_INTEL_PROGRAM:
         array_program(flash, address, value);
         flash->status = 0x80;
@@ -394,6 +428,9 @@ static int intel_write(nor_flash_t *flash, uint32_t address, uint16_t value)
     case 0x70: flash->mode = MODE_INTEL_STATUS; return NOR_FLASH_OK;
     case 0x20: flash->mode = MODE_INTEL_ERASE_CONFIRM; return NOR_FLASH_OK;
     case 0x60: flash->mode = MODE_INTEL_SET_MASTER; return NOR_FLASH_OK;
+    case 0xe8:
+        if (flash->profile != NOR_FLASH_INTEL_28F640J5_X16) return NOR_FLASH_ERR_UNSUPPORTED;
+        flash->mode = MODE_INTEL_BUFFER_COUNT; return NOR_FLASH_OK;
     default: return NOR_FLASH_ERR_UNSUPPORTED;
     }
 }

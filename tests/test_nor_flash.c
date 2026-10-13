@@ -263,9 +263,43 @@ static void test_amd_profile(nor_flash_profile_t profile, size_t size,
     free(image);
 }
 
+static void test_intel_buffer(void)
+{
+    uint8_t *image = malloc(0x800000);
+    assert(image); memset(image, 0x5a, 0x800000);
+    nor_flash_t *f = nor_flash_create(NOR_FLASH_INTEL_28F640J5_X16, image, 0x800000);
+    size_t offset, length;
+    wr(f, 0x20000, 0xe8); assert(rd(f, 0x20000) == 0x80);
+    wr(f, 0x20000, 1); /* two x16 words */
+    wr(f, 0x20000, 0x1234); wr(f, 0x20001, 0xabcd);
+    assert(image[0x40000] == 0x5a);
+    assert(!nor_flash_last_write_dirty_span(f, &offset, &length));
+    wr(f, 0x20000, 0xd0);
+    assert(nor_flash_last_write_dirty_span(f, &offset, &length));
+    assert(offset == 0x40000 && length == 4);
+    assert(rd(f, 0x20000) == 0x80); wr(f, 0, 0xff);
+    assert(rd(f, 0x20000) == 0x1234 && rd(f, 0x20001) == 0xabcd);
+    assert(rd(f, 0x1ffff) == 0x5a5a && rd(f, 0x20002) == 0x5a5a);
+    /* Wrong confirmation and out-of-buffer addressing must abort atomically. */
+    wr(f, 0x20000, 0xe8); wr(f, 0x20000, 0);
+    wr(f, 0x20000, 0x0000); wr(f, 0x20000, 0x70);
+    assert(rd(f, 0x20000) == 0x30); wr(f, 0, 0xff);
+    assert(rd(f, 0x20000) == 0x1234);
+    wr(f, 0x20000, 0xe8); wr(f, 0x20000, 1);
+    wr(f, 0x20000, 0); wr(f, 0x20002, 0);
+    assert(rd(f, 0x20000) == 0x30); wr(f, 0, 0xff);
+    assert(rd(f, 0x20000) == 0x1234);
+    wr(f, 0x3fffff, 0xe8); wr(f, 0x3fffff, 15);
+    wr(f, 0x3fffff, 0);
+    assert(rd(f, 0) == 0x30 && image[0x7fffff] == 0x5a);
+    nor_flash_destroy(f); free(image);
+    puts("Intel StrataFlash: buffered commit, dirty span, abort and bounds passed");
+}
+
 int main(void)
 {
     test_geometry_and_intel();
+    test_intel_buffer();
     test_gnet_intel_profile(NOR_FLASH_INTEL_E28F400B_X16, 0x80000,
                             0x89, 0x4471);
     test_gnet_intel_profile(NOR_FLASH_INTEL_TE28F160_X16, 0x200000,
