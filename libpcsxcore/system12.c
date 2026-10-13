@@ -26,6 +26,9 @@
 #include "gpu_vram.h"
 #include "arcade/serial_nvram.h"
 #include "arcade/at28c16.h"
+#include "arcade/system12_jvs.h"
+#include "arcade/system12_cdxa.h"
+#include "psxevents.h"
 #include "misc.h"
 #include <errno.h>
 #ifdef SYSTEM12_BOARD_THREAD
@@ -53,7 +56,15 @@ static struct {
     u32 ram_size;
     u8 shared[0x10000];
     AT28C16 *eeprom;
+    u8 default_eeprom[2080];
+    size_t default_eeprom_size;
     H8CPU *h8;
+    H8CPU *link;
+    S12Cdxa *cdxa;
+    char *disk_path;
+    u8 link_shared[0x10000], link_ram[0x10000], link_regs[0x2000];
+    u8 link_io[0x200], link_small[32], link_internal[0xf0];
+    int link_reset;
     C352 *pcm;
     rtc4543_serial_t rtc;
     namco_settings_serial_t settings;
@@ -71,6 +82,10 @@ static struct {
     int audio_error;
     u32 jvs_player[2], jvs_system;
     u8 jvs_coin[2];
+    u16 gun[4], analog[8], gun_outputs;
+    S12Jvs jvs;
+    S12Jvs jvs_printer;
+    int jvs_enabled;
     u8 port8, porta, portb;
     u32 dma_offset;
     u32 bank;
@@ -344,9 +359,10 @@ struct board_cmd {
     u64 h8_target, pcm_target;
     u32 jvs_player[2], jvs_system;
     u8 jvs_coin[2];
+    u16 gun[4], analog[8];
 };
 /* Inputs as set by the frontend; the board's copy follows in posting order. */
-static struct { u32 player[2], system; u8 coin[2]; } inputs;
+static struct { u32 player[2], system; u8 coin[2]; u16 gun[4], analog[8]; } inputs;
 
 static void post_inputs(void)
 {
@@ -354,13 +370,87 @@ static void post_inputs(void)
     c.jvs_player[0] = inputs.player[0]; c.jvs_player[1] = inputs.player[1];
     c.jvs_system = inputs.system;
     c.jvs_coin[0] = inputs.coin[0]; c.jvs_coin[1] = inputs.coin[1];
+    memcpy(c.gun, inputs.gun, sizeof(c.gun));
+    memcpy(c.analog, inputs.analog, sizeof(c.analog));
     board_post(&c);
+}
+
+static int analog_index(const char *control, int *gun)
+{
+    static const char *const names[] = {"p1gunx", "p1guny", "p2gunx", "p2guny"};
+    unsigned i;
+    if (!control) return -1;
+    for (i = 0; i < 4; i++) if (!strcmp(control, names[i])) { *gun = 1; return i; }
+    if (!strncmp(control, "adc", 3) && control[3] >= '0' && control[3] <= '7' && !control[4]) {
+        *gun = 0; return control[3] - '0';
+    }
+    if (!strncmp(control, "jvsanalog", 9) && control[9] >= '0' && control[9] <= '7' && !control[10]) {
+        *gun = 2; return control[9] - '0';
+    }
+    return -1;
+}
+
+unsigned system12_analog_max(const char *control)
+{
+    int gun, index = analog_index(control, &gun);
+    if (!board.active || index < 0) return 0;
+    if (gun == 1 && strcmp(board.state, "ptblank2_state") && strcmp(board.state, "golgo13_state")) return 0;
+    if (gun == 2 && !board.jvs_enabled) return 0;
+    return gun ? 65535 : 1023;
+}
+
+int system12_set_analog(const char *control, unsigned value)
+{
+    int gun, index = analog_index(control, &gun);
+    unsigned max = system12_analog_max(control);
+    if (!max || value > max) return -1;
+    if (gun == 1) inputs.gun[index] = value; else inputs.analog[index] = value;
+    post_inputs();
+    return 0;
+}
+
+int system12_set_gun_position(unsigned player, unsigned x, unsigned y)
+{
+    unsigned xmin, xmax, ymin, ymax;
+    if (!board.active || player > 1 || x > 65535 || y > 65535 || !system12_analog_max("p1gunx")) return -1;
+    if (!strcmp(board.state, "golgo13_state")) {
+        xmin = ymin = 0; xmax = ymax = 511; y = 65535 - y;
+    } else if ((!strncmp(board.profile, "ptblank2", 8) || !strcmp(board.profile, "gunbarl"))) {
+        xmin = 0xdc; xmax = 0x387; ymin = 0x28; ymax = 0x11b;
+    } else {
+        xmin = 0xbe; xmax = 0x35f; ymin = 0x1a; ymax = 0x109;
+    }
+    inputs.gun[player * 2] = xmin + x * (xmax - xmin) / 65535;
+    inputs.gun[player * 2 + 1] = ymin + y * (ymax - ymin) / 65535;
+    post_inputs(); return 0;
 }
 
 int system12_set_input(const char *control, int pressed)
 {
     unsigned i;
     if (!board.active || !control || (pressed != 0 && pressed != 1)) return -1;
+    if (!strcmp(board.machine, "aplarail")) {
+        if (!strcmp(control, "p1up")) return system12_set_analog("adc0", pressed ? 0x08b : 0x216);
+        if (!strcmp(control, "p1down")) return system12_set_analog("adc0", pressed ? 0x397 : 0x216);
+    }
+    if (!strcmp(board.machine, "technodr")) {
+        if (!strcmp(control, "p1left")) return system12_set_analog("jvsanalog0", pressed ? 0xa600 : 0x5e00);
+        if (!strcmp(control, "p1right")) return system12_set_analog("jvsanalog0", pressed ? 0x1600 : 0x5e00);
+        if (!strcmp(control, "p1up")) return system12_set_analog("jvsanalog2", pressed ? 0x4680 : 0xed80);
+        if (!strcmp(control, "p1down")) return system12_set_analog("jvsanalog1", pressed ? 0x3e00 : 0x7e00);
+    }
+    if (!strcmp(board.machine, "kartduel")) {
+        if (!strcmp(control, "p1left")) system12_set_analog("adc2", pressed ? 0xe0 : 0x200);
+        if (!strcmp(control, "p1right")) system12_set_analog("adc2", pressed ? 0x320 : 0x200);
+        if (!strcmp(control, "p1up")) system12_set_analog("adc1", pressed ? 0x15a : 0xad);
+        if (!strcmp(control, "p1down")) system12_set_analog("adc0", pressed ? 0x15a : 0xad);
+    }
+    if (!strcmp(board.machine, "truckk")) {
+        if (!strcmp(control, "p1left")) return system12_set_analog("adc0", pressed ? 0 : 0x200);
+        if (!strcmp(control, "p1right")) return system12_set_analog("adc0", pressed ? 0x3ff : 0x200);
+        if (!strcmp(control, "p1up")) system12_set_analog("adc2", pressed ? 0 : 0x200);
+        if (!strcmp(control, "p1down")) system12_set_analog("adc1", pressed ? 0 : 0x200);
+    }
     if (!strcmp(control, "coin1")) inputs.coin[0] = pressed;
     else if (!strcmp(control, "coin2")) inputs.coin[1] = pressed;
     else if (!strcmp(control, "test")) inputs.system = (inputs.system & ~0x80u) | ((u32)pressed << 7);
@@ -369,7 +459,27 @@ int system12_set_input(const char *control, int pressed)
         for (i = 0; i < sizeof(player_inputs) / sizeof(player_inputs[0]); i++)
             if (!strcmp(control, player_inputs[i].name)) {
                 u32 *p = &inputs.player[player_inputs[i].player];
-                *p = (*p & ~player_inputs[i].mask) | (pressed ? player_inputs[i].mask : 0);
+                unsigned mask = player_inputs[i].mask;
+                if (!strcmp(board.machine, "aplarail")) {
+                    if (!strcmp(control, "p1start")) mask = 1;
+                    if (!strcmp(control, "p1button2")) mask = 0x8000;
+                }
+                if (!strcmp(board.machine, "technodr") && !strcmp(control, "p1button3")) mask = 0x2000;
+                if (!strcmp(board.machine, "truckk")) {
+                    if (!strcmp(control, "p1start")) mask = 0x8000;
+                    if (!strcmp(control, "p1button4")) mask = 0x80;
+                }
+                if (!strcmp(board.profile, "ujlnow")) {
+                    if (!strcmp(control, "p1button4")) mask = 0x800;
+                    if (!strcmp(control, "p1button5")) mask = 4;
+                    if (!strcmp(control, "p1button6")) mask = 8;
+                }
+                if (!strcmp(board.state, "golgo13_state")) {
+                    if (!strcmp(control, "p1button1")) mask = 1;
+                    if (!strcmp(control, "p1button2")) mask = 0x800;
+                    if (!strcmp(control, "p1button3")) mask = 2;
+                }
+                *p = (*p & ~mask) | (pressed ? mask : 0);
                 break;
             }
         if (i == sizeof(player_inputs) / sizeof(player_inputs[0])) return -1;
@@ -392,6 +502,7 @@ int system12_eeprom_import(const u8 *image, size_t size)
 
 unsigned char system12_jamma_read(unsigned offset)
 {
+    if (board.jvs_enabled) return 0xff;
     u32 p1 = board.jvs_player[0], p2 = board.jvs_player[1];
     u32 value;
     switch (offset & 3) {
@@ -539,6 +650,9 @@ static void sub_write16(void *opaque, u32 address, u16 value)
 static u8 sub_port_read(void *opaque, unsigned port)
 {
     (void)opaque;
+    if (port == 6 && board.jvs_enabled)
+        return board.jvs.address == 0xff || (!strcmp(board.machine, "technodr") && board.jvs_printer.address == 0xff) ? 0xff : 0xfd;
+    if (port == 8 && board.jvs_enabled) return 0xff;
     if (port == 8) return 0xef; /* sense None */
     if (port == 11) {
         u8 value = board.portb | 0x7f;
@@ -546,6 +660,16 @@ static u8 sub_port_read(void *opaque, unsigned port)
         return value;
     }
     return 0xff;
+}
+
+static u16 sub_adc_read(void *opaque, unsigned channel)
+{
+    (void)opaque;
+    if (!strcmp(board.state, "golgo13_state")) {
+        if (channel == 1) return ((u32)board.gun[0] * 0x240) / 0x1ff + 0x7a;
+        if (channel == 2) return ((u32)board.gun[1] * 0x1bf) / 0x1ff + 0x1f;
+    }
+    return channel < 8 ? board.analog[channel] : 0;
 }
 
 static void sub_port_write(void *opaque, unsigned port, u8 value, u8 ddr)
@@ -577,6 +701,91 @@ static void rtc_serial_data(void *opaque, int level)
     (void)opaque;
     h8_serial_rx_pin(board.h8, 1, level);
 }
+
+static void sub_serial_observer(void *opaque, unsigned channel, u8 byte)
+{
+    (void)opaque;
+    if (channel == 0 && board.jvs_enabled) {
+        int techno = !strcmp(board.machine, "technodr");
+        int printer_initialized = board.jvs_printer.address != 0xff;
+        board.jvs.allow_address = !techno || printer_initialized;
+        board.jvs_printer.allow_address = !printer_initialized;
+        s12_jvs_receive(&board.jvs, byte, board.jvs_player, board.jvs_system,
+            board.analog, techno, h8_current_cycle(board.h8));
+        if (techno) s12_jvs_receive(&board.jvs_printer, byte, board.jvs_player, board.jvs_system,
+            board.analog, 2, h8_current_cycle(board.h8));
+    }
+}
+
+static int board_run_h8_until(u64 target)
+{
+    if (!board.jvs_enabled) return h8_run_until(board.h8, target);
+    while (h8_current_cycle(board.h8) < target) {
+        S12Jvs *j = &board.jvs;
+        S12Jvs *printer = &board.jvs_printer;
+        if (!strcmp(board.machine, "technodr") && printer->tx_index < printer->tx_size &&
+            (j->tx_index >= j->tx_size || printer->next_bit < j->next_bit)) j = printer;
+        u64 next = target;
+        if (j->tx_index < j->tx_size && !(board.portb & 1)) {
+            u64 now = h8_current_cycle(board.h8);
+            if (j->next_bit <= now) {
+                j->next_bit = now;
+                h8_serial_rx_pin(board.h8, 0, s12_jvs_tx_bit(j));
+                continue;
+            }
+            if (j->next_bit < next) next = j->next_bit;
+        }
+        if (h8_run_until(board.h8, next)) return -1;
+    }
+    return 0;
+}
+
+static u8 link_read8(void *opaque, u32 a)
+{
+    if (a >= 0xffff10 && a <= 0xffffff) return board.link_internal[a - 0xffff10];
+    (void)opaque;
+    if (a < 0x10000) return board.link_shared[a ^ 1];
+    if (a < 0x20000) return board.link_ram[a - 0x10000];
+    if (a >= 0x200000 && a < 0x200200) return board.link_io[a - 0x200000];
+    if (a >= 0x400000 && a < 0x400008) return board.link_small[a - 0x400000];
+    if (a >= 0x410000 && a < 0x410010) return board.link_small[8 + a - 0x410000];
+    if (a >= 0x418002 && a < 0x418008) return board.link_small[24 + a - 0x418002];
+    return 0xff;
+}
+
+static void link_write8(void *opaque, u32 a, u8 value)
+{
+    if (a >= 0xffff10 && a <= 0xffffff) { board.link_internal[a - 0xffff10] = value; return; }
+    (void)opaque;
+    if (a < 0x10000) board.link_shared[a ^ 1] = value;
+    else if (a < 0x20000) board.link_ram[a - 0x10000] = value;
+    else if (a >= 0x200000 && a < 0x200200) board.link_io[a - 0x200000] = value;
+    else if (a >= 0x400000 && a < 0x400008) board.link_small[a - 0x400000] = value;
+    else if (a >= 0x410000 && a < 0x410010) board.link_small[8 + a - 0x410000] = value;
+    else if (a >= 0x418002 && a < 0x418008) board.link_small[24 + a - 0x418002] = value;
+}
+
+static u64 link_clock(u64 h8_clock)
+{
+    return (h8_clock / 16934400) * 14745600 + (h8_clock % 16934400) * 14745600 / 16934400;
+}
+
+static void sync_link(void)
+{
+    if (board.link && !board.link_reset)
+        h8_run_until(board.link, link_clock(h8_current_cycle(board.h8)));
+#ifdef PCSX_SYSTEM12_CDXA
+    if (board.cdxa) s12_cdxa_run_until(board.cdxa, link_clock(h8_current_cycle(board.h8)));
+#endif
+}
+
+#ifdef PCSX_SYSTEM12_CDXA
+static void cdxa_irq(void *opaque, int asserted)
+{
+    (void)opaque;
+    if (asserted) set_event(PSXINT_IRQ10, 1);
+}
+#endif
 
 /* Preserve sub-microsecond time across scheduler calls. Reset re-anchors the
  * PSX cycle counter, while the EEPROM's absolute device clock keeps advancing. */
@@ -625,6 +834,16 @@ static void pcm_generate_to(u64 target)
         uint64_t pcm_started = pcsx_profile_begin(PCSX_PROF_PCM, 1);
         c352_generate(board.pcm, samples, frames);
         pcsx_profile_end(PCSX_PROF_PCM, pcm_started);
+#ifdef PCSX_SYSTEM12_CDXA
+        if (board.cdxa) for (i = 0; i < frames; i++) {
+            int16_t cd[2]; unsigned channel;
+            s12_cdxa_sample(board.cdxa, board.pcm_frames + i, cd);
+            for (channel = 0; channel < 2; channel++) {
+                int value = samples[i * 4 + channel] + cd[channel];
+                samples[i * 4 + channel] = value > 32767 ? 32767 : value < -32768 ? -32768 : value;
+            }
+        }
+#endif
         const int gain_q8 = audio_gain_q8;
         for (i = 0; i < frames; i++) {
             stereo[i * 2] = audio_gain(samples[i * 4], gain_q8);
@@ -721,8 +940,9 @@ static void board_exec_kind(const board_cmd *c)
         started = pcsx_profile_begin(PCSX_PROF_H8, 1);
         t0 = PERF_NOW();
         if (!c->run_h8) ;
-        else if (c->run_until) h8_run_until(board.h8, c->h8_target);
+        else if (c->run_until) board_run_h8_until(c->h8_target);
         else h8_run_cycles(board.h8, c->h8_cycles);
+        sync_link();
         pcsx_profile_end(PCSX_PROF_H8, started);
         if (system12_perf_timing) {
             system12_h8_us += board_now_us() - t0;
@@ -744,7 +964,7 @@ static void board_exec_kind(const board_cmd *c)
         if (c->run_h8) {
             started = pcsx_profile_begin(PCSX_PROF_H8, 1);
             t0 = PERF_NOW();
-            if (h8_run_until(board.h8, c->h8_target))
+            if (board_run_h8_until(c->h8_target))
                 SysPrintf("System12: invalid H8 screen deadline\n");
             pcsx_profile_end(PCSX_PROF_H8, started);
             if (system12_perf_timing)
@@ -757,6 +977,7 @@ static void board_exec_kind(const board_cmd *c)
             h8_set_irq(board.h8, 1, c->level);
             h8_adc_trigger(board.h8, c->level);
         }
+        sync_link();
         if (c->level) {
             H8Status status;
             h8_get_status(board.h8, &status);
@@ -774,6 +995,12 @@ static void board_exec_kind(const board_cmd *c)
         board.jvs_player[0] = c->jvs_player[0]; board.jvs_player[1] = c->jvs_player[1];
         board.jvs_system = c->jvs_system;
         board.jvs_coin[0] = c->jvs_coin[0]; board.jvs_coin[1] = c->jvs_coin[1];
+        memcpy(board.gun, c->gun, sizeof(board.gun));
+        memcpy(board.analog, c->analog, sizeof(board.analog));
+        if (board.jvs_enabled) {
+            s12_jvs_coin(&board.jvs, 0, c->jvs_coin[0] & 1);
+            s12_jvs_coin(&board.jvs, 1, c->jvs_coin[1] & 1);
+        }
         break;
     }
 }
@@ -986,11 +1213,16 @@ static void board_audio_out(const int16_t *stereo, unsigned frames)
 /* ---- savestates ---- */
 
 #define S12_STATE_MAGIC 0x53323153u /* "S12S" */
-#define S12_STATE_VERSION 2u
+#define S12_STATE_VERSION 3u
 
 size_t system12_freeze_size(void)
 {
-    return 5 * sizeof(u32) + sizeof(board) + sizeof(AT28C16State) + h8_state_size() + c352_state_size();
+    return 5 * sizeof(u32) + sizeof(board) + sizeof(AT28C16State) +
+        h8_state_size() * (board.link ? 2 : 1) + c352_state_size()
+#ifdef PCSX_SYSTEM12_CDXA
+        + (board.cdxa ? s12_cdxa_state_size() : 0)
+#endif
+        ;
 }
 
 /* The board struct is saved whole; a load keeps what belongs to this run
@@ -1002,6 +1234,8 @@ static void restore_live_fields(const __typeof__(board) *live)
     board.main_size = live->main_size; board.banked_size = live->banked_size;
     board.sub_size = live->sub_size; board.wave_size = live->wave_size; board.ram_size = live->ram_size;
     board.eeprom = live->eeprom; board.h8 = live->h8; board.pcm = live->pcm;
+    board.link = live->link;
+    board.cdxa = live->cdxa; board.disk_path = live->disk_path;
     board.rtc.data_cb = live->rtc.data_cb; board.rtc.data_opaque = live->rtc.data_opaque;
     board.settings.frame_cb = live->settings.frame_cb; board.settings.frame_opaque = live->settings.frame_opaque;
     board.audio_file = live->audio_file; board.audio_cb = live->audio_cb; board.audio_opaque = live->audio_opaque;
@@ -1018,9 +1252,14 @@ int system12_freeze(void *f, int mode)
         (u32)c352_state_size() };
     AT28C16State eeprom;
     void *h8 = malloc(h8_state_size()), *pcm = malloc(c352_state_size());
+    void *link = board.link ? malloc(h8_state_size()) : NULL;
+#ifdef PCSX_SYSTEM12_CDXA
+    void *cdxa = board.cdxa ? malloc(s12_cdxa_state_size()) : NULL;
+    if (board.cdxa && !cdxa) { free(h8); free(pcm); free(link); return -1; }
+#endif
     int result = -1;
 
-    if (!board.active || !h8 || !pcm)
+    if (!board.active || !h8 || !pcm || (board.link && !link))
         goto done;
     /* The board thread finishes what it was given: its devices are idle. */
     board_drain();
@@ -1035,6 +1274,13 @@ int system12_freeze(void *f, int mode)
         SaveFuncs.write(f, &eeprom, sizeof(eeprom));
         SaveFuncs.write(f, h8, h8_state_size());
         SaveFuncs.write(f, pcm, c352_state_size());
+        if (board.link) {
+            h8_get_state(board.link, link);
+            SaveFuncs.write(f, link, h8_state_size());
+        }
+#ifdef PCSX_SYSTEM12_CDXA
+        if (board.cdxa) { s12_cdxa_get_state(board.cdxa, cdxa); SaveFuncs.write(f, cdxa, s12_cdxa_state_size()); }
+#endif
         result = 0;
     } else {
         u32 saved[5];
@@ -1046,7 +1292,12 @@ int system12_freeze(void *f, int mode)
         if (SaveFuncs.read(f, &board, sizeof(board)) != (int)sizeof(board) ||
             SaveFuncs.read(f, &eeprom, sizeof(eeprom)) != (int)sizeof(eeprom) ||
             SaveFuncs.read(f, h8, h8_state_size()) != (int)h8_state_size() ||
-            SaveFuncs.read(f, pcm, c352_state_size()) != (int)c352_state_size()) {
+            SaveFuncs.read(f, pcm, c352_state_size()) != (int)c352_state_size() ||
+            (live.link && SaveFuncs.read(f, link, h8_state_size()) != (int)h8_state_size())
+#ifdef PCSX_SYSTEM12_CDXA
+            || (live.cdxa && SaveFuncs.read(f, cdxa, s12_cdxa_state_size()) != (int)s12_cdxa_state_size())
+#endif
+            ) {
             board = live;
             SysPrintf("System12: the savestate is truncated\n");
             goto done;
@@ -1055,6 +1306,10 @@ int system12_freeze(void *f, int mode)
         at28c16_set_state(board.eeprom, &eeprom);
         h8_set_state(board.h8, h8);
         c352_set_state(board.pcm, pcm);
+        if (board.link) h8_set_state(board.link, link);
+#ifdef PCSX_SYSTEM12_CDXA
+        if (board.cdxa) s12_cdxa_set_state(board.cdxa, cdxa);
+#endif
         pcm_flags_until = 0;
         pcm_wanted = board.pcm_frames;
 #ifdef SYSTEM12_BOARD_THREAD
@@ -1067,6 +1322,10 @@ int system12_freeze(void *f, int mode)
 done:
     free(h8);
     free(pcm);
+    free(link);
+#ifdef PCSX_SYSTEM12_CDXA
+    free(cdxa);
+#endif
     return result;
 }
 
@@ -1088,6 +1347,10 @@ int system12_board_thread_active(void)
 
 int system12_board_thread_start(void)
 {
+#ifdef PCSX_SYSTEM12_CDXA
+    /* CDXA IRQ10 delivery touches the live main CPU event queue. */
+    if (board.cdxa) return -1;
+#endif
 #ifdef SYSTEM12_BOARD_THREAD
     if (bt.active) return 0;
     /* Traces and MAME timeslices read board state from the main thread. */
@@ -1314,7 +1577,7 @@ void system12_slice_end(void)
     h8_target = h8_cycle_at(&target);
     if (h8_target > h8_current_cycle(board.h8)) {
         uint64_t started = pcsx_profile_begin(PCSX_PROF_H8, 1);
-        h8_run_until(board.h8, h8_target);
+        board_run_h8_until(h8_target);
         pcsx_profile_end(PCSX_PROF_H8, started);
     }
     sync_devices(psxRegs.cycle, 1, 0);
@@ -1370,6 +1633,11 @@ static int parse_decimal(const char *value, size_t *result)
  * makes it the active profile (the strings are copied). */
 static int apply_desc(const system12_desc *d)
 {
+    if (d->default_eeprom_size) {
+        if (!d->default_eeprom || (d->default_eeprom_size != 2048 && d->default_eeprom_size != 2080)) return -1;
+        memcpy(board.default_eeprom, d->default_eeprom, d->default_eeprom_size);
+        board.default_eeprom_size = d->default_eeprom_size;
+    }
     if ((d->ram_size != 0x400000 && d->ram_size != 0x1000000) || d->main_size != DEFAULT_MAIN_SIZE ||
         d->bank_size < 0x400000 || d->bank_size > 0x4000000 || (d->bank_size % WINDOW_SIZE) ||
         d->sub_size != DEFAULT_SUB_SIZE || d->wave_size == 0 || d->wave_size > 0x1000000)
@@ -1386,24 +1654,36 @@ static int apply_desc(const system12_desc *d)
     board.boot_hack = d->boot_hack != 0;
     board.alt_bank = d->alt_bank != 0;
     board.tektagt_dma = d->tektagt_dma != 0;
+    if (d->disk_path) { board.disk_path = strdup(d->disk_path); if (!board.disk_path) return -1; }
     if (strcmp(board.unsupported, "none")) {
         SysPrintf("System12: %s requires unimplemented board device(s): %s\n",
             board.profile, board.unsupported);
         return -2;
     }
     if ((strcmp(board.machine, "coh700") && strcmp(board.machine, "coh700b") &&
-         strcmp(board.machine, "coh716")) ||
+         strcmp(board.machine, "coh716") && strcmp(board.machine, "golgo13") &&
+         strcmp(board.machine, "aplarail") && strcmp(board.machine, "technodr") && strcmp(board.machine, "kartduel") &&
+         strcmp(board.machine, "cdxa_pcb") && strcmp(board.machine, "truckk")) ||
         (strcmp(board.state, "namcos12_state") && strcmp(board.state, "namcos12_altbank_state") &&
-         strcmp(board.state, "tektagt_state"))) {
+         strcmp(board.state, "tektagt_state") && strcmp(board.state, "ptblank2_state") &&
+         strcmp(board.state, "golgo13_state") && strcmp(board.state, "technodr_state") && strcmp(board.state, "kartduel_state") &&
+         strcmp(board.state, "namcos12_cdxa_state") && strcmp(board.state, "truckk_state"))) {
         SysPrintf("System12: profile %s/%s requires an unimplemented game-specific board state\n",
             board.machine, board.state);
         return -2;
     }
-    if (board.alt_bank != !strcmp(board.state, "namcos12_altbank_state") ||
+    if (board.alt_bank != (!strcmp(board.state, "namcos12_altbank_state") || !strcmp(board.state, "golgo13_state") ||
+         !strcmp(board.state, "namcos12_cdxa_state") || !strcmp(board.state, "truckk_state")) ||
         board.tektagt_dma != !strcmp(board.state, "tektagt_state") ||
-        board.boot_hack != (!strcmp(board.machine, "coh700b") || !strcmp(board.machine, "coh716")) ||
+        board.boot_hack != (!strcmp(board.machine, "coh700b") || !strcmp(board.machine, "coh716") || !strcmp(board.machine, "golgo13") ||
+         !strcmp(board.machine, "kartduel") || !strcmp(board.machine, "cdxa_pcb") || !strcmp(board.machine, "truckk")) ||
         board.ram_size != (!strcmp(board.machine, "coh716") ? 0x1000000 : 0x400000))
         return -1;
+#ifndef PCSX_SYSTEM12_CDXA
+    if (!strcmp(board.machine, "cdxa_pcb") || !strcmp(board.machine, "truckk")) {
+        SysPrintf("System12: this build does not include the CDXA board\n"); return -2;
+    }
+#endif
     return 0;
 }
 
@@ -1468,17 +1748,43 @@ static int start_board(void)
 {
     H8Config h8config = {0};
     board.pcm = c352_create(board.wave, board.wave_size, 25401600, 288);
-    board.eeprom = at28c16_create(NULL, 0);
+    board.eeprom = at28c16_create(board.default_eeprom_size ? board.default_eeprom : NULL, board.default_eeprom_size);
     h8config.read8 = sub_read8; h8config.write8 = sub_write8;
     h8config.read16 = sub_read16; h8config.write16 = sub_write16;
     h8config.serial_tx_pin = sub_serial_tx_pin;
     h8config.serial_clk_pin = sub_serial_clk_pin;
     h8config.serial_external_period_as[0] = UINT64_C(542534722222);
     h8config.port_read = sub_port_read; h8config.port_write = sub_port_write;
+    h8config.adc_read = sub_adc_read;
+    h8config.serial_tx_observer = sub_serial_observer;
     h8config.peek8 = sub_peek8; h8config.account_reads = sub_account_reads;
     h8config.rom = board.sub; h8config.rom_size = (uint32_t)board.sub_size;
     board.h8 = h8_create(&h8config);
     if (!board.pcm || !board.h8 || !board.eeprom) return -1;
+#ifdef PCSX_SYSTEM12_CDXA
+    if (!strcmp(board.machine, "cdxa_pcb") || !strcmp(board.machine, "truckk")) {
+        char error[256] = {0};
+        const char *sha1 = !strcmp(board.profile, "truckk") ? "6b7c3686b22a508c44f67295b188504b757dd482" :
+            "676f2c530f8d422ab9895ea04a43b2e9272fb8f8";
+        if (!board.disk_path) { SysPrintf("System12: CDXA requires a local game CHD\n"); return -1; }
+        board.cdxa = s12_cdxa_create(board.disk_path, sha1, cdxa_irq, NULL, error, sizeof(error));
+        if (!board.cdxa) { SysPrintf("System12 CDXA: %s\n", error); return -1; }
+        if (!strcmp(board.profile, "truckk")) {
+            u8 temp[20];
+            memcpy(temp, board.main + 0x376ec, sizeof(temp));
+            memmove(board.main + 0x376e4 + sizeof(temp), board.main + 0x376e4, 8);
+            memcpy(board.main + 0x376e4, temp, sizeof(temp));
+        }
+    }
+#endif
+    if (!strcmp(board.machine, "kartduel")) {
+        H8Config link_config = {0};
+        link_config.read8 = link_read8; link_config.write8 = link_write8;
+        link_config.external_io_start = 0xffff10;
+        board.link = h8_create(&link_config);
+        if (!board.link) return -1;
+        board.link_reset = 1;
+    }
     rtc4543_datetime_t epoch = {2026, 10, 4, 7, 12, 0, 0};
     rtc4543_init(&board.rtc, rtc_serial_data, NULL, &epoch);
     namco_settings_init(&board.settings, NULL, NULL);
@@ -1486,6 +1792,9 @@ static int start_board(void)
     psxRomSize = board.main_size;
     if (gpu_set_vram_height(1024)) return -1;
     board.active = 1;
+    board.jvs_enabled = !strcmp(board.machine, "aplarail") || !strcmp(board.machine, "technodr");
+    s12_jvs_reset(&board.jvs);
+    s12_jvs_reset(&board.jvs_printer);
 #ifndef DRC_DISABLE
     new_dynarec_set_code_span_provider(system12_code_span);
 #endif
@@ -1501,12 +1810,32 @@ static int board_busy(void)
 
 int system12_load(const char *directory)
 {
-    system12_desc desc;
+    system12_desc desc = {0};
+    char disk_path[4096];
+    u8 default_eeprom[2080];
     char values[13][256] = {{0}};
     int result;
     if (board_busy())
         return -1;
     result = load_profile(directory, &desc, values);
+    if (!result) {
+        char path[4096];
+        if (snprintf(path, sizeof(path), "%s/eeprom.bin", directory) >= (int)sizeof(path)) result = -1;
+        else {
+            FILE *f = fopen(path, "rb");
+            if (f) {
+                size_t size = fread(default_eeprom, 1, sizeof(default_eeprom), f);
+                if (ferror(f) || (size != 2048 && size != 2080) || fgetc(f) != EOF) result = -1;
+                else { desc.default_eeprom = default_eeprom; desc.default_eeprom_size = size; }
+                fclose(f);
+            } else if (errno != ENOENT) result = -1;
+        }
+    }
+    if (!result && (!strcmp(desc.machine, "cdxa_pcb") || !strcmp(desc.machine, "truckk"))) {
+        if (snprintf(disk_path, sizeof(disk_path), "%s/%s.chd", directory,
+            !strcmp(desc.mame_set, "truckk") ? "tkk2-a" : "ul1-a") >= (int)sizeof(disk_path)) result = -1;
+        else desc.disk_path = disk_path;
+    }
     if (!result)
         result = apply_desc(&desc);
     if (result) {
@@ -1561,6 +1890,11 @@ void system12_unload(void)
 #endif
     if (board.audio_file) system12_close_audio();
     h8_destroy(board.h8);
+    h8_destroy(board.link);
+#ifdef PCSX_SYSTEM12_CDXA
+    s12_cdxa_destroy(board.cdxa);
+#endif
+    free(board.disk_path);
     c352_destroy(board.pcm);
     at28c16_destroy(board.eeprom);
     free(board.main);
@@ -1612,6 +1946,9 @@ void system12_mem_reset(void)
     memset(psxRegs.ptrs.psxP, 0xff, 0x10000);
     if (board.boot_hack && board.main_size >= 0x2028c && board.ram_size >= 0x1000c)
         memcpy(psxRegs.ptrs.psxM + 0x10000, board.main + 0x20280, 12);
+    /* Retain MAME's Point Blank 2 DMA-wait workaround for its synchronous DMA5. */
+    if (!strcmp(board.state, "ptblank2_state"))
+        memset(psxRegs.ptrs.psxR + 0x331c4, 0, 4);
     map_bank(board.booted ? board.bank : 0);
     if (!board.booted) psxRcntSourceScreenUnload();
 }
@@ -1632,6 +1969,28 @@ void system12_reset(void)
         board.jvs_player[0] = board.jvs_player[1] = board.jvs_system = 0;
         board.jvs_coin[0] = board.jvs_coin[1] = 0;
         memset(&inputs, 0, sizeof(inputs));
+        inputs.gun[0] = inputs.gun[2] = !strcmp(board.state, "golgo13_state") ? 0x100 : (!strncmp(board.profile, "ptblank2", 8) || !strcmp(board.profile, "gunbarl")) ? 0x231 : 0x20e;
+        inputs.gun[1] = inputs.gun[3] = !strcmp(board.state, "golgo13_state") ? 0x100 : (!strncmp(board.profile, "ptblank2", 8) || !strcmp(board.profile, "gunbarl")) ? 0xa1 : 0x91;
+        memcpy(board.gun, inputs.gun, sizeof(board.gun));
+        memset(board.analog, 0, sizeof(board.analog));
+        if (!strcmp(board.machine, "aplarail")) inputs.analog[0] = 0x216;
+        if (!strcmp(board.machine, "kartduel")) {
+            inputs.analog[0] = inputs.analog[1] = 0xad; inputs.analog[2] = 0x200;
+        }
+        if (!strcmp(board.machine, "technodr")) {
+            inputs.analog[0] = 0x5e00; inputs.analog[1] = 0x7e00;
+            inputs.analog[2] = 0xed80;
+        }
+        if (!strcmp(board.machine, "truckk")) {
+            inputs.player[1] = 2;
+            inputs.analog[0] = inputs.analog[1] = inputs.analog[2] = 0x200;
+        }
+        if (!strcmp(board.machine, "cdxa_pcb")) inputs.player[1] = 0x30;
+        board.jvs_player[1] = inputs.player[1];
+        memcpy(board.analog, inputs.analog, sizeof(board.analog));
+        s12_jvs_reset(&board.jvs);
+        s12_jvs_reset(&board.jvs_printer);
+        board.gun_outputs = 0;
         board.rtc_fraction = 0;
         memset(board.shared, 0, sizeof(board.shared));
         h8_reset(board.h8);
@@ -1642,6 +2001,10 @@ void system12_reset(void)
         if (h8_soft_reset(board.h8, board.h8_requested))
             SysPrintf("System12: H8 soft reset outside a quiescent boundary\n");
     }
+    if (board.link) board.link_reset = 1;
+#ifdef PCSX_SYSTEM12_CDXA
+    if (board.cdxa) s12_cdxa_reset(board.cdxa, link_clock(board.h8_requested));
+#endif
     board.has_tektagt_dma = 0;
     if (!board.booted) {   /* MAME: machine_start state, not reset */
         board.ttt_cnt = 0;
@@ -1737,12 +2100,44 @@ static void tektagt_protection_write(u32 a, unsigned width, u32 value,
         w(lane, (u16)(bus >> (lane * 16)));
 }
 
+static int link_register(u32 a, unsigned width)
+{
+    return (a >= 0x1f796004 && a + width <= 0x1f79600c) ||
+        (a >= 0x1f796014 && a + width <= 0x1f796018) ||
+        (a >= 0x1f796020 && a + width <= 0x1f796024) ||
+        (a >= 0x1f797000 && a + width <= 0x1f797004);
+}
+
 int system12_read(u32 address, unsigned width, u32 *value)
 {
     u32 a = physical(address), v = 0;
     unsigned i;
     if (!board.active)
         return 0;
+#ifdef PCSX_SYSTEM12_CDXA
+    if (board.cdxa && a >= 0x1f7c0000 && a < 0x1f800000) {
+        board_drain();
+        if (s12_cdxa_read(board.cdxa, a, width, value)) { trace_bus(a, width, 0, *value); return 1; }
+    }
+#endif
+    if (board.link && ((a >= 0x1f780000 && a + width <= 0x1f790000) || link_register(a, width))) {
+        board_drain();
+        const u8 *ram = a < 0x1f790000 ? board.link_shared + a - 0x1f780000 : board.link_regs + a - 0x1f796000;
+        for (i = 0; i < width; i++) v |= (u32)ram[i] << (i * 8);
+        *value = v; trace_bus(a, width, 0, v); return 1;
+    }
+    if (!strcmp(board.state, "ptblank2_state") &&
+        (a & ~0x800000u) >= 0x1f780000 && (a & ~0x800000u) + width <= 0x1f780010) {
+        u32 gun_address = a & ~0x800000u;
+        board_drain();
+        for (i = 0; i < width; i++) {
+            u32 at = gun_address + i;
+            u16 coord = board.gun[(at - 0x1f780000) / 4];
+            if ((coord & 3) == 3) coord++;
+            v |= (u32)((coord >> ((at & 1) * 8)) & 0xff) << (i * 8);
+        }
+        *value = v; trace_bus(a, width, 0, v); return 1;
+    }
     if (board.tektagt_dma &&
         ((a >= 0x1f700000 && a < 0x1f700004) ||
          (a >= 0x1ff00000 && a < 0x1ff00004))) {
@@ -1809,6 +2204,33 @@ int system12_write(u32 address, unsigned width, u32 value)
     unsigned i;
     if (!board.active)
         return 0;
+#ifdef PCSX_SYSTEM12_CDXA
+    if (board.cdxa && a >= 0x1f7c0000 && a < 0x1f800000) {
+        board_drain();
+        if (s12_cdxa_write(board.cdxa, a, width, value)) { trace_bus(a, width, 1, value); return 1; }
+    }
+#endif
+    if (board.link && ((a >= 0x1f780000 && a + width <= 0x1f790000) || link_register(a, width))) {
+        board_drain();
+        u8 *ram = a < 0x1f790000 ? board.link_shared + a - 0x1f780000 : board.link_regs + a - 0x1f796000;
+        for (i = 0; i < width; i++) ram[i] = value >> (i * 8);
+        trace_bus(a, width, 1, value); return 1;
+    }
+    if (board.link && a >= 0x1f796000 && a + width <= 0x1f796004) {
+        board_drain();
+        if (a < 0x1f796002) board.link_reset = 1;
+        if (a + width > 0x1f796002) {
+            if (board.link_reset) h8_soft_reset(board.link, link_clock(h8_current_cycle(board.h8)));
+            board.link_reset = 0;
+        }
+        trace_bus(a, width, 1, value); return 1;
+    }
+    if (!strcmp(board.state, "ptblank2_state") &&
+        (a & ~0x800000u) >= 0x1f788000 && (a & ~0x800000u) + width <= 0x1f788004) {
+        if (((a & ~0x800000u) - 0x1f788000) == 0)
+            board.gun_outputs = (u16)~value & 0xf;
+        trace_bus(a, width, 1, value); return 1;
+    }
     if (board.tektagt_dma && (a & ~3u) == 0x1fb00000) {
         tektagt_protection_write(a, width, value, tektagt_protection_1_w);
         trace_bus(a, width, 1, value);
@@ -1926,6 +2348,20 @@ void system12_report(FILE *out)
 {
     board_drain();
     pcm_flush_wanted();
+#ifdef PCSX_SYSTEM12_CDXA
+    if (board.cdxa) s12_cdxa_report(board.cdxa, out);
+#endif
+    if (board.link) {
+        H8Status link_state;
+        h8_get_status(board.link, &link_state);
+        fprintf(out, "System12: link reset=%d pc=%06x cycles=%" PRIu64 " illegal=%06x:%04x unsupported=%x\n",
+            board.link_reset, link_state.pc, link_state.cycles,
+            link_state.illegal_pc, link_state.illegal_opcode, link_state.unsupported_peripherals);
+    }
+    if (board.jvs_enabled)
+        fprintf(out, "System12: JVS address=%u packets=%u errors=%u coins=%u/%u outputs=%08x\n",
+            board.jvs.address, board.jvs.packets, board.jvs.errors,
+            board.jvs.coins[0], board.jvs.coins[1], board.jvs.outputs);
     fprintf(out, "System12: JAMMA=%02x/%02x/%02x/%02x\n",
         system12_jamma_read(0), system12_jamma_read(1),
         system12_jamma_read(2), system12_jamma_read(3));
@@ -2030,6 +2466,35 @@ int system12_selftest(void)
     CHECK(!system12_set_input("p1button6", 1) && system12_jamma_read(3) == 0xf7);
     CHECK(!system12_set_input("p2button4", 1) && system12_jamma_read(3) == 0xd7);
     CHECK(system12_set_input("unknown", 1) < 0);
+    if (!strcmp(board.state, "ptblank2_state")) {
+        u16 saved_gun[4];
+        memcpy(saved_gun, board.gun, sizeof(saved_gun));
+        CHECK(!system12_set_analog("p1gunx", 0x35f));
+        CHECK(!system12_set_analog("p1guny", 0x103));
+        board_drain();
+        CHECK(psxMemRead32(&psxRegs, 0x1f780000) == 0x03600360);
+        CHECK(psxMemRead16(&psxRegs, 0x1ff80004) == 0x104);
+        CHECK(psxMemRead8(&psxRegs, 0x1f780001) == 3);
+        psxMemWrite16(&psxRegs, 0x1ff88000, 0xfffa);
+        CHECK(board.gun_outputs == 5);
+        psxMemWrite8(&psxRegs, 0x1ff88001, 0);
+        CHECK(board.gun_outputs == 5);
+        CHECK(system12_set_analog("p1gunx", 65536) < 0);
+        CHECK(system12_set_gun_position(0, 0, 65535) == 0);
+        board_drain();
+        CHECK(board.gun[0] == ((!strncmp(board.profile, "ptblank2", 8) || !strcmp(board.profile, "gunbarl")) ? 0xdc : 0xbe));
+        CHECK(board.gun[1] == ((!strncmp(board.profile, "ptblank2", 8) || !strcmp(board.profile, "gunbarl")) ? 0x11b : 0x109));
+        memcpy(board.gun, saved_gun, sizeof(saved_gun));
+        memcpy(inputs.gun, saved_gun, sizeof(saved_gun));
+    }
+    if (!strcmp(board.state, "golgo13_state")) {
+        CHECK(sub_adc_read(NULL, 1) == ((u32)board.gun[0] * 0x240) / 0x1ff + 0x7a);
+        CHECK(sub_adc_read(NULL, 2) == ((u32)board.gun[1] * 0x1bf) / 0x1ff + 0x1f);
+        CHECK(system12_set_gun_position(0, 65535, 0) == 0);
+        board_drain();
+        CHECK(board.gun[0] == 511 && board.gun[1] == 511);
+        CHECK(sub_adc_read(NULL, 1) == 0x2ba && sub_adc_read(NULL, 2) == 0x1de);
+    }
     memset(&inputs, 0, sizeof(inputs));
     post_inputs();
     CHECK(intFakeFetch(0xbfc00000) == SWAPu32(*(u32 *)board.main));

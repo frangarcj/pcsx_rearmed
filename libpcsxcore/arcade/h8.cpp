@@ -122,6 +122,9 @@ struct H8CPU {
     __attribute__((always_inline)) u16 read16i(u32 a) {return read16(a);}
     void write16(u32 a,u16 v) {m_icount-=2;write16_bus(a&0xfffffe,v);}
     void write16_bus(u32 a,u16 v) {
+        if(config.external_io_start && a>=config.external_io_start) {
+            bus_write(a,v>>8);bus_write(a+1,v);return;
+        }
         if(a<0xfffd10&&config.write16){config.write16(config.opaque,a,v);return;}
         if(a>=0xffff60&&a<=0xffff9e) {
             timers.writeWord(a&255,v,0xffff,h8_current_cycle(this)-cycle_epoch);
@@ -215,7 +218,9 @@ template<unsigned Channel> static void serial_clk_pin(void *opaque,int level) {
 }
 static void serial_frame(void *opaque,unsigned channel,u8 byte) {
     H8CPU *c=static_cast<H8CPU*>(opaque);
-    if(c->config.serial_tx)c->config.serial_tx(c->config.opaque,channel,byte);
+    if(c->config.serial_tx_observer)c->config.serial_tx_observer(c->config.opaque,channel,byte);
+    if(c->config.serial_tx && !c->config.serial_tx_pin && !c->config.serial_clk_pin)
+        c->config.serial_tx(c->config.opaque,channel,byte);
 }
 void H8CPU::bind_peripherals() {
     adc.setCallbacks(this,adc_input,adc_irq,peripheral_reschedule);
@@ -224,12 +229,12 @@ void H8CPU::bind_peripherals() {
         config.serial_tx_pin?serial_tx_pin<0>:nullptr,
         config.serial_clk_pin?serial_clk_pin<0>:nullptr,
         peripheral_irq,52,0,serial_frame,peripheral_reschedule,peripheral_rx_now,
-        peripheral_timer_adjust);
+        peripheral_timer_adjust, config.serial_tx_observer != nullptr);
     sci[1].setCallbacks(this,peripheral_now,
         config.serial_tx_pin?serial_tx_pin<1>:nullptr,
         config.serial_clk_pin?serial_clk_pin<1>:nullptr,
         peripheral_irq,56,1,serial_frame,peripheral_reschedule,peripheral_rx_now,
-        peripheral_timer_adjust);
+        peripheral_timer_adjust, config.serial_tx_observer != nullptr);
     for(unsigned ch=0;ch<2;ch++)
         sci[ch].setExternalClockPeriodAS(config.serial_external_period_as[ch],16934400);
 }
@@ -308,6 +313,8 @@ static unsigned port_ddr(unsigned reg) {
     case 0xd2:return 0xd0;case 0xd3:return 0xd1;case 0xd6:return 0xd4;default:return 0;}
 }
 u16 H8CPU::read16_bus(u32 a) {
+    if(config.external_io_start && a>=config.external_io_start)
+        return (u16(bus_read(a))<<8)|bus_read(a+1);
     if(a<0xfffd10&&config.read16)return config.read16(config.opaque,a);
     if(a>=0xffff60&&a<=0xffff9e) {
         u16 v=timers.readWord(a&255,h8_current_cycle(this)-cycle_epoch);
@@ -317,6 +324,8 @@ u16 H8CPU::read16_bus(u32 a) {
 }
 u8 H8CPU::bus_read(u32 a) {
     a&=0xffffff;
+    if(config.external_io_start && a>=config.external_io_start)
+        return config.read8?config.read8(config.opaque,a):0xff;
     if(a<config.rom_size)return config.rom[a];
     if(a>=0xfffd10&&a<=0xffff0f)return ram[a-0xfffd10];
     if(a<0xffff20)return config.read8?config.read8(config.opaque,a):0xff;
@@ -344,6 +353,9 @@ u8 H8CPU::bus_read(u32 a) {
 }
 void H8CPU::bus_write(u32 a,u8 v) {
     a&=0xffffff;
+    if(config.external_io_start && a>=config.external_io_start) {
+        if(config.write8)config.write8(config.opaque,a,v);return;
+    }
     if(a>=0xfffd10&&a<=0xffff0f){ram[a-0xfffd10]=v;return;}
     if(a<0xffff20){if(config.write8)config.write8(config.opaque,a,v);return;}
     unsigned r=a&255;
@@ -378,6 +390,8 @@ void H8CPU::bus_write(u32 a,u8 v) {
 
 bool H8CPU::peek(u32 a,u8 *v) const {
     a&=0xffffff;
+    if(config.external_io_start && a>=config.external_io_start)
+        return config.peek8&&config.peek8(config.opaque,a,v);
     if(a<config.rom_size) {*v=config.rom[a];return true;}
     if(a>=0xfffd10&&a<=0xffff0f) {*v=ram[a-0xfffd10];return true;}
     return a<0xffff20&&config.peek8&&config.peek8(config.opaque,a,v);

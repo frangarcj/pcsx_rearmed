@@ -5,7 +5,7 @@ Reads the ROM declarations of namco/namcos12.cpp at the pinned MAME commit
 (through prepare_mame_psx.py's parser) and the board registry, and writes
 libpcsxcore/arcade/system12_romsets.inc: for each set, its board profile,
 its ROM files (size, CRC32) and how each file is placed in the four board
-regions. The loader then builds the regions from MAME zips on the console.
+regions and optional default EEPROM. The loader then builds the regions from MAME zips on the console.
 
   generate_system12_romsets.py --mame-source ../mamedev
 """
@@ -23,7 +23,7 @@ sys.path.insert(0, str(HERE))
 import prepare_mame_psx as mame  # noqa: E402
 
 DRIVER = "namco/namcos12.cpp"
-REGIONS = ("maincpu:rom", "bankedroms", "sub", "c352")
+REGIONS = ("maincpu:rom", "bankedroms", "sub", "c352", "at28c16")
 OUTPUT = ROOT / "libpcsxcore/arcade/system12_romsets.inc"
 
 
@@ -59,6 +59,10 @@ def generate(source: Path) -> str:
         used: dict[int, int] = {}
         sizes = []
         for region_index, tag in enumerate(REGIONS):
+            if tag not in romset.regions:
+                if tag != "at28c16": raise SystemExit(f"{name}: missing required region {tag}")
+                sizes.append(0)
+                continue
             region = romset.regions[tag]
             if region.erase != 0:
                 raise SystemExit(f"{name}: region {tag} is not erased to zero")

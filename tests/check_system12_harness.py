@@ -69,7 +69,24 @@ def main():
             raise RuntimeError("COH-716/altbank profile failed dynamic RAM or bank/DMA validation")
         if "System12 EEPROM timing: PASS" not in profile_result.stderr:
             raise RuntimeError("COH-716 AT28C16 bus timing selftest did not run")
-        # Declared daughterboards are refused before CPU execution.
+        # Gun buses use real 16-bit lanes, including the mirrored window.
+        for name, machine, state, alt in [("ptblank2", "coh700b", "ptblank2_state", 0),
+                                          ("golgo13", "golgo13", "golgo13_state", 1)]:
+            gun = regions / name
+            gun.mkdir()
+            for filename in ("main.bin", "banked.bin", "sub.bin", "wave.bin"):
+                (gun / filename).write_bytes((variant / filename).read_bytes())
+            (gun / "board.cfg").write_text(
+                f"schema=1\nmame_set={name}\nmachine={machine}\nstate={state}\n"
+                "ram_size=4194304\nmain_size=4194304\nbank_size=8388608\n"
+                f"sub_size=524288\nwave_size=8388608\nboot_hack=1\nalt_bank={alt}\n"
+                "tektagt_dma=0\nunsupported=none\n")
+            run = subprocess.run([str(args.harness.resolve()), "--system12", str(gun),
+                "--board-test", "--frames", "1", "--output", str(gun / "frame.ppm")],
+                capture_output=True, text=True, timeout=30)
+            if run.returncode or "System12 selftest: PASS" not in run.stderr:
+                raise RuntimeError(f"{name} gun bus / ADC selftest failed: {run.stderr}")
+        # Declared unavailable daughterboards are refused before CPU execution.
         unsupported = regions / "unsupported"
         unsupported.mkdir()
         for name in ("main.bin", "banked.bin", "sub.bin", "wave.bin"):
@@ -78,11 +95,11 @@ def main():
             "schema=1\nmame_set=aplarail\nmachine=aplarail\nstate=namcos12_state\n"
             "ram_size=4194304\nmain_size=4194304\nbank_size=33554432\n"
             "sub_size=524288\nwave_size=16777216\nboot_hack=0\nalt_bank=0\n"
-            "tektagt_dma=0\nunsupported=namco_cyberlead_jvs\n")
+            "tektagt_dma=0\nunsupported=future_fixture_device\n")
         rejected = subprocess.run([str(args.harness.resolve()), "--system12", str(unsupported),
             "--frames", "1"], capture_output=True, text=True, timeout=30)
         if rejected.returncode != 1 or "unimplemented board device" not in rejected.stderr:
-            raise RuntimeError("profile with unsupported JVS daughterboard was not rejected")
+            raise RuntimeError("profile declaring an unknown fixture device was not rejected")
         inputs = regions / "inputs.csv"
         inputs.write_text("frame,control,pressed\n0,coin1,1\n1,coin1,0\n2,p1start,1\n3,coin2,1\n")
         audio = regions / "fixture.wav"

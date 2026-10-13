@@ -27,6 +27,9 @@ typedef struct H8Config {
     uint8_t (*port_read)(void *opaque, unsigned port);
     void (*port_write)(void *opaque, unsigned port, uint8_t value, uint8_t ddr);
     void (*serial_tx)(void *opaque, unsigned channel, uint8_t value);
+    /* Completed transmitted frames, also with pin wiring installed. Read-only
+     * observation for byte-oriented peripherals; does not bypass receive pins. */
+    void (*serial_tx_observer)(void *opaque, unsigned channel, uint8_t value);
     /* Optional atomic external word accesses (e.g. C352 execution register). */
     uint16_t (*read16)(void *opaque, uint32_t address);
     void (*write16)(void *opaque, uint32_t address, uint16_t value);
@@ -55,6 +58,9 @@ typedef struct H8Config {
      * side effects in that range. Writes still go to write8/write16. */
     const uint8_t *rom;
     uint32_t rom_size;
+    /* Kart Duel's link board maps ffff10..ffffff as external RAM, overriding
+     * the H8 internal peripheral window in the pinned machine map. */
+    uint32_t external_io_start;
 } H8Config;
 typedef struct H8Status {
     uint32_t pc, er[8];

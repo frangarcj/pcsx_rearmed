@@ -11,7 +11,7 @@
 #include "../system12.h"
 
 enum { S12_LOAD, S12_FILL };
-enum { S12_MAIN, S12_BANKED, S12_SUB, S12_WAVE, S12_REGIONS };
+enum { S12_MAIN, S12_BANKED, S12_SUB, S12_WAVE, S12_EEPROM, S12_REGIONS };
 
 typedef struct {
 	const char *name;
@@ -330,7 +330,7 @@ static int build_regions(const s12_romset *set, const s12_index *index, const ch
 	unsigned i;
 	int result = 0;
 	for (i = 0; i < S12_REGIONS; i++)
-		if (!(regions[i] = calloc(1, set->region_size[i])))
+		if (!(regions[i] = calloc(1, set->region_size[i] ? set->region_size[i] : 1)))
 			result = -1;
 	for (i = 0; !result && i < set->op_count; i++) {
 		const s12_rom_op *op = &s12_ops[set->first_op + i];
@@ -386,7 +386,8 @@ int system12_romset_load(const char *zip_path)
 	uint8_t *regions[S12_REGIONS] = { NULL };
 	char rompath[4096];
 	s12_index index;
-	system12_desc desc;
+	system12_desc desc = {0};
+	char disk_path[4096];
 	int result;
 	directory_of(zip_path, rompath, sizeof(rompath));
 	if (index_open(&index, rompath))
@@ -426,6 +427,18 @@ int system12_romset_load(const char *zip_path)
 	desc.boot_hack = set->boot_hack;
 	desc.alt_bank = set->alt_bank;
 	desc.tektagt_dma = set->tektagt_dma;
-	return system12_load_regions(&desc, regions[S12_MAIN], regions[S12_BANKED],
+	desc.default_eeprom = regions[S12_EEPROM];
+	desc.default_eeprom_size = set->region_size[S12_EEPROM];
+	if (!strcmp(set->info.name, "truckk") || !strcmp(set->info.name, "ujlnow")) {
+		if (snprintf(disk_path, sizeof(disk_path), "%s/%s/%s.chd", rompath, set->info.name,
+			!strcmp(set->info.name, "truckk") ? "tkk2-a" : "ul1-a") >= (int)sizeof(disk_path)) {
+			for (unsigned i = 0; i < S12_REGIONS; i++) free(regions[i]);
+			return -1;
+		}
+		desc.disk_path = disk_path;
+	}
+	result = system12_load_regions(&desc, regions[S12_MAIN], regions[S12_BANKED],
 		regions[S12_SUB], regions[S12_WAVE]);
+	free(regions[S12_EEPROM]);
+	return result;
 }

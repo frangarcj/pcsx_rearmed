@@ -38,6 +38,9 @@ typedef struct {
 	u32 ram_size;
 	size_t main_size, bank_size, sub_size, wave_size;
 	int boot_hack, alt_bank, tektagt_dma;
+	const char *disk_path; /* CDXA only; optional for ordinary ROM-only boards */
+	const u8 *default_eeprom;
+	size_t default_eeprom_size;
 } system12_desc;
 /* Same as system12_load, from regions already in memory (for example built
  * from a MAME romset). Takes ownership of the four malloc'd buffers, which
@@ -67,6 +70,12 @@ void system12_vblank(int level);
 /* Source screen edge at its scheduled absolute time, even if MIPS is late. */
 void system12_vblank_at(int level, const psx_screen_time *time);
 int system12_set_input(const char *control, int pressed);
+/* Raw cabinet coordinates/ADC inputs, as in MAME (not boolean buttons). */
+unsigned system12_analog_max(const char *control);
+/* Screen-relative coordinates (0..65535) mapped to the current cabinet's
+ * gun counters; Golgo's vertical axis is reversed by its input profile. */
+int system12_set_gun_position(unsigned player, unsigned x, unsigned y);
+int system12_set_analog(const char *control, unsigned value);
 /* Exact 2080-byte AT28C16 data+ID image import/export; board must be active. */
 int system12_eeprom_export(unsigned char *image, size_t size);
 int system12_eeprom_import(const unsigned char *image, size_t size);

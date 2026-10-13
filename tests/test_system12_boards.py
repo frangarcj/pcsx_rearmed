@@ -23,15 +23,15 @@ class System12BoardProfiles(unittest.TestCase):
         self.assertEqual(len(profiles), 58)
         self.assertEqual({p["set"] for p in profiles}, {p["set"] for p in system["sets"]})
         self.assertTrue(all(p["ram_size"] in (0x400000, 0x1000000) for p in profiles))
-        self.assertTrue(all(p["boot_hack"] == (p["machine"] in ("coh700b", "coh716")) for p in profiles))
+        self.assertTrue(all(p["boot_hack"] == (p["machine"] in ("coh700b", "coh716", "golgo13", "kartduel", "cdxa_pcb", "truckk")) for p in profiles))
         self.assertEqual({p["machine"] for p in profiles}, {"coh700", "coh700b", "coh716", "aplarail", "technodr", "golgo13", "cdxa_pcb", "truckk", "kartduel"})
-        self.assertEqual({p["set"] for p in profiles if p["alt_bank"]}, {"mdhorse", "kaiunqz", "sws2001"})
+        self.assertEqual({p["set"] for p in profiles if p["alt_bank"]}, {"mdhorse", "kaiunqz", "sws2001", "golgo13", "g13knd", "ujlnow", "truckk"})
         for profile in profiles:
             self.assertEqual(profile["tektagt_dma"], profile["state"] == "tektagt_state")
         # The protection is emulated (MAME tektagt_state): no set needs anything else.
         self.assertEqual(next(p for p in profiles if p["set"] == "tektagt")["unsupported"], [])
-        self.assertIn("gun_io", next(p for p in profiles if p["set"] == "ptblank2")["unsupported"])
-        self.assertIn("link_lan", next(p for p in profiles if p["set"] == "kartduel")["unsupported"])
+        self.assertEqual(next(p for p in profiles if p["set"] == "ptblank2")["unsupported"], [])
+        self.assertEqual(next(p for p in profiles if p["set"] == "kartduel")["unsupported"], [])
 
     def test_packs_dynamic_mame_region_sizes_and_declares_unsupported_devices(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -76,11 +76,15 @@ class System12BoardProfiles(unittest.TestCase):
             for i, (tag, body) in enumerate(data.items()):
                 name = f"{i}.bin"; (inputs / name).write_bytes(body)
                 regions[tag] = {"file": name, "size": len(body), "crc32": f"{zlib.crc32(body) & 0xffffffff:08x}", "sha1": hashlib.sha1(body).hexdigest()}
-            manifest = {"mame_set": "aplarail", "mame_driver": "namco/namcos12.cpp",
+            manifest = {"mame_set": "truckk", "mame_driver": "namco/namcos12.cpp",
                 "mame_source_commit": module.COMMIT, "rom_regions_assembled": True, "regions": regions}
             (inputs / "manifest.json").write_text(json.dumps(manifest))
-            result = module.prepare(inputs, output)
-            self.assertEqual(result["unsupported"], ["namco_cyberlead_jvs"])
+            registry = json.loads(module.REGISTRY.read_text())
+            next(p for p in registry["sets"] if p["set"] == "truckk")["unsupported"] = ["future_device"]
+            registry_path = root / "registry.json"
+            registry_path.write_text(json.dumps(registry))
+            result = module.prepare(inputs, output, registry_path)
+            self.assertEqual(result["unsupported"], ["future_device"])
             (inputs / "0.bin").write_bytes(b"X")
             with self.assertRaises(module.BoardPreparationError):
                 module.prepare(inputs, output)

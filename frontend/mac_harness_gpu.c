@@ -370,7 +370,9 @@ int harness_configure_gl_capture(int enabled, unsigned int target_frame)
 void harness_capture_gl_frame(unsigned int frame)
 {
 #ifdef GPU_VITA_CTR
-  if (capture_gl_requested && !capture_gl_done && frame >= capture_gl_target_frame) {
+  /* A 30 Hz game may not present on the final requested vsync. Keep the
+   * latest actual presentation in the final eight vsyncs (also for 15 Hz). */
+  if (capture_gl_requested && (uint64_t)frame + 7 >= capture_gl_target_frame) {
     capture_gl_done = 1;
     if (!PCSXMacVitaGL_CaptureCurrentFrame())
       fprintf(stderr, "OpenGL capture failed at emulated frame %u\n", frame);

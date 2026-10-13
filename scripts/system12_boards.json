@@ -376,9 +376,7 @@
       "boot_hack": false,
       "alt_bank": false,
       "tektagt_dma": false,
-      "unsupported": [
-        "namco_cyberlead_jvs"
-      ]
+      "unsupported": []
     },
     {
       "set": "mdhorse",
@@ -408,9 +406,7 @@
       "boot_hack": false,
       "alt_bank": false,
       "tektagt_dma": false,
-      "unsupported": [
-        "technodr_custom_io_cpu"
-      ]
+      "unsupported": []
     },
     {
       "set": "tenkomor",
@@ -500,9 +496,7 @@
       "boot_hack": true,
       "alt_bank": false,
       "tektagt_dma": false,
-      "unsupported": [
-        "gun_io"
-      ]
+      "unsupported": []
     },
     {
       "set": "gunbarl",
@@ -517,9 +511,7 @@
       "boot_hack": true,
       "alt_bank": false,
       "tektagt_dma": false,
-      "unsupported": [
-        "gun_io"
-      ]
+      "unsupported": []
     },
     {
       "set": "sws99",
@@ -654,9 +646,7 @@
       "boot_hack": true,
       "alt_bank": false,
       "tektagt_dma": false,
-      "unsupported": [
-        "gun_io"
-      ]
+      "unsupported": []
     },
     {
       "set": "ohbakyuun",
@@ -671,9 +661,7 @@
       "boot_hack": true,
       "alt_bank": false,
       "tektagt_dma": false,
-      "unsupported": [
-        "gun_io"
-      ]
+      "unsupported": []
     },
     {
       "set": "pacapp2",
@@ -730,13 +718,10 @@
       "year": 1999,
       "description": "Um Jammer Lammy NOW! (Japan, UL1/VER.A)",
       "ram_size": 4194304,
-      "boot_hack": false,
-      "alt_bank": false,
+      "boot_hack": true,
+      "alt_bank": true,
       "tektagt_dma": false,
-      "unsupported": [
-        "cdxa_pcb",
-        "local_chd"
-      ]
+      "unsupported": []
     },
     {
       "set": "kaiunqz",
@@ -793,12 +778,10 @@
       "year": 1999,
       "description": "Golgo 13 (Japan, GLG1/VER.A)",
       "ram_size": 4194304,
-      "boot_hack": false,
-      "alt_bank": false,
+      "boot_hack": true,
+      "alt_bank": true,
       "tektagt_dma": false,
-      "unsupported": [
-        "gun_io"
-      ]
+      "unsupported": []
     },
     {
       "set": "sws2000",
@@ -825,14 +808,10 @@
       "year": 2000,
       "description": "Truck Kyosokyoku (US?, TKK2/VER.A)",
       "ram_size": 4194304,
-      "boot_hack": false,
-      "alt_bank": false,
+      "boot_hack": true,
+      "alt_bank": true,
       "tektagt_dma": false,
-      "unsupported": [
-        "cdxa_pcb",
-        "truckk_io_cpu",
-        "local_chd"
-      ]
+      "unsupported": []
     },
     {
       "set": "kartduel",
@@ -844,12 +823,10 @@
       "year": 2000,
       "description": "Kart Duel (World, KTD2/VER.A)",
       "ram_size": 4194304,
-      "boot_hack": false,
+      "boot_hack": true,
       "alt_bank": false,
       "tektagt_dma": false,
-      "unsupported": [
-        "link_lan"
-      ]
+      "unsupported": []
     },
     {
       "set": "kartduelja",
@@ -861,12 +838,10 @@
       "year": 2000,
       "description": "Kart Duel (Japan, KTD1/VER.A)",
       "ram_size": 4194304,
-      "boot_hack": false,
+      "boot_hack": true,
       "alt_bank": false,
       "tektagt_dma": false,
-      "unsupported": [
-        "link_lan"
-      ]
+      "unsupported": []
     },
     {
       "set": "g13knd",
@@ -878,12 +853,10 @@
       "year": 2000,
       "description": "Golgo 13 Kiseki no Dandou (Japan, GLS1/VER.A)",
       "ram_size": 4194304,
-      "boot_hack": false,
-      "alt_bank": false,
+      "boot_hack": true,
+      "alt_bank": true,
       "tektagt_dma": false,
-      "unsupported": [
-        "gun_io"
-      ]
+      "unsupported": []
     },
     {
       "set": "sws2001",

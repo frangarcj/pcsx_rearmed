@@ -107,6 +107,8 @@ CXXSOURCES := libpcsxcore/arcade/gnet_zoom.cpp libpcsxcore/arcade/rf5c296.cpp \
 ifeq ($(HAVE_CHD),1)
 CFLAGS += -DPCSX_SYSTEM_GV
 SOURCES += libpcsxcore/systemgv.c
+CFLAGS += -DPCSX_SYSTEM12_CDXA
+CXXSOURCES += libpcsxcore/arcade/sh2.cpp libpcsxcore/arcade/system12_cdxa.cpp
 CXXSOURCES += libpcsxcore/arcade/konamigv.cpp libpcsxcore/arcade/nscsi_cd.cpp
 CXXSOURCES += libpcsxcore/arcade/chd_hd.cpp libpcsxcore/arcade/chd_cd.cpp
 CXXSOURCES += libpcsxcore/arcade/gnet_storage.cpp
@@ -205,11 +207,19 @@ $(BUILD)/test-cat702: tests/test_cat702.c libpcsxcore/arcade/cat702.c libpcsxcor
 $(BUILD)/test-nor-flash: tests/test_nor_flash.c libpcsxcore/arcade/nor_flash.c libpcsxcore/arcade/nor_flash.h
 	@mkdir -p $(BUILD)
 	$(CC) -arch arm64 -O2 -std=c99 -Wall -Wextra -Werror tests/test_nor_flash.c libpcsxcore/arcade/nor_flash.c -o $@
-devices-test: $(BUILD)/test-nor-flash $(BUILD)/test-c352 $(BUILD)/test-serial $(BUILD)/test-cat702
+$(BUILD)/test-system12-jvs: tests/test_system12_jvs.c libpcsxcore/arcade/system12_jvs.h
+	@mkdir -p $(BUILD)
+	$(CC) -arch arm64 -O2 -std=c99 -Wall -Wextra -Werror $< -o $@
+$(BUILD)/test-sh2: tests/test_sh2.cpp libpcsxcore/arcade/sh2.cpp libpcsxcore/arcade/sh2.h libpcsxcore/arcade/sh2_ops.inc
+	@mkdir -p $(BUILD)
+	$(CXX) -arch arm64 -O2 -std=c++17 -Wall -Wextra -Werror -Wno-unused-parameter tests/test_sh2.cpp libpcsxcore/arcade/sh2.cpp -o $@
+devices-test: $(BUILD)/test-nor-flash $(BUILD)/test-c352 $(BUILD)/test-serial $(BUILD)/test-cat702 $(BUILD)/test-system12-jvs $(BUILD)/test-sh2
 	$(BUILD)/test-c352
 	$(BUILD)/test-serial
 	$(BUILD)/test-cat702
 	$(BUILD)/test-nor-flash
+	$(BUILD)/test-system12-jvs
+	$(BUILD)/test-sh2
 	$(MAKE) -f tests/Makefile.h8 BUILD=$(BUILD)/h8-tests test
 	$(MAKE) -f tests/Makefile.namcos10-crypto BUILD=$(BUILD)/namcos10-tests test
 	$(MAKE) -f tests/Makefile.namcos10-board BUILD=$(BUILD)/namcos10-board-tests test

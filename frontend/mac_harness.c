@@ -326,7 +326,10 @@ static const struct { SDL_Scancode key; const char *control; } interactive_keys[
   {SDL_SCANCODE_UP, "p1up"}, {SDL_SCANCODE_DOWN, "p1down"},
   {SDL_SCANCODE_LEFT, "p1left"}, {SDL_SCANCODE_RIGHT, "p1right"},
   {SDL_SCANCODE_A, "p1button1"}, {SDL_SCANCODE_S, "p1button2"},
-  {SDL_SCANCODE_D, "p1button3"}, {SDL_SCANCODE_SPACE, "p1button4"}
+  {SDL_SCANCODE_D, "p1button3"}, {SDL_SCANCODE_SPACE, "p1button4"},
+  {SDL_SCANCODE_Q, "p1button5"}, {SDL_SCANCODE_E, "p1button6"},
+  {SDL_SCANCODE_F, "p1button7"}, {SDL_SCANCODE_T, "test"},
+  {SDL_SCANCODE_9, "service"}
 };
 static volatile int pause_requested;
 /* gpulib_if.c: the next present keeps the frame for the menu. */
@@ -477,7 +480,8 @@ static int input_control_known(const char *name)
   /* Validate against the selected source input profile while every control
    * is still released, before the CPU begins executing CSV events. */
   return strlen(name) < sizeof(((harness_input_event *)0)->control) &&
-    selected_board && selected_board->set_input(name, 0) == 0;
+    selected_board && ((selected_board->family == 12 && system12_analog_max(name)) ||
+      selected_board->set_input(name, 0) == 0);
 }
 
 static char *trim_field(char *s)
@@ -525,7 +529,8 @@ static int load_input_events(const char *path, harness_input_event **out,
       failed = 1; break;
     }
     errno = 0; pressed = strtoul(pressed_s, &end, 10);
-    if (errno || end == pressed_s || *end || pressed > 1) { failed = 1; break; }
+    unsigned maximum = selected_board && selected_board->family == 12 ? system12_analog_max(control) : 0;
+    if (errno || end == pressed_s || *end || pressed > (maximum ? maximum : 1)) { failed = 1; break; }
     if (used == cap) {
       size_t newcap = cap ? cap * 2 : 32;
       harness_input_event *next = realloc(events, newcap * sizeof(*events));
@@ -552,7 +557,10 @@ static int apply_input_events(const harness_input_event *events, size_t count,
                               size_t *next, uint64_t frame)
 {
   while (*next < count && events[*next].frame <= frame) {
-    if (selected_board->set_input(events[*next].control, events[*next].pressed)) {
+    int error = selected_board->family == 12 && system12_analog_max(events[*next].control)
+      ? system12_set_analog(events[*next].control, events[*next].pressed)
+      : selected_board->set_input(events[*next].control, events[*next].pressed);
+    if (error) {
       fprintf(stderr, "invalid arcade control: %s\n", events[*next].control);
       return -1;
     }

@@ -9,7 +9,7 @@ namespace arcade {
 H8Sci::H8Sci()
     : m_opaque(0), m_now(0), m_rx_now(0), m_tx_pin(0), m_clk_pin(0), m_irq(0),
       m_reschedule(0), m_frame_tx(0), m_timer_adjust(0),
-      m_vector_base(0), m_channel(0),
+      m_vector_base(0), m_channel(0), m_observe_frames(false),
       m_external_to_internal_ratio(0.0), m_internal_to_external_ratio(0.0),
       m_external_period_as(0), m_cpu_hz(0), m_tx_state(ST_IDLE),
       m_rx_state(ST_IDLE), m_tx_bit(0), m_rx_bit(0), m_clock_state(0),
@@ -24,7 +24,7 @@ void H8Sci::setCallbacks(void *opaque, NowCb now, PinCb tx, PinCb clk,
                          IrqRequest irq, unsigned vector_base,
                          unsigned channel, FrameTx frame_tx,
                          RescheduleCb reschedule_cb, NowCb rx_now,
-                         TimerAdjustCb timer_adjust) {
+                         TimerAdjustCb timer_adjust, bool observe_frames) {
     m_opaque = opaque;
     m_now = now;
     m_rx_now = rx_now;
@@ -35,6 +35,7 @@ void H8Sci::setCallbacks(void *opaque, NowCb now, PinCb tx, PinCb clk,
     m_vector_base = vector_base;
     m_channel = channel;
     m_frame_tx = frame_tx;
+    m_observe_frames = observe_frames;
     m_reschedule = reschedule_cb;
 }
 
@@ -368,7 +369,7 @@ void H8Sci::tx_start() {
 }
 
 void H8Sci::frame_done() {
-    if (m_frame_tx && !m_tx_pin && !m_clk_pin)
+    if (m_frame_tx && (m_observe_frames || (!m_tx_pin && !m_clk_pin)))
         m_frame_tx(m_opaque, m_channel, m_tx_frame);
 }
 

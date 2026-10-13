@@ -3,8 +3,8 @@
 
 The input is produced by prepare_mame_psx.py. This validates the pinned source
 manifest and every region digest, then writes the four raw regions plus a
-strict board.cfg. It does not add missing devices or make unsupported games
-bootable; the runtime refuses profiles with declared external requirements.
+strict board.cfg, optional default EEPROM, and a supplied local CDXA CHD.
+The runtime refuses profiles with declared unsupported devices.
 """
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def _digest(data: bytes) -> tuple[str, str]:
 
 
 def prepare(input_dir: Path, output_dir: Path,
-            registry_path: Path = REGISTRY) -> dict[str, object]:
+            registry_path: Path = REGISTRY, chd: Path | None = None) -> dict[str, object]:
     try:
         manifest = json.loads((input_dir / "manifest.json").read_text(encoding="utf-8"))
         registry = json.loads(registry_path.read_text(encoding="utf-8"))
@@ -59,7 +59,10 @@ def prepare(input_dir: Path, output_dir: Path,
     if not isinstance(regions, dict):
         raise BoardPreparationError("manifest has no region table")
     contents: dict[str, bytes] = {}
-    for tag, output_name in REGION_NAMES.items():
+    region_names = dict(REGION_NAMES)
+    if "at28c16" in regions:
+        region_names["at28c16"] = "eeprom.bin"
+    for tag, output_name in region_names.items():
         record = regions.get(tag)
         if not isinstance(record, dict):
             raise BoardPreparationError(f"required region {tag} is missing")
@@ -75,10 +78,21 @@ def prepare(input_dir: Path, output_dir: Path,
                 or sha != str(record.get("sha1", "")).lower()):
             raise BoardPreparationError(f"assembled region {tag} failed size/CRC32/SHA1 verification")
         contents[output_name] = data
-    if manifest.get("pending_disk_media"):
-        # A profile that needs a disk is already unsupported; retain the
-        # declaration in board.cfg rather than silently dropping its media.
-        pass
+    disks = manifest.get("pending_disk_media", [])
+    disk_name = None
+    if disks:
+        if len(disks) != 1 or chd is None:
+            raise BoardPreparationError("this board requires its local disc: pass --chd PATH")
+        disk = disks[0]
+        disk_name = disk["name"] + ".chd"
+        if Path(disk_name).name != disk_name:
+            raise BoardPreparationError("unsafe disc filename")
+        with chd.open("rb") as stream:
+            header = stream.read(124)
+        if (len(header) != 124 or header[:8] != b"MComprHD" or
+                int.from_bytes(header[12:16], "big") != 5 or
+                header[84:104].hex() != disk["sha1"]):
+            raise BoardPreparationError("CHD header/version/SHA1 does not match the pinned disc")
     values = {
         "schema": "1", "mame_set": profile["set"], "machine": profile["machine"],
         "state": profile["state"], "ram_size": str(profile["ram_size"]),
@@ -94,6 +108,8 @@ def prepare(input_dir: Path, output_dir: Path,
     output_dir.mkdir(parents=True, exist_ok=True)
     for name, data in contents.items():
         (output_dir / name).write_bytes(data)
+    if disk_name:
+        shutil.copyfile(chd, output_dir / disk_name)
     (output_dir / "board.cfg").write_text("".join(f"{key}={value}\n" for key, value in values.items()), encoding="ascii")
     output_manifest = {
         "system": "Namco System 12", "mame_set": profile["set"],
@@ -113,9 +129,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("assembled_dir", type=Path, help="directory from prepare_mame_psx.py")
     parser.add_argument("-o", "--output-dir", type=Path, required=True)
     parser.add_argument("--registry", type=Path, default=REGISTRY)
+    parser.add_argument("--chd", type=Path, help="local CHD for a CDXA board")
     args = parser.parse_args(argv)
     try:
-        manifest = prepare(args.assembled_dir, args.output_dir, args.registry)
+        manifest = prepare(args.assembled_dir, args.output_dir, args.registry, args.chd)
     except (BoardPreparationError, OSError) as exc:
         print(f"prepare_system12_board: error: {exc}", file=sys.stderr)
         return 1
