@@ -29,6 +29,8 @@
 #include "../libpcsxcore/arcade/system12_romset.h"
 #include "../libpcsxcore/system11.h"
 #include "../libpcsxcore/system10.h"
+#include "../libpcsxcore/arcade/pcm_wav.h"
+#include "../plugins/dfsound/out.h"
 #include "../libpcsxcore/systemzn.h"
 #include "../libpcsxcore/systemtaito.h"
 #ifdef PCSX_SYSTEM_GV
@@ -208,6 +210,50 @@ static int load_system12(const char *path)
   system12_perf_timing = 1;
   return system12_romset_is_zip(path) ? system12_romset_load(path) : system12_load(path);
 }
+/* System 10 uses the PSX SPU. Capture its native PCM without replacing the
+ * emulated chip or resampling its 768-main-cycle sample cadence. */
+static PcmWav spu_wav;
+static void (*spu_original_feed)(void *, int);
+static unsigned spu_audio_peak;
+static void capture_spu_pcm(void *data, int bytes)
+{
+  const int16_t *samples = data;
+  int16_t four[256 * 4] = {0};
+  if (bytes < 0 || (bytes & 3)) { spu_wav.error = 1; return; }
+  size_t frames = (size_t)bytes / 4;
+  while (frames) {
+    size_t n = frames < 256 ? frames : 256;
+    for (size_t i = 0; i < n; i++) {
+      for (unsigned ch = 0; ch < 2; ch++) {
+        int value = samples[i * 2 + ch];
+        unsigned magnitude = value < 0 ? (unsigned)-value : (unsigned)value;
+        if (magnitude > spu_audio_peak) spu_audio_peak = magnitude;
+        four[i * 4 + ch] = value;
+      }
+    }
+    if (pcm_wav_append4(&spu_wav, four, n)) return;
+    samples += n * 2; frames -= n;
+  }
+}
+static int open_spu_audio(const char *path)
+{
+  if (!out_current || pcm_wav_open(&spu_wav, path, PSXCLK / 768)) return -1;
+  spu_audio_peak = 0;
+  spu_original_feed = out_current->feed;
+  out_current->feed = capture_spu_pcm;
+  return 0;
+}
+static int close_spu_audio(void)
+{
+  if (!spu_original_feed) return pcm_wav_close(&spu_wav);
+  if (SPU_async) SPU_async(psxRegs.cycle, 1);
+  if (out_current) out_current->feed = spu_original_feed;
+  spu_original_feed = NULL;
+  fprintf(stderr, "System10 SPU: rate=%u frames=%" PRIu64 " peak=%u WAV_bytes=%" PRIu64 "\n",
+    spu_wav.rate, spu_wav.bytes / 4, spu_audio_peak, spu_wav.bytes);
+  return pcm_wav_close(&spu_wav);
+}
+
 static const HarnessBoard boards[] = {
   {101, "TaitoFX1S", systemtaito_load, systemtaito_unload, systemtaito_sync,
     systemtaito_set_input, systemtaito_selftest, systemtaito_report,
@@ -226,7 +272,7 @@ static const HarnessBoard boards[] = {
     systemzn_set_input, systemzn_selftest, systemzn_report,
     systemzn_open_audio, systemzn_close_audio, systemzn_eeprom_import, systemzn_eeprom_export},
   {10, "System10", system10_load, system10_unload, system10_sync,
-    system10_set_input, system10_selftest, system10_report, NULL, NULL, NULL, NULL},
+    system10_set_input, system10_selftest, system10_report, open_spu_audio, close_spu_audio, NULL, NULL},
   {11, "System11", system11_load, system11_unload, system11_sync,
     system11_set_input, system11_selftest, system11_report,
     system11_open_audio, system11_close_audio, system11_eeprom_import, system11_eeprom_export},
