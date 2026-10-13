@@ -29,7 +29,8 @@ passive XOR/bit permutation, block-0/1 plaintext exception, and both boot-copy
 ranges. The MEM/IO data-XOR register is decoded only for the MAME `ippo` and
 `ippo2` profiles.
 
-The adapter does not claim to boot a System 10 game. It reports the MAME
+The native host adapter has [short Mac gameplay checks](system10-mac.md) for
+Mr. Driller 2, Mr. Driller G and Gamshara. This module reports the MAME
 base-map's EXIO expansion and CD-ROM/ATA peripherals as unimplemented.
 An optional borrowed [base I/O module](namcos10-io.md) connects input ports,
 EXIO identification, MAME's ACK-only I2C receiver and 100 Hz INT10 status/ack.
@@ -40,8 +41,10 @@ windows are left unmapped for the caller to handle. The MEM(N) R/B register
 returns the selected chip's MAME callback state (`pin != 1`); MAME initializes
 that state to zero, and NAND reset emits low then high callbacks, leaving the
 visible register at zero. Valid single-column `0x30` read confirms are accepted
-after the required address cycles. MEM(N) NAND programming is unsupported;
-the existing NAND engine models read/ID/status/reset operations only. MEM(M)
+after the required address cycles. MEM(N) programming/erase is supported when
+the caller supplies writable NAND backing; read-only configurations still
+reject writes. The runtime uses writable in-memory images for settings and
+preserves source files. MEM(M)
 bank-register reads return the value used by MAME's current predictor, whose
 source comment notes that its hardware behavior is uncertain.
 

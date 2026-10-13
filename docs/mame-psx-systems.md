@@ -15,9 +15,9 @@ the installed listxml reports MAME 0.287.
 | `konami/konamigq.cpp` | Konami System GQ | 1 | `cryptklr` | CXD8530BQ/CXD8538Q; MC68000 and TMS57002 sound system | Complete source profile and local ROM/HDD preparation tested; native board execution pending |
 | `konami/ksys573.cpp` | Konami System 573 | 156 | `ddr4m`, `drmn`, `sys573` | CD-ROM, cassette, PC-card, flash and game I/O configurations | No arcade board support |
 | `konami/twinkle.cpp` | Konami Twinkle | 19 | `bmiidx`, `bmiidx8` | CD/DVD media, MC68000/RF5C400 sound and network/session I/O | Standalone sound-board MC68000/RF5C400, sample RAM and mailbox/periodic IRQ fixtures pass; native PSX integration, ATA/media and authentic games remain pending |
-| `namco/namcos10.cpp` | Namco System 10 | 45 | `taiko2`, `mrdrilrg`, `ballpom` | Main PCB and MEM PCB generations; optional EXIO, CD-ROM on some sets | Native synthetic MEM(M)/MEM(N) MIPS execution, bank fetch, NAND DMA, GPU and I/O pass; real game boot and add-on boards unverified |
-| `namco/namcos11.cpp` | Namco System 11 | 36 | `tekken`, `souledge`, `danceyes` | COH-100/110 CPU boards; motherboard and ROM daughterboard revisions; C76, C352, keycus | Native COH-100/110 synthetic MIPS/C76 execution, banks, inputs/ADC, audio and EEPROM pass; real game boot unverified |
-| `namco/namcos12.cpp` | Namco System 12 / System 11 Plus | 58 | `tekken3`, `soulclbr`, `truckk` | COH-700/716; System 12 motherboard and ROM daughterboard revisions; JVS, H8 I/O, link/gun, CDXA add-on boards | COH-700 Soul Calibur Asia C has 12,000-frame DRC/NEON replays on Mac and ARMv7 Vita3K with observed Stage 2 match progress; timing equivalence, physical Vita, VitaGL and other board variants remain unverified |
+| `namco/namcos10.cpp` | Namco System 10 | 45 | `taiko2`, `mrdrilrg`, `ballpom` | Main PCB and MEM PCB generations; optional EXIO, CD-ROM on some sets | Native synthetic MEM(M)/MEM(N) MIPS execution, bank fetch, NAND DMA, GPU and I/O pass; Mr. Driller 2/G and Gamshara have short Mac interpreter/GL gameplay and SPU capture; broader sets and add-on boards pending |
+| `namco/namcos11.cpp` | Namco System 11 | 36 | `tekken`, `souledge`, `danceyes` | COH-100/110 CPU boards; motherboard and ROM daughterboard revisions; C76, C352, keycus | Tekken, Tekken 2 and Soul Edge pass short Mac interpreter/NEON/GL gameplay; broader sets and physical Vita pending |
+| `namco/namcos12.cpp` | Namco System 12 / System 11 Plus | 58 | `tekken3`, `soulclbr`, `truckk` | COH-700/716; System 12 motherboard and ROM daughterboard revisions; JVS, H8 I/O, link/gun, CDXA add-on boards | COH-700 Soul Calibur Asia C has 12,000-frame DRC/NEON replays on Mac and ARMv7 Vita3K with observed Stage 2 match progress; nine special cabinets also have short Mac DRC/GL gameplay checks; timing equivalence and physical Vita remain pending |
 
 The JSON inventory lists every set, including machine description, parent/ROM
 parent, BIOS/runnable flags, CPU and audio chips with clocks, GPU and other
@@ -46,9 +46,9 @@ family is considered finished.
 | Konami System GQ | 50–65% | HDD preparation, real CHD read/write NCR fixture, MC68000, TMS57002 and K056800/K054539 tested; complete board/gun wiring and real-game validation pending |
 | Konami System 573 | 85–95% | Security cassette, flash and shared CD/SCSI foundations; board configurations, audio, I/O and game validation pending |
 | Konami Twinkle | 90–95% | Sound-board MC68000/RF5C400, banked wave RAM and IRQ/mailbox fixtures pass; native PSX board, ATA/media/session I/O and game validation pending |
-| Namco System 10 | 30–45% | Native MEM(M)/MEM(N) guests exercise crypto, bank fetch, NAND DMA, inputs and GPU; authentic games and add-on boards pending |
-| Namco System 11 | 25–40% | Native MIPS/C76 guests exercise banks, keycus, controls, EEPROM and sound; authentic C76/game media and variant validation pending |
-| Namco System 12 | 30–45% | Soul Calibur Asia C reaches Stage 2 on Mac/Vita3K with C352 progress; other variants, link/gun/JVS/CDXA, timing comparison, physical Vita/VitaGL and broader gameplay validation pending |
+| Namco System 10 | 30–45% | Native MEM(M)/MEM(N) guests exercise crypto, bank fetch, NAND DMA, inputs and GPU; three base-board games pass short Mac gameplay; broader sets, add-ons and DRC pending |
+| Namco System 11 | 25–40% | Native MIPS/C76 guests exercise banks, keycus, controls, EEPROM and sound; three authentic games pass Mac gameplay, including GPU type-1 GL; broader variants and physical Vita pending |
+| Namco System 12 | 30–45% | Soul Calibur Asia C reaches Stage 2 on Mac/Vita3K; nine special gun/JVS/link/CDXA cabinets have short Mac DRC/GL checks; timing comparison, physical Vita and broader gameplay validation pending |
 
 For the original **Soul Calibur Asia C + headless M1 harness** target alone,
 the estimated remaining work is **15–25%**: sustained gameplay and audio/timing
@@ -181,7 +181,7 @@ machine's assets does not imply that it boots.
   JP1 and sound reset wiring. Generated firmware tests execute the MN10200
   read-only program map while main-bus tests program Intel flash; partial lane
   writes and the card interface remain unsupported.
-- Namco System 10: [35 crypto profiles and read-only NAND](namcos10-crypto.md),
+- Namco System 10: [35 crypto profiles and optional writable NAND](namcos10-crypto.md),
   with 441 fixed encrypted streams; [MEM(M)/MEM(N) board adapter](namcos10-board.md)
   tests cover boot copies, banks, flash, bus masks and DMA. The connected
   [base I/O module](namcos10-io.md) preserves MAME input/I2C/IRQ behavior.
@@ -190,7 +190,8 @@ machine's assets does not imply that it boots.
   Its [native adapter](system10-native.md) executes
   [generated MIPS guests](system10-native-test.md) for MEM(M) and MEM(N), with
   banked code, NAND DMA to upper RAM, GPU readback, IRQ acknowledgment and inputs.
-  No authentic System 10 game boot claim.
+  Mr. Driller 2, Mr. Driller G and Gamshara now have
+  [short Mac interpreter/GL gameplay and SPU capture](system10-mac.md).
 - Konami security cassettes: [X76F041, X76F100 and DS2401](konami-security.md)
   password/pin/timing traces; no System 573 boot claim.
 - Konami Twinkle: the [sound-board component](twinkle-board.md) runs generated

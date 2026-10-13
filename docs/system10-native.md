@@ -56,8 +56,9 @@ transfer. Completion is synchronous; detailed DMA bus timing remains pending.
 
 Build with `make -f Makefile.mac-harness`, then pass a verified media package
 using `--system10 REGION-DIR`. `--inputs` and `--board-test` are available.
-`--audio` and `--nvram` export are currently unavailable for System 10; its
-on-board flash remains a mutable in-memory copy. The input adapter uses the
+`--audio` now captures the native SPU stereo output in the Mac harness.
+`--nvram` export is still unavailable; Intel flash and optional writable NAND
+remain mutable in-memory images. See [Mac gameplay validation](system10-mac.md). The input adapter uses the
 base SYSTEM/IN1 layout and rejects controls disabled by the source's
 `PORT_MODIFY` masks for Gamshara, GJ Space, Star Trigon and Kono Tako. DIP fields
 are raw switch levels; compound region DIP encodings remain a caller choice.
@@ -66,4 +67,5 @@ The runtime adapter follows the already-tested `namcos10_board`,
 `namcos10_crypto`, `namcos10_io`, and `nor_flash` modules. The MAME source is
 `src/mame/namco/namcos10.cpp` at the repository's pinned revision. The adapter
 does not claim full game support; CPU instruction execution and board-specific
-guest software still require their own validation.
+guest software require per-title validation. Mr. Driller 2, Mr. Driller G and
+Gamshara passed short scripted Mac gameplay checks on 2026-10-13.

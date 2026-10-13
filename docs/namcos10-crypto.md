@@ -66,13 +66,16 @@ reset/checkpoint/deactivation, table bit order/wrap/reactivation, MEM(M)
 banking, NAND command/address/OOB/page boundaries, ID/status, sequential rows
 and MEM(N) crypto/bypass rules. The complete suite passes ASan/UBSan.
 
-This is a read-only small-page NAND device. NAND programming/erase, busy
-latencies, ECC correction, large-page devices, the Intel NOR command state
-machine, bad-block remapping policies and complete board maps are not
-implemented. Unsupported NAND commands return an error and increment a
+The small-page NAND API defaults to read-only media. Optional writable backing
+enables 32-page block erase and buffered 528-byte page programming, including
+OOB, confirm, bit-clearing and reset persistence, following MAME. Bounds and
+read-only rejection tests pass under ASan/UBSan. Busy latencies, ECC correction,
+large-page devices and bad-block remapping policies remain outside this module.
+Intel NOR commands and complete base-board maps belong to the separate board
+adapter. Unsupported NAND commands return an error and increment a
 state diagnostic. ROM authenticity and nonlinear-table authenticity remain
-the ROM loader's responsibility. No real System 10 ROM was supplied for a
-boot or plaintext comparison in this task.
+the ROM loader's responsibility. Three real sets now have
+[short native Mac gameplay validation](system10-mac.md).
 
 To update profiles and regenerate independent expected vectors:
 
