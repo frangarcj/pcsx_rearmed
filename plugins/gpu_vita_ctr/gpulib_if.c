@@ -674,6 +674,30 @@ static int gp0_triangle_x_span_valid(const uint32_t *words, int stride,
     return max_x - min_x < 1024;
 }
 
+/* Keep the guest registers in hardware format. Normalize only the parser's
+ * copy; bit 13 remains the type-1 indexed-texture interleave flag. */
+static uint32_t native_draw_mode(uint32_t word)
+{
+    return (word & 0xff000000u) | gpu_tpage_to_renderer(word);
+}
+
+static void normalize_type1_packet(uint32_t *words)
+{
+    if (gpu_get_model() != 1) return;
+    unsigned cmd = words[0] >> 24;
+    if (cmd >= 0x24 && cmd <= 0x3f && (cmd & 4)) {
+        unsigned index = 4 + ((cmd >> 4) & 1);
+        words[index] = (words[index] & 0xffffu) |
+            (gpu_tpage_to_renderer(words[index] >> 16) << 16);
+    } else if (cmd == 0xe1) {
+        words[0] = native_draw_mode(words[0]);
+    } else if (cmd == 0xe3 || cmd == 0xe4) {
+        words[0] = (words[0] & 0xff0003ffu) | (((words[0] >> 12) & 0x3ffu) << 10);
+    } else if (cmd == 0xe5) {
+        words[0] = (words[0] & 0xff0007ffu) | (((words[0] >> 12) & 0x7ffu) << 11);
+    }
+}
+
 /* NEON/MAME reject each polygon triangle whose X span reaches 1024 pixels.
  * Keep this at the GP0 boundary so the renderer sees the same geometry and
  * texture state that the software rasterizer would. */
@@ -693,7 +717,7 @@ static unsigned submit_gp0_polygon(uint32_t *words, int count, const uint32_t *e
             ParseTaglessPrimitive((u32 *)words);
         } else if (textured && ex_regs) {
             /* The GP0 parser keeps draw state apart from gpulib's ex_regs. */
-            uint32_t draw_env = ex_regs[1];
+            uint32_t draw_env = gpu_get_model() == 1 ? native_draw_mode(ex_regs[1]) : ex_regs[1];
             ParseTaglessPrimitive((u32 *)&draw_env);
         }
         return valid_012 ? 1u : 0u;
@@ -707,7 +731,7 @@ static unsigned submit_gp0_polygon(uint32_t *words, int count, const uint32_t *e
 
     if (!valid_012 && !valid_123) {
         if (textured && ex_regs) {
-            uint32_t draw_env = ex_regs[1];
+            uint32_t draw_env = gpu_get_model() == 1 ? native_draw_mode(ex_regs[1]) : ex_regs[1];
             ParseTaglessPrimitive((u32 *)&draw_env);
         }
         return 0;
@@ -756,6 +780,7 @@ static void submit_gp0_packet(const uint32_t *words, int count, const uint32_t *
 
     packet[0] = ((uint32_t)count << 24) | 0x00ffffffu;
     memcpy(packet + 1, words, (size_t)count * sizeof(uint32_t));
+    normalize_type1_packet(packet + 1);
     /* GP0 ignores coordinate bits 15:11. Normalize only geometry here;
      * VRAM transfer positions, dimensions, colors and UVs retain their ABI. */
     normalize_gp0_coordinates(packet + 1, count);
@@ -827,10 +852,7 @@ static int init_context(void)
         return 1;
     if (!s_guest_vram)
         return 0;
-    if (gpu_get_model() != 2) {
-        SysPrintf("pcsx-vita: VitaGL rejects unimplemented GPU type 1\n");
-        return 0;
-    }
+    g_nativeGpuModel = gpu_get_model();
     g_nativeVramHeight = gpu_get_vram_height();
     if (g_nativeVramHeight != GPU_VRAM_ROWS_CONSOLE &&
         g_nativeVramHeight != GPU_VRAM_ROWS_SYSTEM12)
@@ -981,11 +1003,18 @@ int renderer_do_cmd_list(uint32_t *list, int count, uint32_t *ex_regs,
 
         if (cmd >= 0x24 && cmd <= 0x3f && (cmd & 4)) {
             const int tpage_index = 4 + ((cmd >> 4) & 1);
-            ex_regs[1] = (ex_regs[1] & ~0x1fffu) |
-                ((LE32TOH(packet[tpage_index]) >> 16) & 0x1fffu);
+            const unsigned mask = gpu_get_model() == 1 ? 0x3fffu : 0x1fffu;
+            ex_regs[1] = (ex_regs[1] & ~mask) |
+                ((LE32TOH(packet[tpage_index]) >> 16) & mask);
+            if (gpu_get_model() == 1)
+                gpu.type1_status = (gpu.type1_status & ~0x1fffu) | (ex_regs[1] & 0x1fffu);
         }
         if (cmd >= 0xe0 && cmd <= 0xe7)
             ex_regs[cmd & 7] = LE32TOH(packet[0]);
+        if (gpu_get_model() == 1 && cmd == 0xe1)
+            gpu.type1_status = (gpu.type1_status & ~0x1fffu) | (ex_regs[1] & 0x1fffu);
+        if (gpu_get_model() == 1 && cmd == 0xe6)
+            gpu.type1_status = (gpu.type1_status & ~0x1800u) | ((ex_regs[6] & 3u) << 11);
 
         submit_gp0_packet(packet, len, ex_regs);
         pos += len;

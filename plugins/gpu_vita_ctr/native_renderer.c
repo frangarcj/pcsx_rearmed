@@ -1514,7 +1514,13 @@ internal void NativeRenderer_DestroyPSXShaders(void)
 	"\t\tfloat lanePhase = fract(texelX * 0.25);\n"                                                        \
 	"\t\tfloat highByte = step(0.5, lanePhase);\n"                                                        \
 	"\t\tfloat highNibbleSel = step(0.5, fract(texelX * 0.5));\n"                                     \
-	"\t\tvec2 packedPixel = v_page_clut.xy + vec2(floor(texelX * 0.25), texel.y);\n"                      \
+	"\t\tvec2 offset = vec2(floor(texelX * 0.25), texel.y);\n"                                    \
+	"\t\tif (v_type1Interleaved > 0.5) {\n"                                                    \
+	"\t\t\tvec2 uv = mod(texel, 256.0);\n"                                                    \
+	"\t\t\toffset.x = mod(floor(uv.x / 4.0), 4.0) + mod(uv.y, 16.0) * 4.0;\n"              \
+	"\t\t\toffset.y = floor(uv.y / 16.0) * 16.0 + floor(uv.x / 16.0);\n"                     \
+	"\t\t}\n"                                                                                 \
+	"\t\tvec2 packedPixel = mod(v_page_clut.xy + offset, vec2(1024.0, VRAM_HEIGHT));\n"                      \
 	"\t\tvec2 packedRg = VRAM((packedPixel + vec2(0.5)) * c_VRAMTexel);\n"                              \
 	"\t\tfloat packedByte = floor(mix(packedRg.x, packedRg.y, highByte) * 255.0 + 0.5);\n"                 \
 	"\t\tfloat highNibble = floor(packedByte * (1.0 / 16.0));\n"                                     \
@@ -1543,7 +1549,15 @@ internal void NativeRenderer_DestroyPSXShaders(void)
 	"\tvec2 samplePSX(vec2 tc) {\n"                                                                               \
 	"\t\ttc = applyTextureWindow(tc);\n"                                                                              \
 	"\t\tfloat highByte = step(0.5, fract(floor(tc.x) * 0.5 + 0.25));\n"                                      \
-	"\t\tvec2 packedRg = VRAM((v_page_clut.xy + vec2(floor(tc.x) * 0.5 + 0.25, floor(tc.y) + 0.5)) * c_VRAMTexel);\n" \
+	"\t\tvec2 texel = floor(tc);\n"                                                           \
+	"\t\tvec2 offset = vec2(floor(texel.x / 2.0), texel.y);\n"                                 \
+	"\t\tif (v_type1Interleaved > 0.5) {\n"                                                    \
+	"\t\t\tvec2 uv = mod(texel, 256.0);\n"                                                    \
+	"\t\t\toffset.x = mod(floor(uv.x / 2.0), 8.0) + mod(floor(uv.x / 16.0), 2.0) * 64.0 + mod(uv.y, 8.0) * 8.0;\n" \
+	"\t\t\toffset.y = floor(uv.y / 8.0) * 8.0 + floor(uv.x / 32.0);\n"                        \
+	"\t\t}\n"                                                                                 \
+	"\t\tvec2 packedPixel = mod(v_page_clut.xy + offset, vec2(1024.0, VRAM_HEIGHT));\n"           \
+	"\t\tvec2 packedRg = VRAM((packedPixel + vec2(0.5)) * c_VRAMTexel);\n" \
 	"\t\tfloat paletteIndex = floor(mix(packedRg.x, packedRg.y, highByte) * 255.0 + 0.5);\n"              \
 	"\t\treturn samplePSXPalette(paletteIndex);\n"                                                        \
 	"\t}\n"
@@ -1840,6 +1854,7 @@ global_variable const char *gte_shader_cached_p4 =
 global_variable const char *gpu_shader_common = "	centroid varying vec4 v_texcoord;\n"
                                                 "	varying vec4 v_color;\n"
                                                 "	varying vec4 v_page_clut;\n"
+                                                "	varying float v_type1Interleaved;\n"
                                                 "	varying vec2 v_ditherCoord;\n"
                                                 "	varying float v_z;\n";
 
@@ -1906,7 +1921,8 @@ const char *gte_shader_32_rgba = "	uniform sampler2D s_texture;\n"
 #if defined(__vita__) || defined(PCSX_NATIVE_VITA_PATH)
 #define GTE_PAGE_CLUT_SETUP                                                                                     \
 	"\t\tv_page_clut.x = fract(a_position.z / 16.0) * 1024.0;\n"                                           \
-	"\t\tv_page_clut.y = floor(a_position.z / 16.0) * 256.0;\n"                                            \
+	"\t\tv_page_clut.y = floor(mod(a_position.z, 64.0) / 16.0) * 256.0;\n"                     \
+	"\t\tv_type1Interleaved = floor(a_position.z / 64.0);\n"                                            \
 	"\t\tv_page_clut.z = fract(a_position.w / 64.0) * 1024.0;\n"                                           \
 	"\t\tv_page_clut.w = floor(mod(a_position.w, 65536.0) / 64.0);\n"
 #else

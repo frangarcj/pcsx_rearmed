@@ -7,6 +7,8 @@
 #ifndef NATIVE_GPU_H
 #define NATIVE_GPU_H
 
+extern int g_nativeGpuModel;
+
 #include <macros.h>
 #include <psx/libgte.h>
 #include <psx/libgpu.h>

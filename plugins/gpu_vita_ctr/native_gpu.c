@@ -34,6 +34,7 @@ void Platform_PollHostEvents(void);
 extern int g_cfg_bilinearFiltering;
 extern int g_dbg_emulatorPaused;
 extern int g_dbg_polygonSelected;
+int g_nativeGpuModel = 2;
 
 #define NATIVE_GPU_LOG(fmt, ...)   Platform_Log("[CTR GPU] " fmt, __VA_ARGS__)
 #define NATIVE_GPU_ERROR(fmt, ...) Platform_LogError("[CTR GPU] [%s] - " fmt, __func__, __VA_ARGS__)
@@ -65,6 +66,14 @@ internal short GetTPageBase(int tpage)
 
 	// NOTE(aalhendi): ctr-native local divergence for CTR retail emitters. The shader wants xPage + yPage * 16, not raw draw-mode bits.
 	return (s16)((page & 0x1f) | ((VRAM_HEIGHT > 512) ? ((page >> 6) & 0x20) : 0));
+}
+
+/* The vertex's page field has room for a flag above the physical 64 pages.
+ * Indexed type-1 textures use it to select the swizzled shader addressing. */
+internal short GetVertexTPage(int tpage)
+{
+    return GetTPageBase(tpage) | ((g_nativeGpuModel == 1 && (tpage & 0x2000) &&
+        GetTPageFormat(tpage) < TF_16_BIT) ? 0x40 : 0);
 }
 
 internal s16 NativeGpu_SignExtend11(u32 value)
@@ -1535,7 +1544,7 @@ void MakeTexcoordQuad(GrVertex *vertex, u8 *uv0, u8 *uv1, u8 *uv2, u8 *uv3, s16 
 	assert(uv3);
 
 	const u8 bright = 2;
-	const short texPage = GetTPageBase(page);
+	const short texPage = GetVertexTPage(page);
 
 	vertex[0].u = uv0[0];
 	vertex[0].v = uv0[1];
@@ -1577,7 +1586,7 @@ void MakeTexcoordTriangle(GrVertex *vertex, u8 *uv0, u8 *uv1, u8 *uv2, s16 page,
 	assert(uv2);
 
 	const u8 bright = 2;
-	const short texPage = GetTPageBase(page);
+	const short texPage = GetVertexTPage(page);
 
 	vertex[0].u = uv0[0];
 	vertex[0].v = uv0[1];
@@ -1611,7 +1620,7 @@ void MakeTexcoordRect(GrVertex *vertex, u8 *uv, s16 page, s16 clut, s16 w, s16 h
 
 	const u8 bright = 2;
 	const u8 dither = 0;
-	const short texPage = GetTPageBase(page);
+	const short texPage = GetVertexTPage(page);
 	const int endU = (int)uv[0] + w;
 	const int endV = (int)uv[1] + h;
 	const bool wrapsU = endU == 256;
@@ -2131,7 +2140,7 @@ internal void AddSplit(bool semiTrans, bool textured, bool framebufferFeedback, 
 	/* 8-bit pages too (as GXM P8), when the page does not run past VRAM's
 	 * right edge; their page carries NATIVE_P8_PAGE_FLAG (0x40). */
 	const bool p8Page = texFormat == TF_8_BIT && (GetTPageBase(tpage) & 15) < 15;
-	const bool p4CacheEligible = textured && s_gpu.overrideTexture == 0 && (texFormat == TF_4_BIT || p8Page) && !framebufferFeedback;
+	const bool p4CacheEligible = !(g_nativeGpuModel == 1 && (tpage & 0x2000)) && textured && s_gpu.overrideTexture == 0 && (texFormat == TF_4_BIT || p8Page) && !framebufferFeedback;
 	const bool p4SuperTurboTint = p4CacheEligible && texFormat == TF_4_BIT && superTurboTint;
 	const s16 p4Page = p4CacheEligible ? (s16)(GetTPageBase(tpage) | (texFormat == TF_8_BIT ? 0x40 : 0)) : -1;
 	const u16 p4Clut = p4CacheEligible ? (u16)clut : 0;
@@ -4009,7 +4018,7 @@ internal int ProcessDrawEnv(P_TAG *polyTag)
 		case 0x1:
 		{
 			// DR_TPAGE
-			activeDrawEnv.tpage = (code & 0x1FFF);
+			activeDrawEnv.tpage = (code & (g_nativeGpuModel == 1 ? 0x3FFF : 0x1FFF));
 			activeDrawEnv.dtd = (code >> 9) & 1;
 			// NOTE(aalhendi): Standalone DR_TPAGE packets use the same E1 word for blend changes; only full DRAWENV packets retarget native on-screen/offscreen rendering.
 			if (fullDrawEnvPacket)
@@ -4081,7 +4090,7 @@ internal void ProcessDrawEnvCommand(u32 code)
 	switch (primSubType)
 	{
 	case 0x1:
-		activeDrawEnv.tpage = (code & 0x1FFF);
+		activeDrawEnv.tpage = (code & (g_nativeGpuModel == 1 ? 0x3FFF : 0x1FFF));
 		activeDrawEnv.dtd = (code >> 9) & 1;
 		break;
 	case 0x2:

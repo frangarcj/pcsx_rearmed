@@ -128,6 +128,9 @@ int harness_gpu_vram_selftest(void)
   harness_gp0(1 | (1u << 16));
   (void)GPUreadStatus();
   renderer_flush_queues();
+#ifdef GPU_VITA_CTR
+  renderer_sync_vram_to_cpu(dst_x, dst_y, 4, 1);
+#endif
   for (i = 0; i < 4; i++)
     got[i] = harness_vram_pixel(dst_x + i, dst_y);
 
@@ -154,6 +157,21 @@ int harness_gpu_vram_selftest(void)
   return pass ? 0 : 2;
 }
 
+static int harness_type1_expect_pixel(unsigned dst_x, unsigned dst_y, uint16_t expected)
+{
+  (void)GPUreadStatus();
+  renderer_flush_queues();
+#ifdef GPU_VITA_CTR
+  renderer_sync_vram_to_cpu(dst_x, dst_y, 1, 1);
+#endif
+  if (harness_vram_pixel(dst_x, dst_y) != expected) {
+    fprintf(stderr, "GPU type-1 pixel (%u,%u) got=%04x expected=%04x\n",
+      dst_x, dst_y, harness_vram_pixel(dst_x, dst_y), expected);
+    return 0;
+  }
+  return 1;
+}
+
 static int harness_type1_textured_pixel(unsigned dst_x, unsigned dst_y,
                                         unsigned uv, uint16_t expected)
 {
@@ -161,14 +179,7 @@ static int harness_type1_textured_pixel(unsigned dst_x, unsigned dst_y,
   harness_gp0(dst_x | (dst_y << 16));
   harness_gp0((400u * 64u << 16) | uv);
   harness_gp0(1u | (1u << 16));
-  (void)GPUreadStatus();
-  renderer_flush_queues();
-  if (harness_vram_pixel(dst_x, dst_y) != expected) {
-    fprintf(stderr, "GPU type-1 pixel (%u,%u) uv=%04x got=%04x expected=%04x\n",
-      dst_x, dst_y, uv, harness_vram_pixel(dst_x, dst_y), expected);
-    return 0;
-  }
-  return 1;
+  return harness_type1_expect_pixel(dst_x, dst_y, expected);
 }
 
 /* Exercise type-1 field packing and its MAME-verified indexed texture
@@ -185,9 +196,18 @@ int harness_gpu_type1_selftest(void)
     400u * 1024u + 5, 400u * 1024u + 7,
     row256 + 4, row256 + 1024u, row256 + 64u + 8,
     row256 + 1024u + 64, row256 + 1024u + 2,
+    (upper ? 512u : 256u) * 1024u + 4, (upper ? 768u : 256u) * 1024u + 4,
     dst_y * 1024u + dst_x, dst_y * 1024u + dst_x + 1,
     dst_y * 1024u + dst_x + 2, dst_y * 1024u + dst_x + 3,
-    dst_y * 1024u + dst_x + 4
+    dst_y * 1024u + dst_x + 4,
+    dst_y * 1024u + dst_x + 10, dst_y * 1024u + dst_x + 11,
+    dst_y * 1024u + dst_x + 12, dst_y * 1024u + dst_x + 13,
+    (dst_y + 1) * 1024u + dst_x + 10, (dst_y + 1) * 1024u + dst_x + 11,
+    (dst_y + 1) * 1024u + dst_x + 12, (dst_y + 1) * 1024u + dst_x + 13,
+    (dst_y + 2) * 1024u + dst_x + 10, (dst_y + 2) * 1024u + dst_x + 11,
+    (dst_y + 2) * 1024u + dst_x + 12, (dst_y + 2) * 1024u + dst_x + 13,
+    (dst_y + 3) * 1024u + dst_x + 10, (dst_y + 3) * 1024u + dst_x + 11,
+    (dst_y + 3) * 1024u + dst_x + 12, (dst_y + 3) * 1024u + dst_x + 13
   };
   uint16_t saved[sizeof(touched) / sizeof(touched[0])];
   unsigned i;
@@ -232,6 +252,7 @@ int harness_gpu_type1_selftest(void)
   gpu.vram[row256 + 1024u + 64] = 7u << 8; /* U=33,V=0 -> page X=64, row 1 */
   gpu.vram[row256 + 1024u + 2] = color16; /* 15bpp path remains linear */
   renderer_update_caches(0, 256, 1024, 2, 0);
+  renderer_update_caches(0, 400, 16, 1, 0);
 
   /* type 1: bit 5 selects Y=256; bit 13 enables indexed interleave. */
   harness_gp0(0xe1000000u | 0x2020u);
@@ -249,11 +270,56 @@ int harness_gpu_type1_selftest(void)
   (void)GPUreadStatus();
   pass &= harness_type1_textured_pixel(dst_x + 2, dst_y, 2u | (1u << 8), color16);
 
+  if (upper) {
+    /* Type-1 Y bits 5/6 must select all four 256-row texture banks. */
+    gpu.vram[512u * 1024u + 4] = 3;
+    gpu.vram[768u * 1024u + 4] = 6;
+    renderer_update_caches(0, 512, 64, 1, 0);
+    renderer_update_caches(0, 768, 64, 1, 0);
+    harness_gp0(0xe1002040u);
+    pass &= harness_type1_textured_pixel(dst_x + 2, dst_y, 1u << 8, color4);
+    harness_gp0(0xe1002060u);
+    pass &= harness_type1_textured_pixel(dst_x + 2, dst_y, 1u << 8, color8);
+  }
+
+  /* A polygon carries TPAGE in UV1, unlike a sprite's E1 state. Select an
+   * interleaved page after the preceding 16bpp draw and check the actual
+   * rasterized color as well as the guest's unconverted TPAGE register. */
+  harness_gp0(0x24808080u);
+  harness_gp0((dst_x + 10) | (dst_y << 16));
+  harness_gp0((400u * 64u << 16) | 16u);
+  harness_gp0((dst_x + 14) | (dst_y << 16));
+  harness_gp0((0x2020u << 16) | 16u);
+  harness_gp0((dst_x + 10) | ((dst_y + 4) << 16));
+  harness_gp0(16u);
+  pass &= harness_type1_expect_pixel(dst_x + 10, dst_y, color8);
+  pass &= (gpu.ex_regs[1] & 0x3fffu) == 0x2020u;
+
+  /* Signed E5 Y starts at bit 12. A clipped sprite shifts onto x=100,
+   * y=dst_y; the adjacent existing green pixel must stay outside E4. */
+  harness_gp0(0xe3000000u | dst_x | (dst_y << 12));
+  harness_gp0(0xe4000000u | dst_x | (dst_y << 12));
+  harness_gp0(0xe5000000u | 0x7fdu | (0x7fbu << 12));
+  harness_gp0(0x64808080u);
+  harness_gp0((dst_x + 3) | ((dst_y + 5) << 16));
+  harness_gp0((400u * 64u << 16) | (1u << 8));
+  harness_gp0(2u | (1u << 16));
+  pass &= harness_type1_expect_pixel(dst_x, dst_y, color4);
+  pass &= harness_type1_expect_pixel(dst_x + 1, dst_y, color8);
+  harness_gp0(0xe3000000u);
+  harness_gp0(0xe4ffffffu);
+  harness_gp0(0xe5000000u);
+
   for (i = 0; i < sizeof(touched) / sizeof(touched[0]); i++)
     gpu.vram[touched[i]] = saved[i];
   renderer_update_caches(0, 256, 1024, 2, 0);
   renderer_update_caches(0, 400, 16, 1, 0);
+  if (upper) {
+    renderer_update_caches(0, 512, 64, 1, 0);
+    renderer_update_caches(0, 768, 64, 1, 0);
+  }
   renderer_update_caches(dst_x, dst_y, 5, 1, 0);
+  renderer_update_caches(dst_x + 10, dst_y, 4, 4, 0);
   GPUwriteStatus(0x00000000);
   fprintf(stderr, "GPU type-1 rows=%u command fields + 4/8/16bpp interleave selftest: %s\n",
     gpu_vram_height, pass ? "PASS" : "FAIL");
