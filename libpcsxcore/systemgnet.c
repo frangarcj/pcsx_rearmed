@@ -17,6 +17,7 @@
 #include "arcade/zn_board.h"
 #include "arcade/zn_mcu.h"
 #include "arcade/psx_sio.h"
+#include "arcade/pcm_wav.h"
 #include "gpu_vram.h"
 #if defined(VITA) || defined(__vita__)
 #include <openssl/sha.h>
@@ -28,6 +29,7 @@
 #endif
 #include <errno.h>
 #include <inttypes.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -118,25 +120,52 @@ typedef struct GnetBoard {
     gnet_zoom_board *zoom;
     gnet_storage_t *storage;
     int test_storage_fixture;
+    char flash_state_path[PATH_BYTES];
     zn_board_t zn;
     ZNMCU *mcu;
     psx_sio_t *sio[2];
     uint8_t inputs[6], dsw;
+    uint8_t analog[2], handles[2];
+    uint16_t trackball[2], lamps;
+    uint8_t weights[2];
     int cat_out[2], mcu_out, active, fault, zn_initialized;
-    int memory_initialized;
+    int memory_initialized, reset_pending;
     uint32_t old_ram_size, old_rom_size, last_cycle;
     uint64_t total_cycles, mn_cycles, mn_fraction;
     uint64_t reads, writes, unsupported;
+    PcmWav wav;
+    uint64_t audio_frames, audio_nonzero;
+    unsigned audio_peak;
 } GnetBoard;
 static GnetBoard board;
 static const char *test_storage_chd_path;
 static systemgnet_audio_frame_fn audio_output;
 static void *audio_output_opaque;
 
+static void request_soft_reset(void *opaque)
+{
+    (void)opaque;
+    board.reset_pending = 1;
+}
+
 static void zoom_audio_frame(void *opaque, float left, float right,
                              uint64_t zsg_cycle)
 {
     (void)opaque;
+    int16_t channels[4] = {0};
+    float samples[2] = {left, right};
+    for (unsigned i = 0; i < 2; i++) {
+        if (!isfinite(samples[i])) { board.fault = 1; continue; }
+        float clipped = fmaxf(-1.0f, fminf(1.0f, samples[i]));
+        int value = (int)lrintf(clipped * 32768.0f);
+        if (value > 32767) value = 32767;
+        channels[i] = (int16_t)value;
+        unsigned magnitude = value < 0 ? (unsigned)-value : (unsigned)value;
+        if (magnitude > board.audio_peak) board.audio_peak = magnitude;
+        if (value) board.audio_nonzero++;
+    }
+    board.audio_frames++;
+    if (pcm_wav_append4(&board.wav, channels, 1)) board.fault = 1;
     if (audio_output) audio_output(audio_output_opaque, left, right, zsg_cycle);
 }
 
@@ -454,8 +483,14 @@ static uint8_t input_read(void *opaque, zn_board_input_t input)
     return input >= ZN_INPUT_P1 && input <= ZN_INPUT_P4 ? board.inputs[input] : board.inputs[2 + (input == ZN_INPUT_SERVICE ? 0 : 1)];
 }
 static uint8_t mcu_dsw(void *opaque) { (void)opaque; return board.dsw; }
+static uint8_t mcu_analog0(void *opaque) { (void)opaque; return board.analog[0]; }
+static uint8_t mcu_analog1(void *opaque) { (void)opaque; return board.analog[1]; }
 static uint8_t mcu_analog(void *opaque) { (void)opaque; return 0xff; }
 static uint16_t mcu_trackball(void *opaque) { (void)opaque; return 0; }
+static uint16_t mcu_handle0(void *opaque)
+{ (void)opaque; board.trackball[0] += (int)board.handles[0] - 128; return board.trackball[0]; }
+static uint16_t mcu_handle1(void *opaque)
+{ (void)opaque; board.trackball[1] += (((int)board.handles[1] - 128) * -193) / 256; return board.trackball[1]; }
 static void update_rxd(void)
 {
     if (board.sio[0]) psx_sio_write_rxd(board.sio[0], board.cat_out[0] && board.cat_out[1] && board.mcu_out);
@@ -499,6 +534,62 @@ static void sio_irq(void *opaque, int state)
     if (state && psxRegs.ptrs.psxH) psxHu32ref(0x1070) |= SWAPu32(1u << (7 + port));
 }
 
+/* Separate emulated flash NVRAM from the strictly audited source images. */
+static int flash_state(int save)
+{
+    enum { BYTES = FIRM_BYTES + GNET_ZOOM_PROGRAM_FLASH_BYTES + 3 * FIRM_BYTES };
+    unsigned char expected[128] = {0}, header[128], digest[20], stored[20];
+    unsigned char *data;
+    char temporary[PATH_BYTES];
+    FILE *file;
+    int failed = 0;
+    if (!board.flash_state_path[0]) return 0;
+    int n = snprintf((char *)expected, sizeof(expected), "PCSXGNETFLASH1 %s %s %s %s\n",
+        board.profile->set, board.bios_root->set,
+        board.bios_option ? board.bios_option->name : "fixed",
+        board.profile->chd_sha1 ? board.profile->chd_sha1 : "none");
+    if (n < 0 || n >= (int)sizeof(expected)) return -1;
+    if (save) {
+        if (snprintf(temporary, sizeof(temporary), "%s.tmp", board.flash_state_path) >= (int)sizeof(temporary)) return -1;
+        file = fopen(temporary, "wb");
+    } else {
+        file = fopen(board.flash_state_path, "rb");
+        if (!file && errno == ENOENT) return 0;
+    }
+    if (!file) return -1;
+    data = (unsigned char *)malloc(BYTES);
+    if (!data) { fclose(file); return -1; }
+    if (save) {
+        memcpy(data, board.firm, FIRM_BYTES);
+        memcpy(data + FIRM_BYTES, board.zoomprog, GNET_ZOOM_PROGRAM_FLASH_BYTES);
+        for (unsigned i = 0; i < 3; i++) memcpy(data + FIRM_BYTES + GNET_ZOOM_PROGRAM_FLASH_BYTES + i * FIRM_BYTES, board.waves[i], FIRM_BYTES);
+        failed = gnet_sha1(data, BYTES, digest) ||
+            fwrite(expected, 1, sizeof(expected), file) != sizeof(expected) ||
+            fwrite(digest, 1, sizeof(digest), file) != sizeof(digest) ||
+            fwrite(data, 1, BYTES, file) != BYTES;
+    } else {
+        failed = fread(header, 1, sizeof(header), file) != sizeof(header) ||
+            memcmp(header, expected, sizeof(header)) ||
+            fread(stored, 1, sizeof(stored), file) != sizeof(stored) ||
+            fread(data, 1, BYTES, file) != BYTES || fgetc(file) != EOF ||
+            ferror(file) || gnet_sha1(data, BYTES, digest) || memcmp(stored, digest, sizeof(digest));
+        if (!failed) {
+            memcpy(board.firm, data, FIRM_BYTES);
+            memcpy(board.zoomprog, data + FIRM_BYTES, GNET_ZOOM_PROGRAM_FLASH_BYTES);
+            for (unsigned i = 0; i < 3; i++) memcpy(board.waves[i], data + FIRM_BYTES + GNET_ZOOM_PROGRAM_FLASH_BYTES + i * FIRM_BYTES, FIRM_BYTES);
+        }
+    }
+    free(data);
+    if (fclose(file)) failed = 1;
+    if (save) {
+        if (!failed && rename(temporary, board.flash_state_path)) failed = 1;
+        if (failed) remove(temporary);
+    }
+    if (failed) fprintf(stderr, "SystemGNet flash NVRAM %s failed: %s\n", save ? "save" : "load", board.flash_state_path);
+    else fprintf(stderr, "SystemGNet flash NVRAM %s PASS: %s\n", save ? "save" : "load", board.flash_state_path);
+    return failed ? -1 : 0;
+}
+
 static int destroy_devices(void)
 {
     unsigned i;
@@ -509,6 +600,8 @@ static int destroy_devices(void)
         }
         board.zoom = NULL;
     }
+    if (board.active && flash_state(1))
+        fprintf(stderr, "G-Net: flash state could not be persisted\n");
     if (board.storage) {
         if (gnet_storage_flush(board.storage) != GNET_STORAGE_OK)
             fprintf(stderr, "G-Net: storage overlay flush failed; writes may be lost\n");
@@ -524,6 +617,7 @@ static int destroy_devices(void)
     free(board.bios); free(board.key0); free(board.key1); free(board.firm); free(board.eprom);
     free(board.zoomprog);
     for (i = 0; i < 3; ++i) free(board.waves[i]);
+    pcm_wav_close(&board.wav);
     memset(&board, 0, sizeof(board));
     return 0;
 }
@@ -538,6 +632,8 @@ static int create_devices(void)
     uint8_t keys[2][8];
     unsigned i;
     memset(board.inputs, 0xff, sizeof(board.inputs));
+    memset(board.analog, 0xff, sizeof(board.analog));
+    memset(board.handles, 0x80, sizeof(board.handles));
     board.dsw = 0x0f; board.cat_out[0] = board.cat_out[1] = board.mcu_out = 1;
     for (i = 0; i < 2; ++i) {
         sio_cb.opaque = (void *)(uintptr_t)i; sio_cb.irq = sio_irq;
@@ -546,6 +642,13 @@ static int create_devices(void)
     }
     for (i = 0; i < 8; ++i) mcfg.analog[i] = mcu_analog;
     for (i = 0; i < 4; ++i) mcfg.trackball[i] = mcu_trackball;
+    if (board.profile && !strcmp(board.profile->input, "gobyrc")) {
+        memset(board.analog, 0x80, sizeof(board.analog));
+        mcfg.analog[0] = mcu_analog0; mcfg.analog[1] = mcu_analog1;
+    }
+    if (board.profile && !strcmp(board.profile->input, "mawasunda")) {
+        mcfg.trackball[0] = mcu_handle0; mcfg.trackball[1] = mcu_handle1;
+    }
     mcfg.dsw = mcu_dsw; mcfg.dsr = mcu_dsr; mcfg.txd = mcu_txd;
     if (zn_mcu_create(&mcfg, &board.mcu) != ZN_MCU_OK) return -1;
     memcpy(keys[0], board.key0, 8); memcpy(keys[1], board.key1, 8);
@@ -560,7 +663,11 @@ static int create_devices(void)
     gcfg.zoom_program_flash = board.zoomprog; gcfg.zoom_program_flash_size = GNET_ZOOM_PROGRAM_FLASH_BYTES;
     for (i = 0; i < 3; ++i) { gcfg.sample_flash[i] = board.waves[i]; gcfg.sample_flash_size[i] = GNET_FIRM_FLASH_BYTES; }
     gcfg.eprom = board.eprom; gcfg.eprom_size = EPROM_BYTES;
+    /* These source input configurations default JP1 to the EPROM bank. */
+    gcfg.jp1 = board.profile && (!strcmp(board.profile->input, "taitogn_jp1") ||
+        !strcmp(board.profile->input, "raystormg") || !strcmp(board.profile->input, "aerofgtsg"));
     gcfg.audio_frame = zoom_audio_frame;
+    gcfg.request_soft_reset = request_soft_reset;
     gcfg.pc_card = board.storage ? gnet_storage_card_ops(board.storage) : NULL;
     if (gnet_zoom_create(&gcfg, &board.zoom) != GNET_ZOOM_OK) return -1;
     if (gpu_set_model(2) || gpu_set_vram_height(1024)) return -1;
@@ -672,6 +779,7 @@ int systemgnet_load(const char *directory)
     if (!board.zoomprog || !board.waves[0] || !board.waves[1] || !board.waves[2]) goto bad;
     memset(board.zoomprog, 0xff, GNET_ZOOM_PROGRAM_FLASH_BYTES);
     for (unsigned i = 0; i < 3; ++i) memset(board.waves[i], 0xff, GNET_FIRM_FLASH_BYTES);
+    if (join_path(board.flash_state_path, directory, "flash.nvram") || flash_state(0)) goto bad;
     if (create_devices()) goto bad;
     return 0;
 bad:
@@ -803,7 +911,9 @@ void systemgnet_mem_reset(void)
 void systemgnet_reset(void)
 {
     if (!board.active) return;
-    board.last_cycle = psxRegs.cycle; board.fault = 0;
+    board.last_cycle = psxRegs.cycle; board.fault = 0; board.reset_pending = 0;
+    if (gnet_zoom_control_write(board.zoom, 0x10) != GNET_ZOOM_OK)
+        board.fault = 1;
     if (board.storage && gnet_storage_reset(board.storage) != GNET_STORAGE_OK)
         board.fault = 1;
 }
@@ -842,9 +952,21 @@ int systemgnet_sync(uint32_t cycle)
     if (scaled / PSX_CLOCK_HZ > UINT64_MAX - board.mn_cycles) { board.fault = 1; return -1; }
     board.mn_cycles += scaled / PSX_CLOCK_HZ;
     board.mn_fraction = scaled % PSX_CLOCK_HZ;
-    if (gnet_zoom_sync_to_cycle(board.zoom, board.mn_cycles) != GNET_ZOOM_OK) board.fault = 1;
-    return board.fault ? -1 : 0;
+    int zoom_result = gnet_zoom_sync_to_cycle(board.zoom, board.mn_cycles);
+    if (zoom_result != GNET_ZOOM_OK) {
+        if (!board.fault) fprintf(stderr, "SystemGNet Zoom fault main_pc=%08x sound_pc=%06x result=%d kind=%u cycles=%" PRIu64 "\n",
+            psxRegs.pc, gnet_zoom_sound_pc(board.zoom), zoom_result,
+            gnet_zoom_fault(board.zoom), board.mn_cycles);
+        board.fault = 1;
+    }
+    return board.fault ? -1 : board.reset_pending;
 }
+
+int systemgnet_reset_requested(void) { return board.reset_pending; }
+
+int systemgnet_open_audio(const char *path)
+{ return board.active ? pcm_wav_open(&board.wav, path, 25000000u / 768u) : -1; }
+int systemgnet_close_audio(void) { return pcm_wav_close(&board.wav); }
 
 static int sio_bus(uint32_t address, unsigned width, uint32_t *value, int write)
 {
@@ -864,7 +986,7 @@ static int gnet_map(uint32_t address)
 {
     return (address >= 0x1f000000u && address < 0x1f800000u) ||
         address == 0x1fa30000u || address == 0x1fb40000u || address == 0x1fb60000u ||
-        address == 0x1fb70000u || (address >= 0x1fb00000u && address < 0x1fb10000u) ||
+        (address >= 0x1fb70000u && address < 0x1fb70002u) || (address >= 0x1fb00000u && address < 0x1fb10000u) ||
         address == 0x1fb80000u || address == 0x1fb80002u || address == 0x1fba0000u ||
         address == 0x1fbc0000u || (address >= 0x1fbe0000u && address < 0x1fbe0200u);
 }
@@ -885,11 +1007,15 @@ int systemgnet_read(uint32_t address, unsigned width, uint32_t *value)
     if (!board.active || !value || (width != 1 && width != 2 && width != 4) || (physical & (width - 1))) return 0;
     if (!gnet_map(physical) && !zn_common_map(physical) &&
         !(physical >= 0x1f801040u && physical < 0x1f801060u)) return 0;
-    if (systemgnet_sync(psxRegs.cycle)) { *value = UINT32_MAX; return -1; }
+    if (systemgnet_sync(psxRegs.cycle) < 0) { *value = UINT32_MAX; return -1; }
     if (sio_bus(physical, width, value, 0)) return 1;
     result = gnet_zoom_bus_read(board.zoom, physical, width, value);
     if (result == GNET_ZOOM_UNMAPPED) result = zn_board_read(&board.zn, physical, width, value) ? GNET_ZOOM_OK : GNET_ZOOM_UNMAPPED;
-    if (result == GNET_ZOOM_UNSUPPORTED) { board.unsupported++; board.fault = 1; *value = UINT32_MAX; return 1; }
+    if (result == GNET_ZOOM_UNSUPPORTED) {
+        if (!board.fault) fprintf(stderr, "SystemGNet unsupported read pc=%08x address=%08x width=%u bank=%u\n",
+            psxRegs.pc, physical, width, gnet_zoom_selected_bank(board.zoom));
+        board.unsupported++; board.fault = 1; *value = UINT32_MAX; return 1;
+    }
     if (result < 0) { board.fault = 1; *value = UINT32_MAX; return -1; }
     if (result == GNET_ZOOM_OK) board.reads++;
     return result == GNET_ZOOM_OK;
@@ -900,11 +1026,24 @@ int systemgnet_write(uint32_t address, unsigned width, uint32_t value)
     if (!board.active || (width != 1 && width != 2 && width != 4) || (physical & (width - 1))) return 0;
     if (!gnet_map(physical) && !zn_common_map(physical) &&
         !(physical >= 0x1f801040u && physical < 0x1f801060u)) return 0;
-    if (systemgnet_sync(psxRegs.cycle)) return -1;
+    if (systemgnet_sync(psxRegs.cycle) < 0) return -1;
     if (sio_bus(physical, width, &value, 1)) return 1;
+    /* Mawasunda's source flash-bank extension drives handle weights/lamps. */
+    if (board.profile && !strcmp(board.profile->machine, "mawasunda") &&
+        gnet_zoom_selected_bank(board.zoom) == 0 &&
+        (physical == 0x1f600000u || physical == 0x1f600002u) && width == 2) {
+        if (physical == 0x1f600000u) {
+            board.weights[0] = value & 31; board.weights[1] = (value >> 8) & 31;
+        } else board.lamps = (uint16_t)~value;
+        board.writes++; return 1;
+    }
     result = gnet_zoom_bus_write(board.zoom, physical, width, value);
     if (result == GNET_ZOOM_UNMAPPED) result = zn_board_write(&board.zn, physical, width, value) ? GNET_ZOOM_OK : GNET_ZOOM_UNMAPPED;
-    if (result == GNET_ZOOM_UNSUPPORTED) { board.unsupported++; board.fault = 1; return 1; }
+    if (result == GNET_ZOOM_UNSUPPORTED) {
+        if (!board.fault) fprintf(stderr, "SystemGNet unsupported write pc=%08x address=%08x width=%u value=%08x bank=%u\n",
+            psxRegs.pc, physical, width, value, gnet_zoom_selected_bank(board.zoom));
+        board.unsupported++; board.fault = 1; return 1;
+    }
     if (result < 0) { board.fault = 1; return -1; }
     if (result == GNET_ZOOM_OK) board.writes++;
     return result == GNET_ZOOM_OK;
@@ -921,12 +1060,38 @@ int systemgnet_set_input(const char *name, int pressed)
         {"p2_start",3,2},{"coin1",3,16},{"coin2",3,32}
     };
     if (!board.active || !name || (pressed != 0 && pressed != 1)) return -1;
+    if (!strcmp(name, "jp1")) {
+        if (gnet_zoom_set_jp1(board.zoom, (unsigned)pressed)) return -1;
+        return gnet_zoom_control_write(board.zoom, gnet_zoom_control_read(board.zoom));
+    }
     for (unsigned i = 0; i < sizeof(map) / sizeof(map[0]); ++i) if (!strcmp(name, map[i].name)) {
         if (pressed) board.inputs[map[i].port] &= (uint8_t)~map[i].mask;
         else board.inputs[map[i].port] |= (uint8_t)map[i].mask;
         return 0;
     }
     return -1;
+}
+
+unsigned systemgnet_analog_max(const char *name)
+{
+    if (!name || !board.profile) return 0;
+    if (!strcmp(board.profile->input, "gobyrc") &&
+        (!strcmp(name, "p1_wheel") || !strcmp(name, "p1_trigger"))) return 255;
+    if (!strcmp(board.profile->input, "mawasunda") &&
+        (!strcmp(name, "p1_handle") || !strcmp(name, "p2_handle"))) return 255;
+    return 0;
+}
+
+int systemgnet_set_analog(const char *name, unsigned value)
+{
+    if (!board.active || !systemgnet_analog_max(name) || value > 255) return -1;
+    if (!strcmp(board.profile->input, "gobyrc")) {
+        board.analog[!strcmp(name, "p1_trigger")] = (uint8_t)value;
+    } else {
+        if (!value) return -1;
+        board.handles[!strcmp(name, "p2_handle")] = (uint8_t)value;
+    }
+    return 0;
 }
 int systemgnet_eeprom_import(const unsigned char *image, size_t size)
 { return board.active ? zn_board_eeprom_import(&board.zn, image, size) : -1; }
@@ -963,4 +1128,14 @@ void systemgnet_report(FILE *out)
             board.profile->bios_model, board.profile->machine,
             board.profile->input, board.profile->init,
             board.profile->rotation, board.profile->flags);
+    fprintf(out, "SystemGNet Zoom pc=%06x fault=%u watchdog_requests=%" PRIu64
+        " reset_pending=%d audio_rate=%u audio_frames=%" PRIu64 " peak=%u nonzero=%" PRIu64 " WAV_bytes=%" PRIu64 "\n",
+        gnet_zoom_sound_pc(board.zoom), gnet_zoom_fault(board.zoom),
+        gnet_zoom_watchdog_reset_requests(board.zoom), board.reset_pending,
+        25000000u / 768u, board.audio_frames, board.audio_peak, board.audio_nonzero, board.wav.bytes);
+    if (board.storage) fprintf(out, "SystemGNet storage locked=%d ata_status=%02x\n",
+        gnet_storage_is_locked(board.storage), gnet_storage_ata_status(board.storage));
+    if (psxRegs.ptrs.psxH) fprintf(out, "SystemGNet DMA4 madr=%08x bcr=%08x chcr=%08x dpcr=%08x dicr=%08x irq=%04x/%04x sr=%08x cause=%08x\n",
+        psxHu32(0x10c0), psxHu32(0x10c4), psxHu32(0x10c8), psxHu32(0x10f0), psxHu32(0x10f4),
+        psxHu16(0x1070), psxHu16(0x1074), psxRegs.CP0.n.SR, psxRegs.CP0.n.Cause);
 }

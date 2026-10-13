@@ -32,12 +32,18 @@ uint32_t systemgnet_main_clock_hz(void);
  * may restart when the Zoom sound devices reset. The client owns opaque and
  * must unregister with NULL before freeing it. */
 void systemgnet_set_audio_output(systemgnet_audio_frame_fn callback, void *opaque);
+int systemgnet_open_audio(const char *path);
+int systemgnet_close_audio(void);
 void systemgnet_mem_reset(void);
 void systemgnet_reset(void);
 int systemgnet_sync(uint32_t psx_cycle);
+/* Positive sync requests a deferred core reset at a safe CPU boundary. */
+int systemgnet_reset_requested(void);
 int systemgnet_read(uint32_t address, unsigned width, uint32_t *value);
 int systemgnet_write(uint32_t address, unsigned width, uint32_t value);
 int systemgnet_set_input(const char *control, int pressed);
+unsigned systemgnet_analog_max(const char *control);
+int systemgnet_set_analog(const char *control, unsigned value);
 int systemgnet_eeprom_import(const unsigned char *image, size_t size);
 int systemgnet_eeprom_export(unsigned char *image, size_t size);
 int systemgnet_selftest(void);
