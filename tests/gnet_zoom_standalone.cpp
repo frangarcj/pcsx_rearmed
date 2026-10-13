@@ -370,6 +370,8 @@ void test_source_maincpu_map_routes_registers_and_shared_ram_lanes()
     Media media;
     media.firm[0] = 0x12;
     media.firm[1] = 0x34;
+    media.firm[2] = 0x56;
+    media.firm[3] = 0x78;
     auto config = media.config();
     gnet_zoom_board *board = nullptr;
     assert(gnet_zoom_create(&config, &board) == GNET_ZOOM_OK);
@@ -380,6 +382,10 @@ void test_source_maincpu_map_routes_registers_and_shared_ram_lanes()
     assert(gnet_zoom_bus_read(board, 0x1fa30000, 1, &value) == GNET_ZOOM_OK && value == 0xa5);
     assert(gnet_zoom_bus_read(board, 0x1f000000, 2, &value) == GNET_ZOOM_OK && value == 0x3412);
 
+    assert(gnet_zoom_bus_read(board, 0x1f000000, 1, &value) == GNET_ZOOM_OK && value == 0x12);
+    assert(gnet_zoom_bus_read(board, 0x1f000001, 1, &value) == GNET_ZOOM_OK && value == 0x34);
+    assert(gnet_zoom_bus_read(board, 0x1f000000, 4, &value) == GNET_ZOOM_OK && value == 0x78563412);
+
     /* Reset starts asserted with bank 0. The control register is byte-wide;
      * bit 2 selects bank 1 and bit 4 releases/reset-pulses the Zoom side. */
     assert(gnet_zoom_bus_read(board, 0x1fb40000, 1, &value) == GNET_ZOOM_OK && value == 0x10);
@@ -387,6 +393,13 @@ void test_source_maincpu_map_routes_registers_and_shared_ram_lanes()
     assert(gnet_zoom_selected_bank(board) == 1);
     assert(gnet_zoom_bus_read(board, 0x1fb70000, 2, &value) == GNET_ZOOM_OK && value == 2);
     assert(gnet_zoom_bus_write(board, 0x1fb70000, 2, 0xbeef) == GNET_ZOOM_OK);
+
+    assert(gnet_zoom_bus_read(board, 0x1fb70000, 1, &value) == GNET_ZOOM_OK && value == 2);
+    assert(gnet_zoom_bus_read(board, 0x1fb70001, 1, &value) == GNET_ZOOM_OK && value == 0);
+    assert(gnet_zoom_bus_read(board, 0x1fb70000, 4, &value) == GNET_ZOOM_OK && value == 0xffff0002);
+    assert(gnet_zoom_bus_write(board, 0x1fb70000, 1, 1) == GNET_ZOOM_OK);
+    assert(gnet_zoom_bus_write(board, 0x1fb40000, 2, 0xff04) == GNET_ZOOM_OK);
+    assert(gnet_zoom_bus_read(board, 0x1fb40000, 2, &value) == GNET_ZOOM_OK && value == 0xff04);
 
     /* The 16-bit Zoom data/address latches and sound IRQ strobe are the exact
      * mapped devices used by taitogn_state::maincpu_program_map. */
@@ -409,7 +422,7 @@ void test_source_maincpu_map_routes_registers_and_shared_ram_lanes()
     assert(gnet_zoom_bus_read(board, 0x1fb80000, 2, &value) == GNET_ZOOM_UNMAPPED);
     assert(gnet_zoom_bus_read(board, 0x1fb00000, 1, &value) == GNET_ZOOM_UNSUPPORTED);
     assert(gnet_zoom_bus_write(board, 0x1fbe0000, 3, 0) == GNET_ZOOM_ARGUMENT);
-    assert(gnet_zoom_bus_read(board, 0x1fa30000, 2, &value) == GNET_ZOOM_UNSUPPORTED);
+    assert(gnet_zoom_bus_read(board, 0x1fa30000, 2, &value) == GNET_ZOOM_OK && value == 0xffa5);
     assert(gnet_zoom_bus_read(board, 0x1fb90000, 1, &value) == GNET_ZOOM_UNMAPPED);
     gnet_zoom_destroy(board);
 }
@@ -483,11 +496,11 @@ void test_rf5c296_controller_and_optional_pc_card_windows()
            probe.read_reg_offset == 0x7ffff);
     read_calls = probe.read_reg_count;
     assert(gnet_zoom_bus_read(board, 0x1f300000, 4, &value) ==
-           GNET_ZOOM_UNSUPPORTED);
+           GNET_ZOOM_OK && value == 0xffffffff);
     assert(probe.read_reg_count == read_calls);
     assert(gnet_zoom_control_write(board, 0x04) == GNET_ZOOM_OK);
     assert(gnet_zoom_bus_read(board, 0x1f200000, 4, &value) ==
-           GNET_ZOOM_UNSUPPORTED);
+           GNET_ZOOM_OK && value == 0xffffffff);
     assert(probe.read_reg_count == read_calls);
     assert(gnet_zoom_control_write(board, 0x00) == GNET_ZOOM_OK);
 
@@ -542,9 +555,9 @@ void test_rf5c296_controller_and_optional_pc_card_windows()
     assert(gnet_zoom_bus_write(board, 0x1fb00000, 1, 0) ==
            GNET_ZOOM_UNSUPPORTED);
     assert(gnet_zoom_bus_read(board, 0x1f000000, 1, &value) ==
-           GNET_ZOOM_UNSUPPORTED);
+           GNET_ZOOM_OK && value == 0xff);
     assert(gnet_zoom_bus_read(board, 0x1f000000, 4, &value) ==
-           GNET_ZOOM_UNSUPPORTED);
+           GNET_ZOOM_OK && value == 0xffffffff);
     assert(gnet_zoom_try_destroy(board) == GNET_ZOOM_OK);
 }
 

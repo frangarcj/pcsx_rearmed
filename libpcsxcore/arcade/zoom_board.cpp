@@ -222,7 +222,11 @@ static void collect_device_faults(zoom_board *b)
     if (b->zsg) {
         ZSG2Status status{};
         zsg2_get_status(b->zsg, &status);
-        if (status.diagnostics) b->fault = ZOOM_FAULT_ZSG_DIAGNOSTIC;
+        /* MAME latches these control registers and logs their unknown
+         * purpose. Authentic sound firmware initializes them during boot;
+         * this source-defined behavior is not an unsupported transaction. */
+        if (status.diagnostics & ~ZSG2_DIAG_UNKNOWN_CONTROL)
+            b->fault = ZOOM_FAULT_ZSG_DIAGNOSTIC;
     }
 }
 
@@ -507,7 +511,9 @@ int zoom_board_sync_to_cycle(zoom_board *b, uint64_t cycle)
         }
         return sync_to(b, std::max(cycle, b->cpu_cycle_origin + local));
     }
-    return sync_to(b, cycle);
+    /* A reset assertion can stop the MN10200 after its last instruction
+     * overran the requested boundary. Retain that time while it is held. */
+    return sync_to(b, std::max(cycle, b->synced_main_cycle));
 }
 
 uint32_t zoom_board_main_read32(zoom_board *b, uint32_t address, uint32_t mem_mask)

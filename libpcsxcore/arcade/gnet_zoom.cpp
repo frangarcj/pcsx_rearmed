@@ -570,6 +570,13 @@ extern "C" unsigned gnet_zoom_selected_bank(const gnet_zoom_board *b)
     return b ? b->bank : 0;
 }
 
+extern "C" int gnet_zoom_set_jp1(gnet_zoom_board *b, unsigned value)
+{
+    if (!b || value > 1) return GNET_ZOOM_ARGUMENT;
+    b->config.jp1 = value;
+    return GNET_ZOOM_OK;
+}
+
 extern "C" int gnet_zoom_main_read16(gnet_zoom_board *b, uint32_t address,
                                       uint16_t *value)
 {
@@ -628,29 +635,32 @@ extern "C" int gnet_zoom_bus_read(gnet_zoom_board *b, uint32_t address,
     *value = UINT32_MAX;
 
     if (address >= MAIN_BASE && address < MAIN_END) {
-        if (width != 2) {
-            if (pc_main_window_contains(b, address, width))
-                return pc_main_read(b, address, width, value);
-            return GNET_ZOOM_UNSUPPORTED;
+        if (width != 2 && pc_main_window_contains(b, address, width))
+            return pc_main_read(b, address, width, value);
+        // MAME's 16-bit bank device splits wider CPU reads and extracts
+        // byte lanes. The startup BIOS reads flash headers byte by byte.
+        *value = 0;
+        for (unsigned offset = 0; offset < width; offset += 2) {
+            uint16_t word = 0xffff;
+            const int r = gnet_zoom_main_read16(b, (address + offset) & ~1u, &word);
+            if (r != GNET_ZOOM_OK) return r;
+            if (width == 1) *value = (word >> ((address & 1u) * 8)) & 0xffu;
+            else *value |= uint32_t(word) << (offset * 8);
         }
-        uint16_t word = 0xffff;
-        const int r = gnet_zoom_main_read16(b, address, &word);
-        *value = word;
-        return r;
+        return GNET_ZOOM_OK;
     }
 
     if (address == 0x1fa30000u) {
-        if (width != 1) return GNET_ZOOM_UNSUPPORTED;
-        *value = b->control3;
+        *value = b->control3 | (width == 4 ? 0xffffff00u : width == 2 ? 0xff00u : 0);
         return GNET_ZOOM_OK;
     }
     if (address == 0x1fb40000u) {
-        if (width != 1) return GNET_ZOOM_UNSUPPORTED;
-        *value = gnet_zoom_control_read(b);
+        *value = gnet_zoom_control_read(b) | (width == 4 ? 0xffffff00u : width == 2 ? 0xff00u : 0);
         return GNET_ZOOM_OK;
     }
-    if (address == 0x1fb70000u && width == 2) {
-        *value = 2; // taitogn_state::gn_1fb70000_r returns 2 unconditionally
+    if (address >= 0x1fb70000u && address < 0x1fb70002u) {
+        *value = width == 1 ? (2u >> ((address & 1u) * 8)) :
+            (width == 4 ? 0xffff0002u : 2u);
         return GNET_ZOOM_OK;
     }
     if (address == 0x1fbc0000u && width == 2) {
@@ -694,22 +704,19 @@ extern "C" int gnet_zoom_bus_write(gnet_zoom_board *b, uint32_t address,
         return gnet_zoom_main_write16(b, address, uint16_t(value), 0xffff);
     }
     if (address == 0x1fa30000u) {
-        if (width != 1) return GNET_ZOOM_UNSUPPORTED;
         b->control3 = uint8_t(value);
         return GNET_ZOOM_OK;
     }
     if (address == 0x1fb40000u) {
-        if (width != 1) return GNET_ZOOM_UNSUPPORTED;
         return gnet_zoom_control_write(b, uint8_t(value));
     }
     if (address == 0x1fb60000u && width == 2) {
         b->control2 = uint16_t(value);
         return GNET_ZOOM_OK;
     }
-    if (address == 0x1fb60000u ||
-        (address == 0x1fb70000u && width != 2))
+    if (address == 0x1fb60000u)
         return GNET_ZOOM_UNSUPPORTED;
-    if (address == 0x1fb70000u && width == 2)
+    if (address >= 0x1fb70000u && address < 0x1fb70002u)
         return GNET_ZOOM_OK; // handler is explicitly a no-op in MAME
     if ((address == 0x1fb80000u || address == 0x1fb80002u ||
          address == 0x1fba0000u) && width == 2) {

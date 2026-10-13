@@ -65,6 +65,8 @@ int gnet_zoom_try_destroy(gnet_zoom_board *board);
 uint8_t gnet_zoom_control_read(const gnet_zoom_board *board);
 int gnet_zoom_control_write(gnet_zoom_board *board, uint8_t data);
 unsigned gnet_zoom_selected_bank(const gnet_zoom_board *board);
+/* Runtime source JP1 input; bank selection is recomputed by control_w. */
+int gnet_zoom_set_jp1(gnet_zoom_board *board, unsigned value);
 
 /* 16-bit accesses in the G-Net flashbank window 1f000000-1f7fffff.
  * Returns UNMAPPED for unconnected space and UNSUPPORTED for the PCMCIA map
@@ -76,7 +78,9 @@ int gnet_zoom_main_write16(gnet_zoom_board *board, uint32_t address,
 
 /* Source taitogn_state::maincpu_program_map G-Net register routing. Addresses
  * must be physical PSX addresses; accesses are naturally aligned and width is
- * 1, 2, or 4. Flash-window accesses remain 16-bit x16 operations. Call
+ * 1, 2, or 4. Flash reads split into x16 transactions and extract byte lanes;
+ * flash writes currently require 16-bit accesses. Byte-wide control registers
+ * accept wider CPU transactions on their connected low byte. Call
  * gnet_zoom_sync_to_cycle before accesses when the host is running the board.
  * A mapped register used at an unsupported width returns UNSUPPORTED. */
 int gnet_zoom_bus_read(gnet_zoom_board *board, uint32_t address,

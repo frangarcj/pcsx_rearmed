@@ -50,6 +50,9 @@ static void test_executed_sound_cpu_bus_and_lanes()
     size_t p = 0;
     emit(boot, p, {0xf8, 0x34, 0x12});                    // D0 = 0x1234
     emit(boot, p, {0xf4, 0x40, 0x00, 0x00, 0x80});      // word -> ZSG2[0]
+    // Real MN10200 firmware initializes an unknown-purpose control latch.
+    // MAME stores it and logs it; this must not stop the sound CPU.
+    emit(boot, p, {0xf4, 0x40, 0x18, 0x06, 0x80});      // word -> ZSG2 control 0x0c
     emit(boot, p, {0xf4, 0x40, 0x10, 0x00, 0x40});      // word -> sound RAM
     emit(boot, p, {0xf4, 0x40, 0x20, 0x00, 0xe0});      // word -> shared RAM
 
@@ -130,6 +133,13 @@ static void test_executed_sound_cpu_bus_and_lanes()
     assert(zoom_board_sync_to_cycle(board, 6000) == ZOOM_BOARD_OK);
     zoom_board_last_audio(board, stereo);
     assert(std::abs(stereo[0]) > 0.00001f);
+    const uint64_t stopped_cycle = zoom_board_main_cycles(board);
+    assert(zoom_board_set_sound_reset(board, 1) == ZOOM_BOARD_OK);
+    assert(zoom_board_sync_to_cycle(board, stopped_cycle - 1) == ZOOM_BOARD_OK);
+    assert(zoom_board_main_cycles(board) == stopped_cycle);
+    assert(zoom_board_set_sound_reset(board, 0) == ZOOM_BOARD_OK);
+    assert(zoom_board_sync_to_cycle(board, stopped_cycle + 100) == ZOOM_BOARD_OK);
+    assert(zoom_board_fault(board) == ZOOM_FAULT_NONE);
     zoom_board_destroy(board);
 }
 
