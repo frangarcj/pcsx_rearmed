@@ -98,3 +98,9 @@ stream timing plus System 12 audio-clock tests. After the GL implementation,
 512/1024-row GPU vectors pass in both renderers, and synthetic System 11 and
 System 12 harness suites pass under GL. Real Tekken 2/Soul Edge GL captures
 remain byte-identical to the pre-change captures.
+
+## Vita3K follow-up
+
+The isolated Soul Edge black-screen investigation and native NEON/GL runtime
+evidence are recorded in [souledge-vita3k.md](souledge-vita3k.md). The Vulkan
+fence fix belongs to the private Vita3K host; the game VPK is unchanged.
