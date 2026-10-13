@@ -53,3 +53,20 @@ make -f Makefile.mac-harness BUILD=build/mac-harness-gv-drc \
 
 Authentic BIOS/CD execution, SPU/CDDA integration, source timing comparison,
 special game peripherals and Vita integration remain unverified.
+
+## Authentic Mac startup follow-up
+
+Hyper Athlete's verified prepared package exposed four native startup issues:
+`disk.cdrom` contains the source filename with `.chd`; both CPU Sony serial
+ports must use their source device state rather than console's idle SIO1 flags;
+CXD8514Q uses GPU type 2 (only CXD8538Q selects type 1 in pinned `video/psx.cpp`);
+and the source `ROM_REGION16_BE` EEPROM dump must be normalized to the 93C46
+port's little-endian word storage after its raw SHA1 check. The normalized default
+matches independent MAME NVRAM byte for byte. Device selftests cover serial byte,
+word and dword routing, GPU info type and the default EEPROM's exported bytes.
+
+The native interpreter/GL now reaches the swimming demo with zero board faults,
+and a player-start replay produces nonzero SPU PCM. The player-start SCSI transfer
+is still incomplete, so this does not pass player gameplay. Mac `--nvram` uses
+128-byte runtime EEPROM images for GV; `--audio` captures SPU. CDDA mixing remains
+pending. See [the ongoing board validation matrix](arcade-mac-validation.md).

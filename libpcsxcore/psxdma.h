@@ -32,6 +32,7 @@ extern "C" {
 
 void psxDma2(u32 madr, u32 bcr, u32 chcr);
 void psxDma3(u32 madr, u32 bcr, u32 chcr);
+int psxSourceSpuDmaActive(void);
 void psxDma4(u32 madr, u32 bcr, u32 chcr);
 #ifdef PCSX_SYSTEM12
 void psxDma5(u32 madr, u32 bcr, u32 chcr);

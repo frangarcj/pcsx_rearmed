@@ -196,6 +196,7 @@ typedef struct HarnessBoard {
   int (*import_nvram)(const unsigned char *, size_t);
   int (*export_nvram)(unsigned char *, size_t);
 } HarnessBoard;
+static const HarnessBoard *selected_board;
 static int sync_system12(u32 cycle) { system12_sync(cycle); return 0; }
 #ifdef PCSX_SYSTEM_GV
 static int sync_systemgv(u32 cycle) { return systemgv_sync(cycle); }
@@ -251,7 +252,8 @@ static int close_spu_audio(void)
   if (SPU_async) SPU_async(psxRegs.cycle, 1);
   if (out_current) out_current->feed = spu_original_feed;
   spu_original_feed = NULL;
-  fprintf(stderr, "System10 SPU: rate=%u frames=%" PRIu64 " peak=%u WAV_bytes=%" PRIu64 "\n",
+  fprintf(stderr, "%s SPU: rate=%u frames=%" PRIu64 " peak=%u WAV_bytes=%" PRIu64 "\n",
+    selected_board && selected_board->family == 102 ? "KonamiGV" : "System10",
     spu_wav.rate, spu_wav.bytes / 4, spu_audio_peak, spu_wav.bytes);
   return pcm_wav_close(&spu_wav);
 }
@@ -263,7 +265,7 @@ static const HarnessBoard boards[] = {
 #ifdef PCSX_SYSTEM_GV
   {102, "KonamiGV", systemgv_load, systemgv_unload, sync_systemgv,
     systemgv_set_input, systemgv_selftest, systemgv_report,
-    NULL, NULL, systemgv_eeprom_import, systemgv_eeprom_export},
+    open_spu_audio, close_spu_audio, systemgv_eeprom_import, systemgv_eeprom_export},
 #endif
 #ifdef PCSX_SYSTEM_GNET
   {103, "GNet", systemgnet_load, systemgnet_unload, sync_systemgnet,
@@ -282,7 +284,6 @@ static const HarnessBoard boards[] = {
     system12_set_input, system12_selftest, system12_report,
     system12_open_audio, system12_close_audio, system12_eeprom_import, system12_eeprom_export},
 };
-static const HarnessBoard *selected_board;
 #endif
 
 #if !defined(__APPLE__) || !defined(__aarch64__)
@@ -760,29 +761,31 @@ static void close_interactive_audio(void)
 static int load_nvram(const char *path)
 {
   unsigned char image[2080];
+  size_t size = selected_board->family == 102 ? 128 : sizeof(image);
   FILE *file = fopen(path, "rb");
   int invalid;
   if (!file) {
     if (errno == ENOENT) return 0;
     perror(path); return -1;
   }
-  invalid = fread(image, 1, sizeof(image), file) != sizeof(image);
+  invalid = fread(image, 1, size, file) != size;
   if (!invalid) invalid = fgetc(file) != EOF || ferror(file);
   if (fclose(file)) invalid = 1;
   if (invalid) {
-    fprintf(stderr, "%s: expected exact 2080-byte AT28C16 image\n", path);
+    fprintf(stderr, "%s: expected exact %zu-byte EEPROM image\n", path, size);
     return -1;
   }
-  return selected_board->import_nvram(image, sizeof(image));
+  return selected_board->import_nvram(image, size);
 }
 
 static int save_nvram(const char *path)
 {
   unsigned char image[2080];
+  size_t size = selected_board->family == 102 ? 128 : sizeof(image);
   char *temporary;
   FILE *file;
   int fd, result = -1;
-  if (selected_board->export_nvram(image, sizeof(image))) return -1;
+  if (selected_board->export_nvram(image, size)) return -1;
   temporary = malloc(strlen(path) + sizeof(".tmp.XXXXXX"));
   if (!temporary) return -1;
   sprintf(temporary, "%s.tmp.XXXXXX", path);
@@ -790,7 +793,7 @@ static int save_nvram(const char *path)
   if (fd < 0) { perror(path); free(temporary); return -1; }
   file = fdopen(fd, "wb");
   if (file) {
-    int invalid = fwrite(image, 1, sizeof(image), file) != sizeof(image);
+    int invalid = fwrite(image, 1, size, file) != size;
     if (fclose(file)) invalid = 1;
     if (!invalid && !rename(temporary, path)) result = 0;
   }
@@ -1415,6 +1418,10 @@ int main(int argc, char **argv)
     extern int harness_gpu_type1_selftest(void);
     if (selected_board->selftest() || (gpu_get_model() == 1 ? harness_gpu_type1_selftest() :
         harness_gpu_vram_selftest())) result = 1;
+#ifdef PCSX_SYSTEM_GNET
+    if ((board_family == 101 || board_family == 102) &&
+        harness_source_spu_dma_fixture(selected_board->name, 33868800, 24000)) result = 1;
+#endif
   }
 #ifdef PCSX_SYSTEM_GV
   if (gv_fixture) {

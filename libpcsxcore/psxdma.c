@@ -26,6 +26,7 @@
 #ifdef PCSX_SYSTEM12
 #include "system10.h"
 #include "system12.h"
+#include "systemtaito.h"
 #ifdef PCSX_SYSTEM_GV
 #include "systemgv.h"
 #endif
@@ -66,9 +67,23 @@ void psxDma5(u32 madr, u32 bcr, u32 chcr)
 
 #ifdef PCSX_SYSTEM_GNET
 #include "systemgnet.h"
+#endif
+int psxSourceSpuDmaActive(void)
+{
+#ifdef PCSX_SYSTEM_GNET
+    if (systemgnet_active()) return 1;
+#endif
+#ifdef PCSX_SYSTEM12
+    if (systemtaito_active()) return 1;
+#ifdef PCSX_SYSTEM_GV
+    if (systemgv_active()) return 1;
+#endif
+#endif
+    return 0;
+}
 /* Pinned MAME PSX DMA: channel 4 writes deliver their payload after a fixed
  * 24000 ticks at 33.8688 MHz, retain MADR, and then signal completion. */
-static void gnet_spu_transfer(int read)
+static void source_spu_transfer(int read)
 {
     u32 address = psxHu32(0x10c0) & PSX_RAM_MASK & ~3u;
     u32 bcr = psxHu32(0x10c4);
@@ -85,36 +100,31 @@ static void gnet_spu_transfer(int read)
         address = 0;
     }
 }
-#endif
 
 void spuInterrupt() {
 	if (HW_DMA4_CHCR & SWAP32(0x01000000))
 	{
-#ifdef PCSX_SYSTEM_GNET
-        if (systemgnet_active() && psxHu32(0x10c8) == 0x01000201)
-            gnet_spu_transfer(0);
-#endif
+        if (psxSourceSpuDmaActive() && psxHu32(0x10c8) == 0x01000201)
+            source_spu_transfer(0);
 		HW_DMA4_CHCR &= SWAP32(~0x01000000);
 		DMA_INTERRUPT(4);
 	}
 }
 
 void psxDma4(u32 madr, u32 bcr, u32 chcr) { // SPU
-#ifdef PCSX_SYSTEM_GNET
-    if (systemgnet_active()) {
+    if (psxSourceSpuDmaActive()) {
         if (chcr == 0x01000201) {
             u32 delay = ((uint64_t)24000 * PSXCLK + 33868800 - 1) / 33868800;
             set_event(PSXINT_SPUDMA, delay);
             return;
         }
         if (chcr == 0x01000200) {
-            gnet_spu_transfer(1);
+            source_spu_transfer(1);
             HW_DMA4_CHCR &= SWAP32(~0x01000000);
             DMA_INTERRUPT(4);
             return;
         }
     }
-#endif
 	u32 words, words_max = 0, words_copy;
 	u16 *ptr;
 

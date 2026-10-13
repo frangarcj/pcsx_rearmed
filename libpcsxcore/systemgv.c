@@ -18,6 +18,7 @@
 
 #include <CommonCrypto/CommonDigest.h>
 #include "libchdr/chd.h"
+#include "arcade/psx_sio.h"
 
 #include <errno.h>
 #include <inttypes.h>
@@ -65,18 +66,48 @@ static const GvProfile gv_profiles[] = {
 
 typedef struct GvBoard {
     KonamiGV *device;
+    psx_sio_t *sio[2];
     ChdCd *cd;
     const GvProfile *profile;
     uint8_t *bios, *eeprom;
+    uint8_t device_eeprom[GV_EEPROM_BYTES];
     uint32_t inputs[3];
     uint32_t last_cycle;
-    uint64_t now_ns, cycle_fraction;
+    uint64_t now_ns, cycle_fraction, sio_cycles;
     uint64_t dma_requests, mmio_reads, mmio_writes;
     uint32_t cd_dma_words;
     uint32_t old_ram_size, old_rom_size;
     int active, fault, memory_initialized;
 } GvBoard;
 static GvBoard board;
+
+static void sony_sio_irq(void *opaque, int state)
+{
+    unsigned port = (unsigned)(uintptr_t)opaque;
+    if (state && psxRegs.ptrs.psxH)
+        psxHu32ref(0x1070) |= SWAPu32(1u << (7 + port));
+}
+
+static int sony_sio_bus(uint32_t address, unsigned width, uint32_t *value,
+                        uint32_t mask, int write)
+{
+    if (address < 0x1f801040u || address >= 0x1f801060u ||
+        (address & (width - 1))) return 0;
+    unsigned port = (address - 0x1f801040u) >> 4;
+    unsigned shift = (address & 3u) * 8;
+    uint32_t raw = 0;
+    int error;
+    if (write)
+        error = psx_sio_write(board.sio[port], (address >> 2) & 3,
+                              *value << shift, mask << shift);
+    else {
+        error = psx_sio_read(board.sio[port], (address >> 2) & 3,
+                             mask << shift, &raw);
+        *value = (raw >> shift) & mask;
+    }
+    if (error) { board.fault = 1; return -1; }
+    return 1;
+}
 
 #ifndef DRC_DISABLE
 /* GV's fixed BIOS and RAM use the normal direct mappings. Register a code
@@ -284,6 +315,7 @@ static int validate_manifest(const char *directory, const GvProfile *profile)
 static int validate_ini(const char *directory, const GvProfile *profile)
 {
     IniEntry values[GV_MAX_INI] = {0};
+    char disk_filename[128];
     static const struct { const char *key, *value; } common[] = {
         {"format", "pcsx-aow-system-gv-v1"}, {"bios_parent", "konamigv"},
         {"mame_machine", "konamigv"}, {"mame_input", "konamigv"},
@@ -299,12 +331,14 @@ static int validate_ini(const char *directory, const GvProfile *profile)
         {"region.eeprom.size", "128"}, {"unsupported_game_io", ""}
     };
     size_t i;
+    if (snprintf(disk_filename, sizeof(disk_filename), "%s.chd", profile->disk) >=
+        (int)sizeof(disk_filename)) return -1;
     if (read_ini(directory, values)) return -1;
     if (strcmp(ini_value(values, "mame_set"), profile->set) ||
         strcmp(ini_value(values, "mame_parent"), profile->parent) ||
         strcmp(ini_value(values, "mame_init"), profile->init) ||
         strcmp(ini_value(values, "mame_flags"), profile->flags) ||
-        strcmp(ini_value(values, "disk.cdrom"), profile->disk) ||
+        strcmp(ini_value(values, "disk.cdrom"), disk_filename) ||
         strcmp(ini_value(values, "disk.cdrom.sha1"), profile->disk_sha1) ||
         strcmp(ini_value(values, "disk.cdrom.status"), profile->disk_status)) return -1;
     for (i = 0; i < sizeof(common) / sizeof(common[0]); i++)
@@ -359,12 +393,28 @@ static int activate_device(const nscsi_cd_media_ops_t *media)
     config.write_ram8 = write_ram8;
     config.irq10 = irq10;
     config.cd_media = *media;
-    config.eeprom_image = board.eeprom;
+    /* The audited ROM_REGION16_BE bytes are the on-disk dump. The 93C46
+     * port stores words as little-endian bytes, matching MAME's NVRAM export.
+     * Normalize in device memory while keeping the original hash-checked
+     * region untouched. */
+    for (i = 0; i < GV_EEPROM_BYTES; ++i)
+        board.device_eeprom[i] = board.eeprom[i ^ 1u];
+    config.eeprom_image = board.device_eeprom;
     config.eeprom_image_bytes = GV_EEPROM_BYTES;
     board.device = konamigv_create(&config);
-    if (!board.device || gpu_set_model(1) || gpu_set_vram_height(512)) {
+    /* Pinned video/psx.cpp selects type 1 only for CXD8538Q. The GV's
+     * CXD8514Q uses type-2 packet fields, despite its early CPU revision. */
+    if (!board.device || gpu_set_model(2) || gpu_set_vram_height(512)) {
         fprintf(stderr, "SystemGV: common board/device initialization failed\n");
         return -1;
+    }
+    /* These are CPU devices in the pinned psx.cpp internal map. GV has no
+     * serial peripheral connected to their output pins; the board's MB89371
+     * is a separate device. Preserve the source's idle status 0x0005. */
+    for (i = 0; i < 2; ++i) {
+        psx_sio_callbacks_t cb = {0};
+        cb.opaque = (void *)(uintptr_t)i; cb.irq = sony_sio_irq;
+        if (psx_sio_create(i ? PSX_SIO1 : PSX_SIO0, &cb, &board.sio[i])) return -1;
     }
     board.old_ram_size = psxRamSize;
     board.old_rom_size = psxRomSize;
@@ -490,6 +540,7 @@ void systemgv_unload(void)
     if (board.active) new_dynarec_set_code_span_provider(NULL);
 #endif
     if (board.device) konamigv_destroy(board.device);
+    for (unsigned i = 0; i < 2; ++i) psx_sio_destroy(board.sio[i]);
     if (board.cd) chd_cd_close(board.cd);
     free(board.bios);
     free(board.eeprom);
@@ -532,6 +583,12 @@ int systemgv_sync(uint32_t psx_cycle)
     }
     elapsed = psx_cycle - board.last_cycle;
     board.last_cycle = psx_cycle;
+    if (board.sio_cycles > UINT64_MAX - elapsed) { board.fault = 1; return -1; }
+    board.sio_cycles += elapsed;
+    for (unsigned i = 0; i < 2; ++i)
+        if (psx_sio_advance_to_cycle(board.sio[i], board.sio_cycles)) {
+            board.fault = 1; return -1;
+        }
     whole = elapsed / clock;
     partial = elapsed % clock;
     if (whole > UINT64_MAX / 1000000000ULL) { board.fault = 1; return -1; }
@@ -554,8 +611,12 @@ int systemgv_read(uint32_t address, unsigned width, uint32_t *value)
     if (width != 1 && width != 2 && width != 4) return 0;
     if (!overlaps(physical, width, 0x1f000000, 0x20) &&
         !overlaps(physical, width, 0x1f100000, 12) &&
-        !overlaps(physical, width, 0x1f680000, 16)) return 0;
+        !overlaps(physical, width, 0x1f680000, 16) &&
+        !overlaps(physical, width, 0x1f801040, 32)) return 0;
     if (systemgv_sync(psxRegs.cycle)) { *value = UINT32_MAX; return -1; }
+    result = sony_sio_bus(physical, width, value,
+                          width == 4 ? UINT32_MAX : (1u << (width * 8)) - 1, 0);
+    if (result) { board.mmio_reads++; return result; }
     result = konamigv_read(board.device, physical, width, value);
     if (result < 0) { board.fault = 1; *value = UINT32_MAX; return -1; }
     if (result) board.mmio_reads++;
@@ -572,8 +633,11 @@ int systemgv_write(uint32_t address, unsigned width, uint32_t value,
     if (!overlaps(physical, width, 0x1f000000, 0x20) &&
         !overlaps(physical, width, 0x1f180000, 4) &&
         !overlaps(physical, width, 0x1f680000, 16) &&
-        !overlaps(physical, width, 0x1f780000, 4)) return 0;
+        !overlaps(physical, width, 0x1f780000, 4) &&
+        !overlaps(physical, width, 0x1f801040, 32)) return 0;
     if (systemgv_sync(psxRegs.cycle)) return -1;
+    result = sony_sio_bus(physical, width, &value, mem_mask, 1);
+    if (result) { board.mmio_writes++; return result; }
     result = konamigv_write(board.device, physical, width, value, mem_mask);
     if (result < 0) { board.fault = 1; return -1; }
     if (result) board.mmio_writes++;
@@ -615,6 +679,9 @@ int systemgv_dma5(uint32_t madr, uint32_t bcr, uint32_t chcr)
     if (words == -2) return 1; /* MAME leaves unrecognized control words alone. */
     if (words < 0) { board.fault = 1; return -1; }
     address = madr & PSX_RAM_MASK;
+    if (getenv("PCSX_TRACE_GV_DMA"))
+        fprintf(stderr,"GV DMA5 pc=%08x time=%" PRIu64 " madr=%08x bcr=%08x chcr=%08x words=%d\n",
+            psxRegs.pc,board.now_ns,madr,bcr,chcr,words);
     if ((uint64_t)(uint32_t)words * 4 > PSX_RAM_SIZE - address) {
         board.fault = 1;
         return -1;
@@ -667,12 +734,25 @@ int systemgv_eeprom_export(unsigned char *image, size_t size)
 int systemgv_selftest(void)
 {
     uint32_t input, old_irq, value;
+    uint8_t eeprom[GV_EEPROM_BYTES];
     unsigned failures = 0;
     if (!board.active || !psxRegs.ptrs.psxM) return -1;
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "SystemGV selftest failed line %u: %s\n", __LINE__, #x); failures++; } } while (0)
     old_irq = psxHu32(0x1070);
     CHECK(PSX_RAM_SIZE == 0x200000 && PSX_ROM_SIZE == GV_BIOS_BYTES && !Config.HLE);
+    CHECK(gpu_get_model() == 2);
+    psxMemWrite32(&psxRegs, 0x1f801814, 0x10000007);
+    CHECK(psxMemRead32(&psxRegs, 0x1f801810) == 2);
+    CHECK(systemgv_eeprom_export(eeprom, sizeof(eeprom)) == 0);
+    for (unsigned i = 0; i < sizeof(eeprom); ++i)
+        CHECK(eeprom[i] == board.eeprom[i ^ 1u]);
     CHECK(psxMemRead32(&psxRegs, 0xbfc00000) == SWAPu32(*(uint32_t *)board.bios));
+    CHECK(psxMemRead16(&psxRegs, 0x1f801054) == 5);
+    psxMemWrite16(&psxRegs, 0x1f801058, 0x000d);
+    CHECK(psxMemRead8(&psxRegs, 0x1f801058) == 0x0d);
+    psxMemWrite16(&psxRegs, 0x1f80105a, 0x0040);
+    CHECK(psxMemRead32(&psxRegs, 0x1f801058) == 0x0040000d);
+    CHECK(psxMemRead16(&psxRegs, 0x1f801054) == 5);
     CHECK(systemgv_set_input("p1button1", 1) == 0);
     CHECK(systemgv_read(0x1f100000, 4, &input) == 1 && (input & 0x10) == 0);
     CHECK(systemgv_read(0x9f100000, 4, &value) == 1 && (value & 0x10) == 0);
@@ -710,6 +790,12 @@ void systemgv_report(FILE *out)
             board.dma_requests, status.dma_bytes_remaining, status.eeprom_busy,
             status.faults, board.fault);
     fprintf(out, "SystemGV: CD_DMA_words=%u\n", board.cd_dma_words);
+    fprintf(out,"SystemGV: NCR command=%02x status=%02x int=%02x seq=%02x fifo=%u phase=%u count=%u/%u\n",
+        status.ncr.command,status.ncr.status,status.ncr.interrupt_status,status.ncr.sequence,
+        status.ncr.fifo_count,status.ncr.phase,status.ncr.transfer_count,status.ncr.transfer_counter);
+    fprintf(out, "SystemGV: IRQ=%04x/%04x SR=%08x Cause=%08x DMA2=%08x/%08x\n",
+        psxHu16(0x1070), psxHu16(0x1074), psxRegs.CP0.n.SR,
+        psxRegs.CP0.n.Cause, psxHu32(0x10a0), psxHu32(0x10a8));
     fprintf(out, "SystemGV: MMIO reads=%" PRIu64 " writes=%" PRIu64
             " cycles_ns=%" PRIu64 " CD tracks=%u last_lba=%u CHD_status=%s\n",
             board.mmio_reads, board.mmio_writes, board.now_ns,

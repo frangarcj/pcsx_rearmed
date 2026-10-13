@@ -2,14 +2,13 @@
 #include "../libpcsxcore/psxevents.h"
 #include "../libpcsxcore/psxhw.h"
 
-static int harness_gnet_spu_dma_fixture(void)
+static int harness_source_spu_dma_fixture(const char *name, u32 clock, u32 source_delay)
 {
   /* COH3002T uses 50 MHz PSX cycles. The source's 24000/33868800 s
    * DMA delay reaches cycle 35431; the payload is delivered at that edge. */
   const u32 start = psxRegs.cycle;
-  const u32 source_delay = 35431;
   int16_t before[8] = {0}, after[8] = {0};
-  int failed = PSXCLK != 50000000;
+  int failed = PSXCLK != clock;
   psxMemWrite32(&psxRegs, 0x80004000, 0x56781234);
   psxMemWrite32(&psxRegs, 0x80004004, 0xdef09abc);
   psxMemWrite32(&psxRegs, 0x80004008, 0x24681357);
@@ -41,6 +40,9 @@ static int harness_gnet_spu_dma_fixture(void)
   if (psxMemRead32(&psxRegs, 0x803ffffc) != 0x56781234 ||
       psxMemRead32(&psxRegs, 0x80000000) != 0xdef09abc ||
       psxHu32(0x10c0) != 0x803ffffc || (psxHu32(0x10c8) & 0x01000000)) failed = 1;
-  fprintf(stderr, "SystemGNet SPU DMA fixture: %s delayed_payload=1 ticks=24000 boundary_cycle=35431 madr_retained=1 read_wrap=1\n", failed ? "FAIL" : "PASS");
+  fprintf(stderr, "%s SPU DMA fixture: %s delayed_payload=1 ticks=24000 boundary_cycle=%u madr_retained=1 read_wrap=1\n", name, failed ? "FAIL" : "PASS", source_delay);
   return failed;
 }
+
+static int harness_gnet_spu_dma_fixture(void)
+{ return harness_source_spu_dma_fixture("SystemGNet", 50000000, 35431); }

@@ -96,7 +96,14 @@ static void sio_txd(void *opaque, int state)
     if (!advance_pins(psx_sio_elapsed_cycles(board.sio[0]))) zn_board_sio_tx(&board.zn, state);
 }
 static void request_reset(void *opaque)
-{ (void)opaque; board.reset_pending = 1; board.reset_requests++; }
+{
+    (void)opaque;
+    if (getenv("PCSX_TRACE_TAITO_WATCHDOG"))
+        fprintf(stderr,"Taito watchdog reset pc=%08x time_us=%" PRIu64 " IRQ=%04x/%04x SR=%08x RA=%08x SP=%08x EPC=%08x\n",
+            psxRegs.pc,cycle_us(board.cycles),psxHu16(0x1070),psxHu16(0x1074),psxRegs.CP0.n.SR,
+            psxRegs.GPR.n.ra,psxRegs.GPR.n.sp,psxRegs.CP0.n.EPC);
+    board.reset_pending = 1; board.reset_requests++;
+}
 static void request_sound_barrier(void *opaque)
 { (void)opaque; board.sound_barrier = 1; }
 static void audio_sample(void *opaque, int16_t left, int16_t right)
