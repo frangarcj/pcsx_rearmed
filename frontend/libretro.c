@@ -63,6 +63,7 @@
 #include "revision.h"
 
 #include <libretro.h>
+#include "gun_pointer.h"
 #ifdef VITA
 #include <psp2/kernel/sysmem.h>
 #endif
@@ -2751,6 +2752,26 @@ static void system12_mapped_input(unsigned port)
    if (port == 0)
       system12_set_input("service", pressed[10]);
 }
+
+static void system12_pointer_input(unsigned port)
+{
+   int pointer_pressed, pad_pressed = 0;
+   char name[16];
+   if (!system12_analog_max("p1gunx")) return;
+   pointer_pressed = input_state_cb(port, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_PRESSED) != 0;
+   if (pointer_pressed) {
+      unsigned x = gun_pointer_from_retro(input_state_cb(port, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_X));
+      unsigned y = gun_pointer_from_retro(input_state_cb(port, RETRO_DEVICE_POINTER, 0, RETRO_DEVICE_ID_POINTER_Y));
+      system12_set_gun_position(port, x, y);
+   }
+   if (system12_mapped) {
+      for (size_t i = 0; i < SYSTEM12_PAD; i++)
+         if (system12_map[i] == 0 && input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, system12_pad[i].id))
+            pad_pressed = 1;
+   } else pad_pressed = input_state_cb(port, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B) != 0;
+   snprintf(name, sizeof(name), "p%ubutton1", port + 1);
+   system12_set_input(name, pointer_pressed || pad_pressed);
+}
 #endif
 
 static void update_variables(bool in_flight)
@@ -4133,7 +4154,9 @@ void retro_run(void)
       SYSTEM12_PAD_INPUT("coin2", 1, RETRO_DEVICE_ID_JOYPAD_L3);
       SYSTEM12_PAD_INPUT("service", 0, RETRO_DEVICE_ID_JOYPAD_SELECT);
       SYSTEM12_PAD_INPUT("test", 1, RETRO_DEVICE_ID_JOYPAD_SELECT);
-system12_input_done:;
+system12_input_done:
+      system12_pointer_input(0);
+      system12_pointer_input(1);
 #undef SYSTEM12_PAD_INPUT
    }
 #endif

@@ -10,6 +10,7 @@
 #ifdef PCSX_NATIVE_VITA_PATH
 #include <SDL3/SDL.h>
 #include "mac_pause.h"
+#include "gun_pointer.h"
 #endif
 #include "../libpcsxcore/r3000a.h"
 #include "../libpcsxcore/psxinterpreter.h"
@@ -332,6 +333,8 @@ static const struct { SDL_Scancode key; const char *control; } interactive_keys[
   {SDL_SCANCODE_9, "service"}
 };
 static volatile int pause_requested;
+static unsigned char interactive_key_down[sizeof(interactive_keys) / sizeof(interactive_keys[0])];
+static int interactive_mouse_trigger, interactive_mouse_sensor;
 /* gpulib_if.c: the next present keeps the frame for the menu. */
 extern volatile int pcsx_menu_backdrop_request;
 
@@ -342,8 +345,40 @@ int mac_pause_interrupted(void)
 
 static void release_interactive_input(void)
 {
+  memset(interactive_key_down, 0, sizeof(interactive_key_down));
+  interactive_mouse_trigger = interactive_mouse_sensor = 0;
   for (unsigned i = 0; i < sizeof(interactive_keys) / sizeof(interactive_keys[0]); i++)
     system12_set_input(interactive_keys[i].control, 0);
+}
+
+static void set_interactive_control(const char *control, int pressed)
+{
+  if (!strcmp(control, "p1button1")) pressed |= interactive_mouse_trigger;
+  if (!strcmp(control, "p1button7")) pressed |= interactive_mouse_sensor;
+  for (unsigned i = 0; i < sizeof(interactive_keys) / sizeof(interactive_keys[0]); i++)
+    if (!strcmp(control, interactive_keys[i].control)) pressed |= interactive_key_down[i];
+  system12_set_input(control, pressed);
+}
+
+static int aim_interactive_mouse(SDL_WindowID id, float px, float py)
+{
+  SDL_Window *window = SDL_GetWindowFromID(id);
+  int w, h, pw, ph, rect[4]; unsigned x, y;
+  if (!window || !SDL_GetWindowSize(window, &w, &h) ||
+      !SDL_GetWindowSizeInPixels(window, &pw, &ph) || w < 1 || h < 1) return 0;
+  rect[2] = pw; rect[3] = pw * 3 / 4;
+  if (rect[3] > ph) { rect[3] = ph; rect[2] = ph * 4 / 3; }
+  rect[0] = (pw - rect[2]) / 2; rect[1] = (ph - rect[3]) / 2;
+#ifdef GPU_VITA_CTR
+  extern void VitaCtrNativeRenderer_GetFrameViewport(int rect[4]);
+  int viewport[4]; VitaCtrNativeRenderer_GetFrameViewport(viewport);
+  if (viewport[2] > 1 && viewport[3] > 1) {
+    memcpy(rect, viewport, sizeof(rect)); rect[1] = ph - rect[1] - rect[3];
+  }
+#endif
+  int inside = gun_pointer_position(px * pw / w, py * ph / h, rect, &x, &y);
+  if (rect[2] > 1 && rect[3] > 1) system12_set_gun_position(0, x, y);
+  return inside;
 }
 
 static void poll_interactive_input(void)
@@ -354,6 +389,21 @@ static void poll_interactive_input(void)
       interrupted = 1;
     if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
       release_interactive_input();
+    if (system12_analog_max("p1gunx")) {
+      if (event.type == SDL_EVENT_MOUSE_MOTION) {
+        aim_interactive_mouse(event.motion.windowID, event.motion.x, event.motion.y);
+      }
+      if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+        int pressed = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+          aim_interactive_mouse(event.button.windowID, event.button.x, event.button.y);
+        if (event.button.button == SDL_BUTTON_LEFT) {
+          interactive_mouse_trigger = pressed; set_interactive_control("p1button1", 0);
+        }
+        if (event.button.button == SDL_BUTTON_RIGHT) {
+          interactive_mouse_sensor = pressed; set_interactive_control("p1button7", 0);
+        }
+      }
+    }
     if (event.type != SDL_EVENT_KEY_DOWN && event.type != SDL_EVENT_KEY_UP)
       continue;
     if (event.key.repeat) continue;
@@ -363,8 +413,10 @@ static void poll_interactive_input(void)
       pcsx_menu_backdrop_request = 1;
     }
     for (unsigned i = 0; i < sizeof(interactive_keys) / sizeof(interactive_keys[0]); i++)
-      if (event.key.scancode == interactive_keys[i].key)
-        system12_set_input(interactive_keys[i].control, event.type == SDL_EVENT_KEY_DOWN);
+      if (event.key.scancode == interactive_keys[i].key) {
+        interactive_key_down[i] = event.type == SDL_EVENT_KEY_DOWN;
+        set_interactive_control(interactive_keys[i].control, 0);
+      }
   }
 }
 

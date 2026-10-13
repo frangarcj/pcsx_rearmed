@@ -187,7 +187,7 @@ $(FLAGS_STAMP): FORCE
 	@cmp -s $@.tmp $@ || cp $@.tmp $@
 	@rm -f $@.tmp
 
-$(STANDALONE_OBJ): frontend/vita/standalone.c frontend/vita/validation.h frontend/vita/input_csv_reader.h Makefile.vita $(FLAGS_STAMP) | $(BUILD_DIR)
+$(STANDALONE_OBJ): frontend/vita/standalone.c frontend/vita/validation.h frontend/vita/input_csv_reader.h frontend/gun_pointer.h Makefile.vita $(FLAGS_STAMP) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD_DIR)/rom_selector.o: frontend/vita/rom_selector.cpp Makefile.vita $(FLAGS_STAMP) | $(BUILD_DIR)

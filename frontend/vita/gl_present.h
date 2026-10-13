@@ -16,6 +16,8 @@ void glp_finish(void);
 /* video_cb: a converted frame (the 24-bit modes), if the raw one did not
  * come, then the picture goes to the screen. */
 void glp_video(const void *data, unsigned width, unsigned height, size_t pitch);
+/* Last display viewport, in top-left screen pixels, for touch aiming. */
+void glp_get_viewport(int rect[4]);
 
 #ifdef __cplusplus
 }

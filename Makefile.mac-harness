@@ -213,6 +213,23 @@ $(BUILD)/test-system12-jvs: tests/test_system12_jvs.c libpcsxcore/arcade/system1
 $(BUILD)/test-sh2: tests/test_sh2.cpp libpcsxcore/arcade/sh2.cpp libpcsxcore/arcade/sh2.h libpcsxcore/arcade/sh2_ops.inc
 	@mkdir -p $(BUILD)
 	$(CXX) -arch arm64 -O2 -std=c++17 -Wall -Wextra -Werror -Wno-unused-parameter tests/test_sh2.cpp libpcsxcore/arcade/sh2.cpp -o $@
+$(BUILD)/test-gun-pointer: tests/test_gun_pointer.c frontend/gun_pointer.h
+	@mkdir -p $(BUILD)
+	$(CC) -arch arm64 -O2 -std=c99 -Wall -Wextra -Werror $< -o $@
+ifeq ($(GPU)$(BOARD),vitagl-like1)
+$(BUILD)/tests/test_mac_gun_pointer.o: tests/test_mac_gun_pointer.c frontend/mac_harness.c frontend/gun_pointer.h
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+$(BUILD)/test-mac-gun-pointer: $(BUILD)/tests/test_mac_gun_pointer.o $(filter-out $(BUILD)/frontend/mac_harness.o,$(OBJECTS)) $(SHELF_LIB)
+	$(CXX) -arch arm64 -Wl,-dead_strip -o $@ $(BUILD)/tests/test_mac_gun_pointer.o $(filter-out $(BUILD)/frontend/mac_harness.o,$(OBJECTS)) -lz -lm $(GPU_LIBS)
+.PHONY: gun-pointer-test
+gun-pointer-test: $(BUILD)/test-gun-pointer $(BUILD)/test-mac-gun-pointer
+	$(BUILD)/test-gun-pointer
+	$(BUILD)/test-mac-gun-pointer
+else
+gun-pointer-test: $(BUILD)/test-gun-pointer
+	$(BUILD)/test-gun-pointer
+endif
 devices-test: $(BUILD)/test-nor-flash $(BUILD)/test-c352 $(BUILD)/test-serial $(BUILD)/test-cat702 $(BUILD)/test-system12-jvs $(BUILD)/test-sh2
 	$(BUILD)/test-c352
 	$(BUILD)/test-serial

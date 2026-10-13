@@ -37,6 +37,13 @@ static struct { int x, y, w, h, disp_w, disp_h, wide; } s_frame[TEX_COUNT];
 /* Main-thread time in the present (copy, draw and swap). */
 unsigned long long glp_busy_us;
 
+void glp_get_viewport(int rect[4])
+{
+    int wide = s_aspect == 1 || (s_aspect == 2 && s_last >= 0 && s_frame[s_last].wide);
+    rect[2] = wide ? DISPLAY_W : GAME_W; rect[3] = DISPLAY_H;
+    rect[0] = (DISPLAY_W - rect[2]) / 2; rect[1] = 0;
+}
+
 /* The textures hold the PSX's 15-bit pixels as they are (GXM reads that
  * format, as the vita2d path did). Sharp bilinear: whole texels by nearest,
  * the fraction of a screen pixel at each texel edge blended by the

@@ -18,6 +18,7 @@
 #include <psp2/kernel/sysmem.h>
 #include <psp2/kernel/threadmgr.h>
 #include <psp2/power.h>
+#include <psp2/touch.h>
 
 #include <arm_neon.h>
 #include <vita2d.h>
@@ -26,6 +27,7 @@
 #include "validation.h"
 #include "../../libpcsxcore/system12_profile.h"
 #include "input_csv_reader.h"
+#include "../gun_pointer.h"
 #include "vita_gpuprof.h"
 /* Menu mode: the vitaGL executable (selector, pause menu, options) and PCSX
  * ReArcade's NEON one (a game the selector hands it, with the pause menu). */
@@ -914,6 +916,47 @@ static void apply_replay_inputs(unsigned frame)
     }
 }
 
+static SceTouchPanelInfo g_touch_panel;
+static bool g_touch_ready, g_touch_pressed, g_touch_wait_release;
+static int g_touch_id = -1;
+static unsigned g_touch_x = 32768, g_touch_y = 32768;
+
+static void poll_gun_touch(void)
+{
+    SceTouchData data;
+    int rect[4] = { GAME_X, 0, GAME_W, DISPLAY_H };
+    bool was_pressed = g_touch_pressed;
+    g_touch_pressed = false;
+    if (!g_touch_ready || g_replay_active || g_pause_requested ||
+        sceTouchPeek(SCE_TOUCH_PORT_FRONT, &data, 1) <= 0) {
+        g_touch_id = -1; return;
+    }
+#ifdef STANDALONE_VITAGL
+    extern void VitaCtrNativeRenderer_GetFrameViewport(int rect[4]);
+    VitaCtrNativeRenderer_GetFrameViewport(rect);
+    rect[1] = DISPLAY_H - rect[1] - rect[3];
+#elif defined(REARCADE_NEON)
+    glp_get_viewport(rect);
+#endif
+    if (g_touch_wait_release) {
+        if (!data.reportNum) g_touch_wait_release = false;
+        g_touch_id = -1; return;
+    }
+    for (unsigned i = 0; i < data.reportNum && i < SCE_TOUCH_MAX_REPORT; i++) {
+        const SceTouchReport *report = &data.report[i];
+        if (was_pressed && report->id != g_touch_id) continue;
+        float px = (float)(report->x - g_touch_panel.minDispX) * (DISPLAY_W - 1) /
+            (g_touch_panel.maxDispX - g_touch_panel.minDispX);
+        float py = (float)(report->y - g_touch_panel.minDispY) * (DISPLAY_H - 1) /
+            (g_touch_panel.maxDispY - g_touch_panel.minDispY);
+        unsigned x, y;
+        if (!gun_pointer_position(px, py, rect, &x, &y)) continue;
+        g_touch_x = x; g_touch_y = y;
+        g_touch_id = report->id; g_touch_pressed = true; return;
+    }
+    g_touch_id = -1;
+}
+
 static void input_poll_cb(void)
 {
     const uint32_t quit_mask = SCE_CTRL_SELECT | SCE_CTRL_START | SCE_CTRL_L1 | SCE_CTRL_R1;
@@ -936,6 +979,7 @@ static void input_poll_cb(void)
 #endif
         }
         g_pause_combo_down = combo_down;
+        poll_gun_touch();
         return;
     }
 
@@ -945,6 +989,7 @@ static void input_poll_cb(void)
     } else {
         g_exit_hold = 0;
     }
+    poll_gun_touch();
 }
 
 static int16_t analog_value(uint8_t v)
@@ -968,6 +1013,16 @@ static int16_t input_state_cb(unsigned port, unsigned device, unsigned index, un
     }
     if (port != 0)
         return 0;
+
+    if (device == RETRO_DEVICE_POINTER) {
+        if (index != 0) return 0;
+        switch (id) {
+        case RETRO_DEVICE_ID_POINTER_X: return gun_pointer_to_retro(g_touch_x);
+        case RETRO_DEVICE_ID_POINTER_Y: return gun_pointer_to_retro(g_touch_y);
+        case RETRO_DEVICE_ID_POINTER_PRESSED: return g_touch_pressed;
+        default: return 0;
+        }
+    }
 
     if (device == RETRO_DEVICE_ANALOG) {
         if (index == RETRO_DEVICE_INDEX_ANALOG_LEFT)
@@ -1468,6 +1523,7 @@ static void wait_for_menu_input_release(void)
     memset(&g_pad, 0, sizeof(g_pad));
     g_pause_combo_down = false;
     g_pause_requested = false;
+    g_touch_pressed = false; g_touch_id = -1; g_touch_wait_release = true;
 }
 
 /* The pause menu, until it resumes, restarts or closes the game. Save and
@@ -1544,6 +1600,7 @@ static int run_ui_game(const char *game_path)
         memset(&g_pad, 0, sizeof(g_pad));
         g_pause_requested = false;
         g_pause_combo_down = false;
+        g_touch_pressed = false; g_touch_id = -1; g_touch_wait_release = true;
         ret = VITA_PAUSE_CLOSE_GAME;
         while (!g_exit_requested) {
 #ifdef VITA_DEBUG_SHOT
@@ -1953,6 +2010,10 @@ int main(int argc, char **argv)
         scePowerGetBusClockFrequency(), scePowerGetGpuClockFrequency(), scePowerGetGpuXbarClockFrequency());
     make_dirs();
     sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG_WIDE);
+    g_touch_ready = sceTouchGetPanelInfo(SCE_TOUCH_PORT_FRONT, &g_touch_panel) >= 0 &&
+        g_touch_panel.maxDispX > g_touch_panel.minDispX &&
+        g_touch_panel.maxDispY > g_touch_panel.minDispY &&
+        sceTouchSetSamplingState(SCE_TOUCH_PORT_FRONT, SCE_TOUCH_SAMPLING_STATE_START) >= 0;
 
     ret = display_init();
     if (ret < 0) {
