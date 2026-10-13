@@ -1,0 +1,20 @@
+--- a/vita3k/renderer/src/vulkan/context.cpp
++++ b/vita3k/renderer/src/vulkan/context.cpp
+@@ -695,6 +695,17 @@
+         }
+ 
+         // reset the fences in both case (the wait thread does not do that as they can still be used)
++        // These submissions have completed. Drop staging references before
++        // resetting their fences: a later scene may still have a recent frame
++        // timestamp but must not wait on a fence that is now unsignaled.
++        for (auto &staging : context.state.texture_cache.staging_buffers) {
++            if (std::find(frame.rendered_fences.begin(), frame.rendered_fences.end(),
++                    staging.waiting_fence) != frame.rendered_fences.end()) {
++                staging.frame_timestamp = ~uint64_t{0};
++                staging.scene_timestamp = ~uint64_t{0};
++                staging.waiting_fence = nullptr;
++            }
++        }
+         device.resetFences(frame.rendered_fences);
+         frame.rendered_fences.clear();
+     }

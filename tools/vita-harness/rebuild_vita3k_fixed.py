@@ -47,6 +47,10 @@ parser.add_argument('--fix-unmapped-readback', action='store_true',
                     help='Synchronize Vulkan color surfaces through CPU staging when mapping is disabled')
 parser.add_argument('--trace-display-presentation', action='store_true',
                     help='Log bounded callback delivery, accepted frames and Vulkan surface selection')
+parser.add_argument('--trace-texture-staging', action='store_true',
+                    help='Trace up to 64 Vulkan texture staging fence waits')
+parser.add_argument('--fix-texture-staging-fences', action='store_true',
+                    help='Invalidate completed texture staging references before Vulkan fence reset')
 options = parser.parse_args()
 ORIG = options.source.resolve()
 BUILD = (options.build or ORIG / 'build/macos').resolve()
@@ -83,6 +87,8 @@ MSPACE_BASE_LIMIT_PATCH = Path(__file__).resolve().parent / 'patches/vita3k-mspa
 FORWARDED_PATCH = Path(__file__).resolve().parent / 'patches/dynarmic-forwarded-exceptions.patch'
 READBACK_PATCH = Path(__file__).resolve().parent / 'patches/vita3k-vulkan-unmapped-readback.patch'
 DISPLAY_TRACE_PATCH = Path(__file__).resolve().parent / 'patches/vita3k-display-presentation-trace.patch'
+STAGING_TRACE_PATCH = Path(__file__).resolve().parent / 'patches/vita3k-texture-staging-trace.patch'
+STAGING_FENCES_PATCH = Path(__file__).resolve().parent / 'patches/vita3k-texture-staging-fences.patch'
 shutil.copytree(options.app_template.resolve(), APP)
 
 SOURCES = [
@@ -124,6 +130,12 @@ if options.fix_unmapped_readback:
         ('renderer', 'src/vulkan/surface_cache.cpp', 'vita3k/renderer/src/vulkan/surface_cache.cpp', 'surface_cache-vulkan.cpp.o'),
         ('renderer', 'src/transfer.cpp', 'vita3k/renderer/src/transfer.cpp', 'transfer.cpp.o'),
     ])
+
+if options.trace_texture_staging:
+    SOURCES.append(('renderer', 'src/vulkan/texture.cpp', 'vita3k/renderer/src/vulkan/texture.cpp', 'texture.cpp.o'))
+
+if options.fix_texture_staging_fences and not options.fix_unmapped_readback:
+    SOURCES.append(('renderer', 'src/vulkan/context.cpp', 'vita3k/renderer/src/vulkan/context.cpp', 'context-vulkan.cpp.o'))
 
 # Preserve first occurrence and stable order when multiple options patch one TU.
 SOURCES = list(dict.fromkeys(SOURCES))
@@ -181,6 +193,12 @@ if options.fix_mspace_stats:
 if options.fix_mspace_base_limit:
     subprocess.run(['git', 'apply', '--check', str(MSPACE_BASE_LIMIT_PATCH)], check=True, cwd=SRC, env=patch_env)
     subprocess.run(['git', 'apply', str(MSPACE_BASE_LIMIT_PATCH)], check=True, cwd=SRC, env=patch_env)
+if options.trace_texture_staging:
+    subprocess.run(['git', 'apply', '--check', str(STAGING_TRACE_PATCH)], check=True, cwd=SRC, env=patch_env)
+    subprocess.run(['git', 'apply', str(STAGING_TRACE_PATCH)], check=True, cwd=SRC, env=patch_env)
+if options.fix_texture_staging_fences:
+    subprocess.run(['git', 'apply', '--check', str(STAGING_FENCES_PATCH)], check=True, cwd=SRC, env=patch_env)
+    subprocess.run(['git', 'apply', str(STAGING_FENCES_PATCH)], check=True, cwd=SRC, env=patch_env)
 for relative in inputs:
     if hashlib.sha256((SRC / relative).read_bytes()).hexdigest() == original_hashes[relative]:
         raise RuntimeError(f'patch did not modify expected source: {relative}')
@@ -345,6 +363,10 @@ manifest = {
                                   if options.fix_mspace_stats else None),
     'mspace_base_limit_patch_sha256': (hashlib.sha256(MSPACE_BASE_LIMIT_PATCH.read_bytes()).hexdigest()
                                        if options.fix_mspace_base_limit else None),
+    'texture_staging_trace_patch_sha256': (hashlib.sha256(STAGING_TRACE_PATCH.read_bytes()).hexdigest()
+                                          if options.trace_texture_staging else None),
+    'texture_staging_fences_patch_sha256': (hashlib.sha256(STAGING_FENCES_PATCH.read_bytes()).hexdigest()
+                                           if options.fix_texture_staging_fences else None),
     'executable_sha256': hashlib.sha256(BIN.read_bytes()).hexdigest(),
     'dynarmic_archive': str(dynarmic_input),
     'dynarmic_archive_sha256': hashlib.sha256(dynarmic_input.read_bytes()).hexdigest(),

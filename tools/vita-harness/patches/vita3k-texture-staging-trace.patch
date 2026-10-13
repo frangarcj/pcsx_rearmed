@@ -1,0 +1,19 @@
+--- a/vita3k/renderer/src/vulkan/texture.cpp
++++ b/vita3k/renderer/src/vulkan/texture.cpp
+@@ -189,6 +189,16 @@
+     const vk::Fence current_fence = context->next_fence;
+ 
+     if (need_wait) {
++        static unsigned staging_wait_trace_count = 0;
++        if (++staging_wait_trace_count <= 64) {
++            LOG_INFO("PCSX staging wait n={} index={} bytes={} used={} capacity={} frame={}/{} scene={}/{} context_scene={} last_waited={} same_fence={} fence_status={}",
++                staging_wait_trace_count, staging_idx, current_texture->memory_needed,
++                staging_buffer->used_so_far, staging_buffer->buffer.size,
++                staging_buffer->frame_timestamp, context->frame_timestamp,
++                staging_buffer->scene_timestamp, current_scene_timestamp, context->scene_timestamp,
++                last_waited_scene, current_fence == staging_buffer->waiting_fence,
++                vk::to_string(state.device.getFenceStatus(staging_buffer->waiting_fence)));
++        }
+         if (staging_buffer->scene_timestamp == current_scene_timestamp) {
+             assert(current_fence == staging_buffer->waiting_fence);
+             // special case, all the staging buffer are occupied by the current scene

@@ -118,7 +118,7 @@ class CapturedGuest:
                      b"pcsx-vita: smoke FAIL", b"pcsx-vita: inputs replay FAIL",
                      b"pcsx-vita: invalid inputs CSV",
                      b"pcsx-vita: vitaGL shutdown FAIL", b"pcsx-vita: vitaGL readback FAIL")
-    KEY_WORDS = (b"pcsx-vita:", b"Stopping -> Idle", b"installed successfully!",
+    KEY_WORDS = (b"PCSX staging", b"pcsx-vita:", b"Stopping -> Idle", b"installed successfully!",
                  b"[InterpreterFallback] Unimplemented instruction", b"Unpredictable instruction",
                  b"Unhandled EXC_", b"|C|", b"Successfully saved screenshot",
                  b"Failed to save screenshot", b"Failed to take screenshot",
@@ -170,6 +170,7 @@ class CapturedGuest:
             # Keep bounded frame milestones visible while the guarded guest runs.
             print(line[:1024], flush=True)
         if (encoded.startswith(self.LIVE_DIAGNOSTIC_PREFIXES) or
+                b"PCSX staging " in encoded or
                 b"pcsx-vita: VGL_ALLOC " in encoded or
                 b"pcsx-vita: PERF " in encoded):
             # Private host and guest probes already bound their output. Bound it here too,
