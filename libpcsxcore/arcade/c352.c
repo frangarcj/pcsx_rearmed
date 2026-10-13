@@ -35,6 +35,7 @@
 #include "c352.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #if defined(__ARM_NEON) && !defined(C352_SCALAR)
 #include <arm_neon.h>
@@ -536,11 +537,13 @@ void c352_generate(C352 *c, int16_t *out, size_t frames)
             if (total >= c->sample_rate) {
                 fprintf(stderr, "c352: %lu calls/s, %.1f frames/call, busy voices %.1f, slow noise %lu short %lu\n",
                     calls, (double)total / calls, (double)busy_sum / calls, slow_noise, slow_short);
+                #ifdef PCSX_SYSTEM12
                 {
                     extern unsigned long system12_pcm_origin_h8, system12_pcm_origin_sync;
                     fprintf(stderr, "c352 syncs: H8 accesses %lu, board SYNC %lu\n", system12_pcm_origin_h8, system12_pcm_origin_sync);
                     system12_pcm_origin_h8 = system12_pcm_origin_sync = 0;
                 }
+                #endif
                 calls = total = slow_noise = slow_short = busy_sum = 0;
             }
         }
