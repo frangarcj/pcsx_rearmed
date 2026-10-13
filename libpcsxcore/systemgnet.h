@@ -43,6 +43,8 @@ int systemgnet_read(uint32_t address, unsigned width, uint32_t *value);
 int systemgnet_write(uint32_t address, unsigned width, uint32_t value);
 int systemgnet_set_input(const char *control, int pressed);
 unsigned systemgnet_analog_max(const char *control);
+/* Clockwise presentation rotation from the selected MAME profile. */
+unsigned systemgnet_rotation(void);
 int systemgnet_set_analog(const char *control, unsigned value);
 int systemgnet_eeprom_import(const unsigned char *image, size_t size);
 int systemgnet_eeprom_export(unsigned char *image, size_t size);

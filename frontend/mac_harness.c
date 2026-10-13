@@ -11,6 +11,7 @@
 #include <SDL3/SDL.h>
 #include "mac_pause.h"
 #include "gun_pointer.h"
+#include "arcade_audio_mixer.h"
 #endif
 #include "../libpcsxcore/r3000a.h"
 #include "../libpcsxcore/psxinterpreter.h"
@@ -358,7 +359,7 @@ static void usage(const char *name)
 {
   fprintf(stderr, "usage: %s (--exe PS-X-EXE | --system12 REGION-DIR | --system11 REGION-DIR | --system10 REGION-DIR | --capcom-zn REGION-DIR | --taito-fx1 REGION-DIR | --system-gv REGION-DIR | --system-gnet REGION-DIR | --system-gnet-fixture) "
     "[--frames N] [--output FRAME.ppm] [--capture-gl] [--dump-vram FILE] [--dump-ram FILE] [--board-test] [--verify-smoke] "
-    "[--inputs FILE.csv] [--audio FILE.wav] [--nvram FILE] "
+    "[--inputs FILE.csv] [--audio FILE.wav] [--mixed-audio FILE.wav] [--nvram FILE] [--gnet-jp1 on|off] "
     "[--audio-test-fixture] "
     "[--reset-at-cycle N] "
     "[--trace FILE --trace-blocks N --trace-start CYCLES] [--cycle-snapshots FILE "
@@ -377,11 +378,93 @@ static const struct { SDL_Scancode key; const char *control; } interactive_keys[
   {SDL_SCANCODE_D, "p1button3"}, {SDL_SCANCODE_SPACE, "p1button4"},
   {SDL_SCANCODE_Q, "p1button5"}, {SDL_SCANCODE_E, "p1button6"},
   {SDL_SCANCODE_F, "p1button7"}, {SDL_SCANCODE_T, "test"},
-  {SDL_SCANCODE_9, "service"}
+  {SDL_SCANCODE_9, "service"},
+  {SDL_SCANCODE_6, "coin2"}, {SDL_SCANCODE_2, "p2start"},
+  {SDL_SCANCODE_I, "p2up"}, {SDL_SCANCODE_K, "p2down"},
+  {SDL_SCANCODE_J, "p2left"}, {SDL_SCANCODE_L, "p2right"},
+  {SDL_SCANCODE_Z, "p2button1"}, {SDL_SCANCODE_X, "p2button2"}, {SDL_SCANCODE_C, "p2button3"}
 };
 static volatile int pause_requested;
 static unsigned char interactive_key_down[sizeof(interactive_keys) / sizeof(interactive_keys[0])];
 static int interactive_mouse_trigger, interactive_mouse_sensor;
+static int interactive_replay, interactive_focused = 1;
+static int interactive_mouse_wheel = 128, interactive_mouse_handle = 128;
+static unsigned interactive_analog_frame;
+static SDL_Gamepad *interactive_pads[2];
+static unsigned interactive_volume = 100;
+
+static void interactive_board_input(const char *control, int pressed)
+{
+  if (!selected_board) return;
+  if (selected_board->family == 103 && control[0] == 'p' &&
+      (control[1] == '1' || control[1] == '2')) {
+    char name[32];
+    snprintf(name, sizeof(name), "%.2s_%s", control, control + 2);
+    selected_board->set_input(name, pressed);
+  } else selected_board->set_input(control, pressed);
+}
+void mac_interactive_set_test(int enabled) { interactive_board_input("test", enabled); }
+void mac_interactive_set_volume(unsigned percent)
+{
+  interactive_volume = percent > 400 ? 400 : percent;
+  if (selected_board && selected_board->family == 12) system12_set_volume(interactive_volume);
+}
+static int interactive_key(SDL_Scancode code)
+{
+  for (unsigned i = 0; i < sizeof(interactive_keys) / sizeof(interactive_keys[0]); ++i)
+    if (interactive_keys[i].key == code) return interactive_key_down[i];
+  return 0;
+}
+static int raw_axis(int value)
+{
+  int raw = (value + 32768) / 256;
+  return raw < 0 ? 0 : raw > 255 ? 255 : raw;
+}
+static void refresh_interactive_gamepads(void)
+{
+  for (unsigned i = 0; i < 2; ++i)
+    if (interactive_pads[i] && !SDL_GamepadConnected(interactive_pads[i])) {
+      SDL_CloseGamepad(interactive_pads[i]); interactive_pads[i] = NULL;
+    }
+  int count = 0;
+  SDL_JoystickID *ids = SDL_GetGamepads(&count);
+  for (int n = 0; ids && n < count; ++n) {
+    if ((interactive_pads[0] && SDL_GetGamepadID(interactive_pads[0]) == ids[n]) ||
+        (interactive_pads[1] && SDL_GetGamepadID(interactive_pads[1]) == ids[n])) continue;
+    for (unsigned i = 0; i < 2; ++i) if (!interactive_pads[i]) {
+      interactive_pads[i] = SDL_OpenGamepad(ids[n]); break;
+    }
+  }
+  SDL_free(ids);
+}
+static void poll_interactive_analog(void)
+{
+#ifdef PCSX_SYSTEM_GNET
+  if (!selected_board || selected_board->family != 103 || interactive_replay) return;
+  int wheel = interactive_mouse_wheel, trigger = 128, handle[2] = {interactive_mouse_handle,128};
+  if (interactive_focused) {
+    for (unsigned i = 0; i < 2; ++i) if (interactive_pads[i]) {
+      int x = SDL_GetGamepadAxis(interactive_pads[i], SDL_GAMEPAD_AXIS_LEFTX);
+      if (abs(x) > 4096) { handle[i] = raw_axis(x); if (!i) wheel = raw_axis(x); }
+      if (!i) {
+        int t = SDL_GetGamepadAxis(interactive_pads[i], SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) -
+                SDL_GetGamepadAxis(interactive_pads[i], SDL_GAMEPAD_AXIS_LEFT_TRIGGER);
+        if (abs(t) > 1024) trigger = raw_axis(t);
+      }
+    }
+    int p1 = interactive_key(SDL_SCANCODE_RIGHT) - interactive_key(SDL_SCANCODE_LEFT);
+    int p2 = interactive_key(SDL_SCANCODE_L) - interactive_key(SDL_SCANCODE_J);
+    if (p1) wheel = handle[0] = p1 > 0 ? 255 : 0;
+    if (p2) handle[1] = p2 > 0 ? 255 : 1;
+    if (interactive_mouse_trigger || interactive_key(SDL_SCANCODE_A)) trigger = 255;
+    if (interactive_mouse_sensor || interactive_key(SDL_SCANCODE_S)) trigger = 0;
+  } else wheel = trigger = handle[0] = handle[1] = 128;
+  systemgnet_set_analog("p1_wheel", wheel);
+  systemgnet_set_analog("p1_trigger", trigger);
+  systemgnet_set_analog("p1_handle", handle[0] < 1 ? 1 : handle[0]);
+  systemgnet_set_analog("p2_handle", handle[1]);
+#endif
+}
 /* gpulib_if.c: the next present keeps the frame for the menu. */
 extern volatile int pcsx_menu_backdrop_request;
 
@@ -392,19 +475,52 @@ int mac_pause_interrupted(void)
 
 static void release_interactive_input(void)
 {
+  if (interactive_replay) return; /* preserve replay state across pause/focus */
   memset(interactive_key_down, 0, sizeof(interactive_key_down));
   interactive_mouse_trigger = interactive_mouse_sensor = 0;
   for (unsigned i = 0; i < sizeof(interactive_keys) / sizeof(interactive_keys[0]); i++)
-    system12_set_input(interactive_keys[i].control, 0);
+    interactive_board_input(interactive_keys[i].control, 0);
+  interactive_mouse_wheel = interactive_mouse_handle = 128;
+#ifdef PCSX_SYSTEM_GNET
+  if (selected_board && selected_board->family == 103) {
+    systemgnet_set_analog("p1_wheel",128); systemgnet_set_analog("p1_trigger",128);
+    systemgnet_set_analog("p1_handle",128); systemgnet_set_analog("p2_handle",128);
+  }
+#endif
+}
+
+static int interactive_pad_button(const char *control)
+{
+  if (!selected_board || selected_board->family != 103 || !interactive_focused) return 0;
+  unsigned port = control[0] == 'p' && control[1] == '2' ? 1 : 0;
+  const char *name = control[0] == 'p' ? control + 2 : control;
+  SDL_Gamepad *pad = interactive_pads[port];
+  if (!strncmp(control, "coin", 4)) {
+    pad = interactive_pads[control[4] == '2'];
+    return pad && (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_BACK) ||
+      SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_STICK));
+  }
+  static const struct { const char *name; SDL_GamepadButton button; } map[] = {
+    {"up",SDL_GAMEPAD_BUTTON_DPAD_UP},{"down",SDL_GAMEPAD_BUTTON_DPAD_DOWN},
+    {"left",SDL_GAMEPAD_BUTTON_DPAD_LEFT},{"right",SDL_GAMEPAD_BUTTON_DPAD_RIGHT},
+    {"button1",SDL_GAMEPAD_BUTTON_SOUTH},{"button2",SDL_GAMEPAD_BUTTON_EAST},
+    {"button3",SDL_GAMEPAD_BUTTON_WEST},{"start",SDL_GAMEPAD_BUTTON_START}
+  };
+  for (unsigned i = 0; pad && i < sizeof(map) / sizeof(map[0]); ++i)
+    if (!strcmp(name,map[i].name)) return SDL_GetGamepadButton(pad,map[i].button);
+  return 0;
 }
 
 static void set_interactive_control(const char *control, int pressed)
 {
-  if (!strcmp(control, "p1button1")) pressed |= interactive_mouse_trigger;
-  if (!strcmp(control, "p1button7")) pressed |= interactive_mouse_sensor;
+  if (selected_board && selected_board->family == 12) {
+    if (!strcmp(control, "p1button1")) pressed |= interactive_mouse_trigger;
+    if (!strcmp(control, "p1button7")) pressed |= interactive_mouse_sensor;
+  }
+  pressed |= interactive_pad_button(control);
   for (unsigned i = 0; i < sizeof(interactive_keys) / sizeof(interactive_keys[0]); i++)
     if (!strcmp(control, interactive_keys[i].control)) pressed |= interactive_key_down[i];
-  system12_set_input(control, pressed);
+  interactive_board_input(control, pressed);
 }
 
 static int aim_interactive_mouse(SDL_WindowID id, float px, float py)
@@ -431,12 +547,49 @@ static int aim_interactive_mouse(SDL_WindowID id, float px, float py)
 static void poll_interactive_input(void)
 {
   SDL_Event event;
+  int update_pads = frame_counter != interactive_analog_frame;
+  if (frame_counter != interactive_analog_frame) {
+    interactive_mouse_handle = 128;
+    interactive_analog_frame = frame_counter;
+  }
   while (SDL_PollEvent(&event)) {
     if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
       interrupted = 1;
-    if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
-      release_interactive_input();
-    if (system12_analog_max("p1gunx")) {
+    if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+      interactive_focused = 0; release_interactive_input();
+    }
+    if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED) interactive_focused = 1;
+    if (event.type == SDL_EVENT_GAMEPAD_ADDED || event.type == SDL_EVENT_GAMEPAD_REMOVED)
+      refresh_interactive_gamepads();
+    if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || event.type == SDL_EVENT_GAMEPAD_BUTTON_UP)
+      update_pads = 1;
+    if (interactive_replay || !interactive_focused) {
+      if (event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_ESCAPE) {
+        pause_requested = 1; pcsx_menu_backdrop_request = 1;
+      }
+      continue;
+    }
+#ifdef PCSX_SYSTEM_GNET
+    if (selected_board && selected_board->family == 103) {
+      if (event.type == SDL_EVENT_MOUSE_MOTION) {
+        SDL_Window *window = SDL_GetWindowFromID(event.motion.windowID);
+        int w = 0;
+        if (window) SDL_GetWindowSize(window, &w, NULL);
+        if (w > 1) {
+          float raw = event.motion.x * 255.0f / (w - 1);
+          interactive_mouse_wheel = raw < 0 ? 0 : raw > 255 ? 255 : (int)raw;
+        }
+        int value = 128 + (int)(event.motion.xrel * 16);
+        interactive_mouse_handle = value < 1 ? 1 : value > 255 ? 255 : value;
+      }
+      if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+        int down = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+        if (event.button.button == SDL_BUTTON_LEFT) interactive_mouse_trigger = down;
+        if (event.button.button == SDL_BUTTON_RIGHT) interactive_mouse_sensor = down;
+      }
+    }
+#endif
+    if (selected_board && selected_board->family == 12 && system12_analog_max("p1gunx")) {
       if (event.type == SDL_EVENT_MOUSE_MOTION) {
         aim_interactive_mouse(event.motion.windowID, event.motion.x, event.motion.y);
       }
@@ -465,6 +618,10 @@ static void poll_interactive_input(void)
         set_interactive_control(interactive_keys[i].control, 0);
       }
   }
+  if (update_pads && !interactive_replay && interactive_focused && selected_board && selected_board->family == 103)
+    for (unsigned i = 0; i < sizeof(interactive_keys) / sizeof(interactive_keys[0]); ++i)
+      set_interactive_control(interactive_keys[i].control, 0);
+  poll_interactive_analog();
 }
 
 /* The pause menu's header: the set's MAME description, else the path's
@@ -481,32 +638,91 @@ static void interactive_title(const char *board, char *out, size_t size)
 /* Interactive sound: the board's 88.2 kHz stereo goes to an SDL stream, and
  * the queued audio paces the loop, as on the Vita. */
 static SDL_AudioStream *interactive_audio;
+static ArcadeAudioMixer interactive_mix;
+static PcmWav interactive_mix_wav;
+static const char *interactive_mix_path;
+static int interactive_audio_error, interactive_mixing;
+static void (*interactive_spu_feed)(void *, int);
+static u32 interactive_spu_cycle;
+unsigned mac_interactive_get_volume(void) { return interactive_volume; }
 
 static void interactive_audio_cb(void *opaque, const int16_t *stereo,
     unsigned frames)
 {
   (void)opaque;
-  SDL_PutAudioStreamData(interactive_audio, stereo, (int)(frames * 4));
+  if (!SDL_PutAudioStreamData(interactive_audio, stereo, (int)(frames * 4)))
+    interactive_audio_error = 1;
+  if (interactive_mix_wav.file) {
+    int16_t four[256 * 4] = {0};
+    while (frames) {
+      unsigned n = frames > 256 ? 256 : frames;
+      for (unsigned i = 0; i < n; ++i) {
+        four[i * 4] = stereo[i * 2]; four[i * 4 + 1] = stereo[i * 2 + 1];
+      }
+      if (pcm_wav_append4(&interactive_mix_wav, four, n)) interactive_audio_error = 1;
+      stereo += n * 2; frames -= n;
+    }
+  }
 }
+
+#ifdef PCSX_SYSTEM_GNET
+static void interactive_zoom_pcm(void *opaque, float left, float right, uint64_t cycle)
+{
+  (void)opaque; (void)cycle;
+  arcade_mix_push(&interactive_mix, 1, left, right);
+}
+static void interactive_spu_pcm(void *data, int bytes)
+{
+  const int16_t *samples = data;
+  if (bytes < 0 || (bytes & 3)) { interactive_audio_error = 1; return; }
+  interactive_mix.gain = interactive_volume;
+  for (int i = 0; i < bytes / 4; ++i)
+    /* Pinned taitogn.cpp routes SPU at 0.3 and Zoom at unity. */
+    arcade_mix_push(&interactive_mix, 0, samples[i * 2] * (0.3f / 32768.0f),
+      samples[i * 2 + 1] * (0.3f / 32768.0f));
+}
+#endif
 
 static int open_interactive_audio(void)
 {
-  const SDL_AudioSpec spec = { SDL_AUDIO_S16, 2, 88200 };
+  const SDL_AudioSpec spec = { SDL_AUDIO_S16, 2, selected_board->family == 103 ? 44100 : 88200 };
   if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) return -1;
   interactive_audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
       &spec, NULL, NULL);
   if (!interactive_audio) return -1;
-  system12_set_audio_output(interactive_audio_cb, NULL);
-  system12_set_volume(400); /* the pause menu's default Volume */
-  SDL_ResumeAudioStreamDevice(interactive_audio);
+  if (!SDL_ResumeAudioStreamDevice(interactive_audio)) {
+    SDL_DestroyAudioStream(interactive_audio); interactive_audio = NULL; return -1;
+  }
+  if (interactive_mix_path && pcm_wav_open(&interactive_mix_wav, interactive_mix_path, 44100)) {
+    SDL_DestroyAudioStream(interactive_audio); interactive_audio = NULL; return -1;
+  }
+#ifdef PCSX_SYSTEM_GNET
+  if (selected_board->family == 103) {
+    arcade_mix_init(&interactive_mix, PSXCLK, interactive_audio_cb, NULL);
+    interactive_mixing = 1;
+    interactive_spu_feed = out_current->feed;
+    interactive_spu_cycle = psxRegs.cycle;
+    out_current->feed = interactive_spu_pcm;
+    systemgnet_set_audio_output(interactive_zoom_pcm, NULL);
+    fprintf(stderr, "Interactive G-Net audio: SPU=%u/768 Hz gain=0.3 Zoom=25000000/768 Hz gain=1 output=44100 Hz\n", PSXCLK);
+  } else
+#endif
+  {
+    system12_set_audio_output(interactive_audio_cb, NULL);
+    mac_interactive_set_volume(400);
+  }
   return 0;
 }
 
 /* Keep about three frames queued: enough to avoid gaps, little latency. */
 static void wait_interactive_audio(void)
 {
-  const int limit = 88200 * 4 / 60 * 3;
-  while (!interrupted && SDL_GetAudioStreamQueued(interactive_audio) > limit) {
+  const int rate = interactive_mixing ? 44100 : 88200;
+  const int limit = rate * 4 / 60 * 3;
+  while (!interrupted && !interactive_audio_error) {
+    int queued = SDL_GetAudioStreamQueued(interactive_audio);
+    if (queued < 0) { interactive_audio_error = 1; break; }
+    if (queued <= limit) break;
     SDL_DelayNS(1000000);
     poll_interactive_input();
   }
@@ -514,8 +730,27 @@ static void wait_interactive_audio(void)
 
 static void close_interactive_audio(void)
 {
+  for (unsigned i = 0; i < 2; ++i) if (interactive_pads[i]) {
+    SDL_CloseGamepad(interactive_pads[i]); interactive_pads[i] = NULL;
+  }
   if (!interactive_audio) return;
-  system12_set_audio_output(NULL, NULL);
+#ifdef PCSX_SYSTEM_GNET
+  if (interactive_mixing) {
+    if (SPU_async) SPU_async(psxRegs.cycle, 1);
+    systemgnet_set_audio_output(NULL, NULL);
+    out_current->feed = interactive_spu_feed;
+    interactive_spu_feed = NULL;
+    fprintf(stderr, "Interactive G-Net mix: frames=%" PRIu64 " SPU_inputs=%" PRIu64 " Zoom_inputs=%" PRIu64
+      " SPU_nonzero=%" PRIu64 " Zoom_nonzero=%" PRIu64 " clipped=%" PRIu64 " pending=%u/%u error=%d\n",
+      interactive_mix.frames, interactive_mix.lane[0].inputs, interactive_mix.lane[1].inputs,
+      interactive_mix.lane[0].nonzero, interactive_mix.lane[1].nonzero, interactive_mix.clipped,
+      interactive_mix.lane[0].count, interactive_mix.lane[1].count,
+      interactive_mix.error || interactive_audio_error);
+    if (interactive_mix.error) interactive_audio_error = 1;
+  } else
+#endif
+    system12_set_audio_output(NULL, NULL);
+  if (pcm_wav_close(&interactive_mix_wav)) interactive_audio_error = 1;
   SDL_DestroyAudioStream(interactive_audio);
   interactive_audio = NULL;
 }
@@ -731,12 +966,12 @@ int main(int argc, char **argv)
   int state_saved = 0;
   int use_drc = 0;
   int capture_gl = 0;
-  int interactive = 0;
+  int interactive = 0, gnet_jp1 = -1;
   int vblank_sync_only = 0;
   int source_step = 0;
   uint32_t slice_steps = 0;
   int slice_started = 0;
-  int max_blocks_requested = 0;
+  int max_blocks_requested = 0, frames_requested = 0;
   uint64_t reset_at_cycle = 0;
   int reset_performed = 0;
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
@@ -793,6 +1028,9 @@ int main(int argc, char **argv)
     else if (!strcmp(argv[i], "--dump-vram") && i + 1 < argc) vram_path = argv[++i];
     else if (!strcmp(argv[i], "--inputs") && i + 1 < argc) inputs_path = argv[++i];
     else if (!strcmp(argv[i], "--audio") && i + 1 < argc) audio_path = argv[++i];
+#if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
+    else if (!strcmp(argv[i], "--mixed-audio") && i + 1 < argc) interactive_mix_path = argv[++i];
+#endif
     else if (!strcmp(argv[i], "--nvram") && i + 1 < argc) nvram_path = argv[++i];
     else if (!strcmp(argv[i], "--audio-test-fixture")) audio_test_fixture = 1;
     else if (!strcmp(argv[i], "--reset-at-cycle") && i + 1 < argc) {
@@ -803,6 +1041,11 @@ int main(int argc, char **argv)
     }
     else if (!strcmp(argv[i], "--drc")) use_drc = 1;
     else if (!strcmp(argv[i], "--interactive")) interactive = 1;
+    else if (!strcmp(argv[i], "--gnet-jp1") && i + 1 < argc) {
+      const char *value = argv[++i];
+      if (strcmp(value,"on") && strcmp(value,"off")) { usage(argv[0]); return 2; }
+      gnet_jp1 = !strcmp(value,"on");
+    }
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
     /* Checks of the pause menu: open it at frame N, press the script's
      * buttons, save it to a PPM and exit. */
@@ -858,7 +1101,7 @@ int main(int argc, char **argv)
     else if (!strcmp(argv[i], "--frames") && i + 1 < argc) {
       char *tail; unsigned long n = strtoul(argv[++i], &tail, 10);
       if (*tail || n == 0 || n > 216000) { usage(argv[0]); return 2; }
-      frames = n;
+      frames = n; frames_requested = 1;
     }
     else if (!strcmp(argv[i], "--gpu-type1-test") || !strcmp(argv[i], "--gpu-type1-test-1m")) {
       if (gpu_type1_test) { usage(argv[0]); return 2; }
@@ -909,17 +1152,29 @@ int main(int argc, char **argv)
   }
   if (interactive) {
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
-    if (!board || board_family != 12 || inputs_path || capture_gl || board_test) {
-      fprintf(stderr, "interactive mode requires System12 without replay/capture/board-test options\n");
+    if (!board || (board_family != 12 && board_family != 103) || board_test) {
+      fprintf(stderr, "interactive mode requires System12 or G-Net without board-test options\n");
       return 2;
     }
-    frames = UINT32_MAX / 4;
+    if (!frames_requested) frames = UINT32_MAX / 4;
     if (!max_blocks_requested) max_blocks = ~0UL;
 #else
     fprintf(stderr, "interactive mode requires the vitagl-like Mac renderer build\n");
     return 2;
 #endif
   }
+  if (gnet_jp1 >= 0 && (!board || board_family != 103 || board_test)) {
+    fprintf(stderr,"--gnet-jp1 requires an authentic G-Net profile\n"); return 2;
+  }
+#if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
+  if (interactive_mix_path && (!interactive || board_family != 103 ||
+      !strcmp(interactive_mix_path, output) ||
+      (audio_path && !strcmp(interactive_mix_path, audio_path)) ||
+      (nvram_path && !strcmp(interactive_mix_path, nvram_path)) ||
+      (inputs_path && !strcmp(interactive_mix_path, inputs_path)))) {
+    fprintf(stderr, "--mixed-audio requires interactive G-Net and a separate output path\n"); return 2;
+  }
+#endif
   if (ram_path) {
     const char *paths[] = {exe, output, inputs_path, audio_path, nvram_path,
                           trace_path, snapshot_path, bus_trace_path, edge_trace_path, vram_path};
@@ -1137,6 +1392,16 @@ int main(int argc, char **argv)
   SPU_registerCallback(SPUirq);
   SPU_registerScheduleCb(SPUschedule);
   if (SPU_open() || GPU_open(NULL, NULL, NULL)) return 1;
+#ifdef PCSX_SYSTEM_GNET
+  if (gnet_jp1 >= 0 && systemgnet_set_input("jp1",gnet_jp1)) return 1;
+#endif
+#if defined(GPU_VITA_CTR) && defined(PCSX_SYSTEM_GNET)
+  if (selected_board && selected_board->family == 103) {
+    extern void VitaCtrNativeRenderer_SetPresentationRotation(unsigned degrees);
+    VitaCtrNativeRenderer_SetPresentationRotation(systemgnet_rotation());
+    fprintf(stderr, "G-Net presentation rotation=%u\n", systemgnet_rotation());
+  }
+#endif
   psxReset();
 #ifdef PCSX_SYSTEM12
   if (gpu_type1_test) {
@@ -1289,16 +1554,20 @@ int main(int argc, char **argv)
   signal(SIGINT, on_signal); signal(SIGTERM, on_signal);
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
   if (interactive) {
+    interactive_replay = inputs_path != NULL;
+    SDL_InitSubSystem(SDL_INIT_GAMEPAD);
+    refresh_interactive_gamepads();
     interactive_started_ns = SDL_GetTicksNS();
     interactive_frame = frame_counter;
     if (open_interactive_audio())
       fprintf(stderr, "Interactive: no audio (%s), pacing at 60 Hz\n", SDL_GetError());
+    if (interactive_mix_path && !interactive_audio) result = 1;
     interactive_title(board, interactive_game, sizeof(interactive_game));
     if (art_dir) {
       const system12_romset_info *set = system12_romset_is_zip(board) ? system12_romset_identify(board) : NULL;
       if (set) snprintf(art_path, sizeof(art_path), "%s/snap/%s.png", art_dir, set->name);
     }
-    fprintf(stderr, "Interactive: 5 coin, 1 start, arrows move, A/S/D/Space buttons, Escape pause\n");
+    fprintf(stderr, "Interactive: 5/6 coin, 1/2 start, arrows/JL move or steer, A/S/D buttons, G-Net mouse/gamepad analog, Escape pause\n");
   }
 #endif
   if (!result && load_state_path) {
@@ -1350,6 +1619,14 @@ int main(int argc, char **argv)
     unsigned int steps = 0;
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
     if (interactive) {
+      if (interactive_audio_error || interactive_mix.error) { result = 1; break; }
+      /* At 50 MHz a whole video frame exceeds dfsound's 914-sample work
+       * buffer. Service silent SPU intervals as well as its IRQ/MMIO paths,
+       * so Zoom and SPU retain the same source-clock epoch. */
+      if (interactive_mixing && (u32)(psxRegs.cycle - interactive_spu_cycle) >= 256u * 768u) {
+        if (SPU_async) SPU_async(psxRegs.cycle, 0);
+        interactive_spu_cycle = psxRegs.cycle;
+      }
       if ((blocks & 255) == 0 || frame_counter != interactive_frame)
         poll_interactive_input();
       if (pause_next < pause_count && !pause_requested && frame_counter - start_frame >= pauses[pause_next].at) {
@@ -1373,6 +1650,9 @@ int main(int argc, char **argv)
         if (choice == MAC_PAUSE_RESTART) {
           unsigned int elapsed_frames = frame_counter - start_frame;
           psxReset();
+          if (interactive_mixing) {
+            arcade_mix_reset(&interactive_mix); interactive_spu_cycle = psxRegs.cycle;
+          }
           start_frame = frame_counter - elapsed_frames;
           prev_cycle = psxRegs.cycle;
           slice_steps = 0; slice_started = 0;
@@ -1455,6 +1735,11 @@ int main(int argc, char **argv)
         unsigned int elapsed_frames = frame_counter - start_frame;
         fprintf(stderr, "System12 harness soft reset: cycle=%" PRIu64 "\n", cycles);
         psxReset();
+#ifdef PCSX_NATIVE_VITA_PATH
+        if (interactive_mixing) {
+          arcade_mix_reset(&interactive_mix); interactive_spu_cycle = psxRegs.cycle;
+        }
+#endif
         start_frame = frame_counter - elapsed_frames;
         prev_cycle = psxRegs.cycle;
         reset_performed = 1;
@@ -1473,6 +1758,11 @@ int main(int argc, char **argv)
          * run progress when the core restarts its frame and cycle counters. */
         unsigned int elapsed_frames = frame_counter - start_frame;
         psxReset();
+#ifdef PCSX_NATIVE_VITA_PATH
+        if (interactive_mixing) {
+          arcade_mix_reset(&interactive_mix); interactive_spu_cycle = psxRegs.cycle;
+        }
+#endif
         start_frame = frame_counter - elapsed_frames;
         prev_cycle = psxRegs.cycle;
         slice_steps = 0; slice_started = 0;
@@ -1528,6 +1818,7 @@ int main(int argc, char **argv)
   clock_gettime(CLOCK_MONOTONIC, &end);
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
   close_interactive_audio();
+  if (interactive_audio_error) result = 1;
 #endif
   if (!result && reset_at_cycle && !reset_performed) {
     fprintf(stderr, "requested soft-reset cycle was not reached\n");

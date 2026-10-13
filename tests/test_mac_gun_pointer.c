@@ -25,6 +25,8 @@ static void key(SDL_Scancode code, int down) {
     assert(SDL_PushEvent(&e));poll_interactive_input();
 }
 int main(void) {
+    for (unsigned i=0;i<sizeof(boards)/sizeof(boards[0]);++i)
+        if (boards[i].family==12) selected_board=&boards[i];
     assert(SDL_Init(SDL_INIT_VIDEO));
     SDL_Window *w=SDL_CreateWindow("PCSX gun input test",800,600,SDL_WINDOW_HIDDEN);assert(w);
     SDL_Event e;while(SDL_PollEvent(&e)) {}

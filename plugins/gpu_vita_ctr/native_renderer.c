@@ -461,6 +461,12 @@ extern int gNativeDitheringEnabled;
 global_variable int s_presentAspectW = 4;
 global_variable int s_presentAspectH = 3;
 global_variable SDL_Rect s_presentViewport = {0, 0, 0, 0};
+#if defined(PCSX_NATIVE_VITA_PATH) && !defined(__vita__)
+static unsigned s_presentationRotation;
+static GLuint s_rotationTexture, s_rotationShader;
+static int s_rotationWidth, s_rotationHeight;
+static SDL_Rect s_rotatedViewport;
+#endif
 /* The viewport of the frame being presented: s_presentViewport, or 4:3 for
  * a 2D frame in the widescreen-hook mode (NativeRenderer_FrameViewport). */
 global_variable SDL_Rect s_frameViewport = {0, 0, 0, 0};
@@ -753,6 +759,13 @@ void NativeRenderer_Shutdown(void)
 	{
 		glDeleteProgram(s_presentRgbaShader);
 	}
+#if defined(PCSX_NATIVE_VITA_PATH) && !defined(__vita__)
+    glDeleteTextures(1, &s_rotationTexture);
+    if (s_rotationShader) glDeleteProgram(s_rotationShader);
+    s_rotationTexture = s_rotationShader = 0;
+    s_rotationWidth = s_rotationHeight = 0;
+    s_presentationRotation = 0; s_rotatedViewport.w = 0;
+#endif
 	glDeleteVertexArrays(1, &s_vramQuadVAO);
 	glDeleteBuffers(1, &s_vramQuadVBO);
 #if defined(__vita__) || defined(PCSX_NATIVE_VITA_PATH)
@@ -957,10 +970,27 @@ int VitaCtrNativeRenderer_GetAspectMode(void)
  * snapshot of the game reads. */
 void VitaCtrNativeRenderer_GetFrameViewport(int rect[4])
 {
+#if defined(PCSX_NATIVE_VITA_PATH) && !defined(__vita__)
+    if (s_presentationRotation && s_rotatedViewport.w > 0) {
+        rect[0] = s_rotatedViewport.x; rect[1] = s_rotatedViewport.y;
+        rect[2] = s_rotatedViewport.w; rect[3] = s_rotatedViewport.h;
+        return;
+    }
+#endif
 	rect[0] = s_frameViewport.x;
 	rect[1] = s_frameViewport.y;
 	rect[2] = s_frameViewport.w;
 	rect[3] = s_frameViewport.h;
+}
+
+void VitaCtrNativeRenderer_SetPresentationRotation(unsigned degrees)
+{
+#if defined(PCSX_NATIVE_VITA_PATH) && !defined(__vita__)
+    s_presentationRotation = degrees == 90 || degrees == 180 || degrees == 270 ? degrees : 0;
+    s_rotatedViewport.w = 0;
+#else
+    (void)degrees;
+#endif
 }
 
 internal void NativeRenderer_InitRenderTarget(struct NativeRenderTarget *target)
@@ -4877,6 +4907,60 @@ void NativeRenderer_PresentVRAMRect(int displayX, int displayY, int displayW, in
 
 	s_previousShader = (ShaderID)-1;
 	s_lastBoundTexture = (TextureID)-1;
+}
+
+/* Rotate the completed Mac scanout, including its HD overlay and borders.
+ * The copy stays on the GPU; PSX VRAM and render targets keep their original
+ * geometry. Menu backdrops are captured after this pass and need no rotation. */
+void NativeRenderer_FinishPresentation(void)
+{
+#if defined(PCSX_NATIVE_VITA_PATH) && !defined(__vita__)
+    if (!s_presentationRotation || s_frameViewport.w < 1 || s_frameViewport.h < 1) return;
+    if (!s_rotationShader) {
+        const char *shader = "#ifdef VERTEX\n"
+            "attribute vec2 a_position; varying vec2 v_uv; uniform vec2 cs;\n"
+            "void main() { v_uv = a_position * 0.5 + 0.5;\n"
+            "gl_Position = vec4(a_position.x*cs.x-a_position.y*cs.y, a_position.x*cs.y+a_position.y*cs.x,0.,1.); }\n"
+            "#endif\n#ifdef FRAGMENT\n"
+            "varying vec2 v_uv; uniform sampler2D s_src;\n"
+            "void main() { gl_FragColor = texture2D(s_src, v_uv); }\n#endif\n";
+        s_rotationShader = NativeRenderer_Shader_Compile(shader, false, NULL);
+        if (!s_rotationShader) { SysPrintf("Mac rotation shader failed\n"); return; }
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glActiveTexture(GL_TEXTURE0);
+    if (!s_rotationTexture) glGenTextures(1, &s_rotationTexture);
+    glBindTexture(GL_TEXTURE_2D, s_rotationTexture);
+    if (s_rotationWidth != s_frameViewport.w || s_rotationHeight != s_frameViewport.h) {
+        s_rotationWidth = s_frameViewport.w; s_rotationHeight = s_frameViewport.h;
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, s_rotationWidth, s_rotationHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+    glReadBuffer(GL_BACK);
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, s_frameViewport.x, s_frameViewport.y, s_rotationWidth, s_rotationHeight);
+    int aw = s_rotationWidth, ah = s_rotationHeight;
+    if (s_presentationRotation != 180) { int t = aw; aw = ah; ah = t; }
+    int w = g_windowWidth, h = w * ah / aw;
+    if (h > g_windowHeight) { h = g_windowHeight; w = h * aw / ah; }
+    s_rotatedViewport = (SDL_Rect){(g_windowWidth-w)/2, (g_windowHeight-h)/2,w,h};
+    NativeRenderer_SetScissorState(0);
+    glDisable(GL_SCISSOR_TEST); glDisable(GL_STENCIL_TEST);
+    NativeRenderer_SetBlendMode(BM_NONE); NativeRenderer_SetDepthState(0, 0);
+    glClearColor(0,0,0,1); glClear(GL_COLOR_BUFFER_BIT);
+    NativeRenderer_SetViewPort(s_rotatedViewport.x,s_rotatedViewport.y,w,h);
+    glUseProgram(s_rotationShader);
+    float c = s_presentationRotation == 180 ? -1 : 0;
+    float t = s_presentationRotation == 90 ? -1 : s_presentationRotation == 270 ? 1 : 0;
+    glUniform2f(glGetUniformLocation(s_rotationShader,"cs"),c,t);
+    glUniform1i(glGetUniformLocation(s_rotationShader,"s_src"),0);
+    glBindVertexArray(s_vramQuadVAO);
+    NativeRenderer_DrawTriangles(0,2);
+    glBindVertexArray(0);
+    s_previousShader = (ShaderID)-1; s_lastBoundTexture = (TextureID)-1;
+#endif
 }
 
 void NativeRenderer_PresentBlank(void)

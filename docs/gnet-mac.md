@@ -20,9 +20,9 @@ the 5000-frame NEON and GL captures show the same textured car selection, and
 the complete board reports and audio counters match. Replays use frame-based
 inputs, not emulation speed changes. A subsequent 8300-frame GL replay consumes
 all 42 inputs and shows player 1 in Beginner / Round 1, lap 1/3, with the race
-timer running. The portrait rotation metadata for
-Psyvariar is still not applied by the native presentation path; its raw captures
-are sideways. Physical Vita, ARM64 DRC game execution, full-game fidelity and
+timer running. The original raw captures of Psyvariar are sideways. The subsequent
+[interactive Mac validation](gnet-mac-interactive.md) applies its presentation
+rotation and adds live SDL controls and mixed audio. Physical Vita, ARM64 DRC game execution, full-game fidelity and
 launcher/menu integration are not validated by these runs.
 
 ## Startup fixes found with authentic media
@@ -76,13 +76,14 @@ The native source-profile controls added here are `p1_wheel` / `p1_trigger`
 (0..255, neutral 128) for Go By RC, and `p1_handle` / `p2_handle` (1..255,
 neutral 128) for Mawasunda. Handle sampling uses the pinned source's cumulative
 trackball equation, including player 2's -193/256 factor; weight and lamp writes
-are latched in their source bank-0 registers. These are harness replay controls;
-SDL mouse/gamepad bindings and physical cabinet force feedback are not provided.
+are latched in their source bank-0 registers. The [interactive Mac frontend](gnet-mac-interactive.md) also routes keyboard,
+mouse and SDL gamepad inputs. Physical cabinet force feedback is not provided.
 
 The Zoom PCM sink converts the source normalized stereo stream to bounded
 PCM16 at the device's integer 25000000/768 rate (32552 Hz), without altering its
-emulated clock. Float callback delivery remains available. SPU and Zoom output
-are separate paths; this task captures Zoom and does not add a frontend mixer.
+emulated clock. Float callback delivery remains available. This first pass captures Zoom separately. The subsequent
+[Mac interactive frontend](gnet-mac-interactive.md) mixes SPU and Zoom for SDL;
+libretro mixing remains pending.
 
 ## MAME comparisons and regression checks
 

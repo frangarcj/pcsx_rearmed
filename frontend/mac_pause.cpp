@@ -20,8 +20,9 @@ extern "C" void VitaCtrNativeRenderer_SetAspectMode(int mode);
 extern "C" void NativeRenderer_SwapWindow(void);
 extern "C" void VitaCtrNativeRenderer_GetFrameViewport(int rect[4]);
 extern "C" void gteSetWidescreenHack(int enabled);
-extern "C" int system12_set_input(const char *control, int pressed);
-extern "C" void system12_set_volume(unsigned percent);
+extern "C" void mac_interactive_set_test(int enabled);
+extern "C" void mac_interactive_set_volume(unsigned percent);
+extern "C" unsigned mac_interactive_get_volume(void);
 extern "C" int PCSXMacVitaGL_CaptureCurrentFrame(void);
 extern "C" int PCSXMacVitaGL_WriteCapturePpm(const char *path);
 
@@ -45,6 +46,11 @@ static std::vector<std::pair<std::string, std::string> > settings = {
 
 static const char *get_option(void *, const char *key)
 {
+    if (!strcmp(key, "pcsx_rearmed_arcade_volume")) {
+        static char volume[16];
+        snprintf(volume, sizeof(volume), "%u", mac_interactive_get_volume());
+        return volume;
+    }
 	for (const auto &entry : settings)
 		if (entry.first == key)
 			return entry.second.c_str();
@@ -58,9 +64,9 @@ static void set_option(void *, const char *key, const char *value)
 			entry.second = value;
 	/* The harness's keyboard has its own layout; the test switch acts. */
 	if (!strcmp(key, "pcsx_rearmed_arcade_test"))
-		system12_set_input("test", !strcmp(value, "enabled"));
+		mac_interactive_set_test(!strcmp(value, "enabled"));
 	if (!strcmp(key, "pcsx_rearmed_arcade_volume"))
-		system12_set_volume((unsigned)atoi(value));
+		mac_interactive_set_volume((unsigned)atoi(value));
 	if (!strcmp(key, "vita_aspect_ratio")) {
 		/* 16:9 Unstretched also squeezes the GTE's projection (the harness
 		 * interprets: no recompiled code to flush). */

@@ -90,6 +90,8 @@ storage. The native profile loader and board expose the source PC Card/ATA
 path. Frontend save-state support, Zoom mixing, analog input bindings and
 broader authentic-media coverage remain open. The Mac harness captures Zoom
 PCM to WAV and has bounded interpreter/GL gameplay evidence for four profiles.
+Its [interactive SDL mode](gnet-mac-interactive.md) adds live analog bindings,
+presentation rotation and source-clock SPU/Zoom mixing; libretro is separate.
 
 The audio callback receives normalized stereo floats and a ZSG timestamp in
 the 25 MHz chip-clock domain. It runs synchronously while `systemgnet_sync`

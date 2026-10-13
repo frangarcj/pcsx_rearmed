@@ -216,6 +216,7 @@ void Platform_EndScene(void)
         NativeRenderer_PresentVRAMRect(display->disp.x, display->disp.y, display->disp.w, display->disp.h);
         NativeRenderer_PresentMainOverlay(display->disp.x, display->disp.y, display->disp.w, display->disp.h);
     }
+    NativeRenderer_FinishPresentation();
     const int keep_backdrop = pcsx_menu_backdrop_request;
     pcsx_menu_backdrop_request = 0;
     if (!keep_backdrop)
@@ -261,6 +262,7 @@ void VitaCtrNativeRenderer_PresentCurrentFrame(void)
         NativeRenderer_PresentVRAMRect(display->disp.x, display->disp.y, display->disp.w, display->disp.h);
         NativeRenderer_PresentShownOverlay(display->disp.x, display->disp.y, display->disp.w, display->disp.h);
     }
+    NativeRenderer_FinishPresentation();
 }
 
 typedef struct VitaCtrVramTask {

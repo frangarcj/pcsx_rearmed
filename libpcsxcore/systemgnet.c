@@ -1082,6 +1082,15 @@ unsigned systemgnet_analog_max(const char *name)
     return 0;
 }
 
+unsigned systemgnet_rotation(void)
+{
+    if (!board.profile) return 0;
+    if (!strcmp(board.profile->rotation, "ROT90")) return 90;
+    if (!strcmp(board.profile->rotation, "ROT180")) return 180;
+    if (!strcmp(board.profile->rotation, "ROT270")) return 270;
+    return 0;
+}
+
 int systemgnet_set_analog(const char *name, unsigned value)
 {
     if (!board.active || !systemgnet_analog_max(name) || value > 255) return -1;

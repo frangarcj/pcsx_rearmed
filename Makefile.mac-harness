@@ -44,7 +44,7 @@ CFLAGS += -DPCSX_NATIVE_VITA_PATH=1 -DGPU_VITA_CTR $(SDL3_CFLAGS) $(LIBPNG_CFLAG
   -DGL_SILENCE_DEPRECATION -Iplugins/gpu_vita_ctr/include
 SOURCES += plugins/gpu_vita_ctr/gpulib_if.c plugins/gpu_vita_ctr/native_gpu.c \
   plugins/gpu_vita_ctr/native_renderer.c plugins/gpu_vita_ctr/mac_vita_compat.c \
-  frontend/mac_harness_gpu.c
+  frontend/mac_harness_gpu.c frontend/arcade_audio_mixer.c
 GPU_LIBS += $(SDL3_LIBS) $(LIBPNG_LIBS) -framework OpenGL
 # The interactive pause menu (arcade-shelf, its own ImGui).
 SHELF_LIB := deps/arcade-shelf/build/libarcadeshelf.a
@@ -278,3 +278,18 @@ endif
 clean:
 	rm -rf $(BUILD)
 -include $(OBJECTS:.o=.d)
+
+$(BUILD)/test-arcade-audio-mixer: tests/test_arcade_audio_mixer.c frontend/arcade_audio_mixer.c frontend/arcade_audio_mixer.h
+	@mkdir -p $(BUILD)
+	$(CC) -arch arm64 -O2 -std=c99 -Wall -Wextra -Werror tests/test_arcade_audio_mixer.c frontend/arcade_audio_mixer.c -lm -o $@
+ifeq ($(GPU)$(BOARD),vitagl-like1)
+$(BUILD)/tests/test_mac_gnet_input.o: tests/test_mac_gnet_input.c frontend/mac_harness.c frontend/arcade_audio_mixer.h
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+$(BUILD)/test-mac-gnet-input: $(BUILD)/tests/test_mac_gnet_input.o $(filter-out $(BUILD)/frontend/mac_harness.o,$(OBJECTS)) $(SHELF_LIB)
+	$(CXX) -arch arm64 -Wl,-dead_strip -o $@ $(BUILD)/tests/test_mac_gnet_input.o $(filter-out $(BUILD)/frontend/mac_harness.o,$(OBJECTS)) -lz -lm $(GPU_LIBS)
+.PHONY: gnet-frontend-test
+gnet-frontend-test: $(BUILD)/test-arcade-audio-mixer $(BUILD)/test-mac-gnet-input
+	$(BUILD)/test-arcade-audio-mixer
+	$(BUILD)/test-mac-gnet-input
+endif

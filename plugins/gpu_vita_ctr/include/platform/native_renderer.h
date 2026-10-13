@@ -18,6 +18,9 @@ void NativeRenderer_SwapWindow(void);
 void NativeRenderer_StoreFrameBuffer(int x, int y, int w, int h);
 void NativeRenderer_PresentVRAMDisplay(void);
 void NativeRenderer_PresentMainRenderTarget(void);
+/* Mac presentation only; called after all game layers, before capture/swap. */
+void NativeRenderer_FinishPresentation(void);
+void VitaCtrNativeRenderer_SetPresentationRotation(unsigned degrees);
 void NativeRenderer_PresentMainOverlay(int displayX, int displayY, int displayW, int displayH);
 void NativeRenderer_CaptureBackdrop(void);
 void NativeRenderer_BeginMenuRedraw(void);
