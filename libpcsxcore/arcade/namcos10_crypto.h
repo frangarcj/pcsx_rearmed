@@ -59,6 +59,9 @@ typedef struct NS10NANDConfig {
     size_t size;
     uint32_t pages;
     uint8_t manufacturer_id, device_id, sequential_row_read;
+    /* Optional caller-owned writable backing, identical to bytes. NULL keeps
+     * the read-only API. Writes never modify the on-disk source dump. */
+    uint8_t *writable_bytes;
 } NS10NANDConfig;
 typedef struct NS10NANDState {
     uint32_t page, column;
@@ -68,9 +71,10 @@ typedef struct NS10NANDState {
 NS10NAND *ns10_nand_create(const NS10NANDConfig *config);
 void ns10_nand_destroy(NS10NAND *nand);
 void ns10_nand_reset(NS10NAND *nand);
-/* Supports read0x00/01/50, readID0x90, status0x70, reset0xff. */
+/* Read/ID/status/reset; writable backing also enables program80/10/15 and erase60/d0. */
 int ns10_nand_command(NS10NAND *nand, uint8_t command);
 void ns10_nand_address(NS10NAND *nand, uint8_t value);
+int ns10_nand_write_byte(NS10NAND *nand, uint8_t value);
 uint8_t ns10_nand_read_byte(NS10NAND *nand);
 uint16_t ns10_nand_read_word(NS10NAND *nand);
 void ns10_nand_get_state(const NS10NAND *nand, NS10NANDState *state);

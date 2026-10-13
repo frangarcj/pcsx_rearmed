@@ -54,6 +54,8 @@ struct NS10Crypto {
 struct NS10NAND {
     NS10NANDConfig config;
     NS10NANDState state;
+    uint8_t page_buffer[528];
+    unsigned program_bytes;
 };
 static const Profile *lookup(const char *name) {
     if (!name)
@@ -223,9 +225,10 @@ int ns10_crypto_set_state(NS10Crypto *c, const NS10CryptoState *s) {
     return NS10_OK;
 }
 NS10NAND *ns10_nand_create(const NS10NANDConfig *cfg) {
-    if (!cfg || !cfg->bytes || !cfg->pages || uint64_t(cfg->pages) * 528 != cfg->size)
+    if (!cfg || !cfg->bytes || !cfg->pages || uint64_t(cfg->pages) * 528 != cfg->size ||
+        (cfg->writable_bytes && (cfg->writable_bytes != cfg->bytes || cfg->pages % 32)))
         return nullptr;
-    auto n = new (std::nothrow) NS10NAND{*cfg, {}};
+    auto n = new (std::nothrow) NS10NAND{*cfg, {}, {}, 0};
     if (n)
         ns10_nand_reset(n);
     return n;
@@ -252,6 +255,32 @@ int ns10_nand_command(NS10NAND *n, uint8_t cmd) {
         s.pointer_mode = cmd == 0x50 ? 2 : cmd;
         s.address_cycle = 0;
         return NS10_OK;
+    case 0x80:
+        if (!n->config.writable_bytes) break;
+        s.mode = 4; s.address_cycle = 0; n->program_bytes = 0;
+        std::memset(n->page_buffer, 0xff, sizeof(n->page_buffer));
+        return NS10_OK;
+    case 0x10:
+    case 0x15:
+        if (!n->config.writable_bytes) break;
+        if (s.mode != 4 || s.address_cycle < 3 || s.page >= n->config.pages)
+            return NS10_INVALID_ARGUMENT;
+        for (unsigned i = 0; i < 528; i++)
+            n->config.writable_bytes[size_t(s.page) * 528 + i] &= n->page_buffer[i];
+        s.status = 0xc0; s.mode = 0;
+        return NS10_OK;
+    case 0x60:
+        if (!n->config.writable_bytes) break;
+        s.mode = 5; s.page = 0; s.address_cycle = 0;
+        return NS10_OK;
+    case 0xd0:
+        if (!n->config.writable_bytes) break;
+        if (s.mode != 5 || s.address_cycle < 2 || s.page >= n->config.pages)
+            return NS10_INVALID_ARGUMENT;
+        std::memset(n->config.writable_bytes + size_t(s.page & ~31u) * 528, 0xff, 32 * 528);
+        s.status = 0xc0; s.mode = 0;
+        if (s.pointer_mode == 1) s.pointer_mode = 0;
+        return NS10_OK;
     case 0x70:
         s.mode = 2;
         return NS10_OK;
@@ -259,11 +288,11 @@ int ns10_nand_command(NS10NAND *n, uint8_t cmd) {
         s.mode = 3;
         s.address_cycle = 0;
         return NS10_OK;
-    default:
-        s.mode = 0;
-        s.unsupported_commands++;
-        return NS10_UNSUPPORTED_COMMAND;
+    default: break;
     }
+    s.mode = 0;
+    s.unsupported_commands++;
+    return NS10_UNSUPPORTED_COMMAND;
 }
 void ns10_nand_address(NS10NAND *n, uint8_t v) {
     if (!n)
@@ -275,8 +304,15 @@ void ns10_nand_address(NS10NAND *n, uint8_t v) {
         s.address_cycle++;
         return;
     }
-    if (s.mode != 1)
+    if (s.mode == 5) {
+        if (s.address_cycle < 2) {
+            unsigned shift = s.address_cycle * 8;
+            s.page = (s.page & ~(0xffu << shift)) | (uint32_t(v) << shift);
+        }
+        if (s.address_cycle < 255) s.address_cycle++;
         return;
+    }
+    if (s.mode != 1 && s.mode != 4) return;
     if (!s.address_cycle) {
         s.page = 0;
         s.column = s.pointer_mode == 2 ? 512 + (v & 15) : s.pointer_mode == 1 ? 256 + v : v;
@@ -288,6 +324,16 @@ void ns10_nand_address(NS10NAND *n, uint8_t v) {
     }
     if (s.address_cycle < 255)
         s.address_cycle++;
+}
+int ns10_nand_write_byte(NS10NAND *n, uint8_t value) {
+    if (!n) return NS10_INVALID_ARGUMENT;
+    if (!n->config.writable_bytes) return NS10_UNSUPPORTED_COMMAND;
+    auto &s = n->state;
+    if (s.mode != 4 || s.address_cycle < 3 || s.column >= 528)
+        return NS10_INVALID_ARGUMENT;
+    if (n->program_bytes++ < 528) n->page_buffer[s.column] = value;
+    if (++s.column == 528) s.column = s.pointer_mode == 2 ? 512 : 0;
+    return NS10_OK;
 }
 uint8_t ns10_nand_read_byte(NS10NAND *n) {
     if (!n)

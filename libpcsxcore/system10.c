@@ -333,6 +333,7 @@ static int create_device(void)
             if (strncmp(r->tag, "nand", 4) || r->tag[4] == 0) continue;
             if (r->size % 528 || nand_count >= 16) return -1;
             nand_configs[nand_count].bytes = r->bytes;
+            nand_configs[nand_count].writable_bytes = r->bytes;
             nand_configs[nand_count].size = r->size;
             nand_configs[nand_count].pages = (uint32_t)(r->size / 528);
             nand_configs[nand_count].manufacturer_id = 0xec;

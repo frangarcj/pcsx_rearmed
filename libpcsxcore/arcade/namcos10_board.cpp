@@ -238,7 +238,7 @@ static int write_word(NS10Board *b, uint32_t address, uint16_t data, uint16_t me
                     ? NS10_BOARD_OK : NS10_BOARD_UNSUPPORTED;
             }
             int result = ns10_nand_command(nand, byte);
-            if (result == NS10_OK && byte == 0xff) {
+            if (result == NS10_OK && (byte == 0xff || byte == 0x10 || byte == 0x15 || byte == 0xd0)) {
                 /* nandflash.cpp reset drives R/B low then high; the board
                  * callback stores `state != 1`, as MAME does. */
                 nand_rnb_callback(b, b->selected_nand, 0);
@@ -256,7 +256,13 @@ static int write_word(NS10Board *b, uint32_t address, uint16_t data, uint16_t me
         return NS10_BOARD_OK;
     }
     case 0x1f450000u:
-        return NS10_BOARD_UNSUPPORTED; /* MAME NAND programming is not implemented. */
+        if (!selected_nand(b)) return NS10_BOARD_RANGE;
+        /* The source always emits two high-byte-first writes, even for a
+         * partial CPU word mask; NAND data wires do not follow host lanes. */
+        if (ns10_nand_write_byte(selected_nand(b), uint8_t(data >> 8)) != NS10_OK ||
+            ns10_nand_write_byte(selected_nand(b), uint8_t(data)) != NS10_OK)
+            return NS10_BOARD_UNSUPPORTED;
+        return NS10_BOARD_OK;
     case 0x1f460000u:
         if (b->ctrl_reg & 4) return NS10_BOARD_OK;
         if (data >= b->nand_count) return NS10_BOARD_RANGE;

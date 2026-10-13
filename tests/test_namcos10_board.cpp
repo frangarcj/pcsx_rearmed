@@ -137,8 +137,8 @@ static void memn_tests()
     nand0[0x40 * 528] = 0x13;
     nand0[0x40 * 528 + 1] = 0x57;
     NS10NANDConfig chips[2] = {
-        {images[0], nand0.size(), pages, 0xec, 0x73, 1},
-        {images[1], nand1.size(), pages, 0xec, 0x73, 1}
+        {images[0], nand0.size(), pages, 0xec, 0x73, 1, nullptr},
+        {images[1], nand1.size(), pages, 0xec, 0x73, 1, nullptr}
     };
     NS10BoardConfig cfg{};
     cfg.kind = NS10_BOARD_MEMN; cfg.game_profile = "gahaha";
@@ -194,6 +194,24 @@ static void memn_tests()
     assert(ns10_board_read(b, 0x1fc00000, 2, &value) == NS10_BOARD_UNMAPPED);
     assert(ns10_board_write(b, 0x1f450000, 2, 0x1234, 0xffff) == NS10_BOARD_UNSUPPORTED);
     ns10_board_destroy(b);
+
+    // Optional writable NAND must preserve MAME's two high-byte-first data
+    // strobes through the actual CPU-visible controller, not host word lanes.
+    chips[0].writable_bytes = nand0.data();
+    assert(ns10_board_create(&cfg, &b) == NS10_BOARD_OK);
+    writev(b, 0x1f410000, 0x60);
+    writev(b, 0x1f420000, 40); writev(b, 0x1f430000, 0);
+    writev(b, 0x1f410000, 0xd0);
+    assert(readv(b, 0x1f400000) == 0); // completed R/B low/high pulse
+    writev(b, 0x1f410000, 0x00); writev(b, 0x1f410000, 0x80);
+    writev(b, 0x1f420000, 0); writev(b, 0x1f430000, 40); writev(b, 0x1f440000, 0);
+    writev(b, 0x1f450000, 0x1234); writev(b, 0x1f410000, 0x10);
+    assert(nand0[40 * 528] == 0x12 && nand0[40 * 528 + 1] == 0x34);
+    ns10_board_reset(b);
+    nand_program(b, 0, 40, 0);
+    assert(readv(b, 0x1f450000) == 0x1234); // settings block bypasses passive crypto
+    ns10_board_destroy(b);
+    chips[0].writable_bytes = nullptr;
 
     cfg.game_profile = "ippo";
     b = nullptr;

@@ -138,7 +138,7 @@ static void nand_tests() {
     for (unsigned p = 0; p < 4; p++)
         for (unsigned c = 0; c < 528; c++)
             bytes[p * 528 + c] = uint8_t(p * 31 + c);
-    NS10NANDConfig cfg = {bytes.data(), bytes.size(), 4, 0xec, 0x73, 0};
+    NS10NANDConfig cfg = {bytes.data(), bytes.size(), 4, 0xec, 0x73, 0, nullptr};
     auto n = ns10_nand_create(&cfg);
     assert(n);
     address(n, 0x00, 0x10, 2);
@@ -199,7 +199,58 @@ static void nand_tests() {
     std::puts("System10 NAND: real dump reads, address/pointer modes, OOB/page boundaries, "
               "ID/status, sequential rows and MEMN crypto pipeline passed");
 }
+static void nand_write_tests() {
+    std::vector<uint8_t> bytes(64 * 528, 0x5a);
+    NS10NANDConfig cfg = {bytes.data(), bytes.size(), 64, 0xec, 0x73, 0, bytes.data()};
+    auto n = ns10_nand_create(&cfg);
+    assert(n);
+    assert(ns10_nand_command(n, 0x60) == NS10_OK);
+    ns10_nand_address(n, 47); ns10_nand_address(n, 0);
+    assert(ns10_nand_command(n, 0xd0) == NS10_OK);
+    for (unsigned i = 0; i < 32 * 528; i++) assert(bytes[i] == 0x5a);
+    for (unsigned i = 32 * 528; i < bytes.size(); i++) assert(bytes[i] == 0xff);
+    assert(ns10_nand_command(n, 0x70) == NS10_OK && ns10_nand_read_byte(n) == 0xc0);
+    // A page buffer must stay invisible until confirm, and programming only
+    // clears bits. Neither adjacent bytes nor OOB may be lost.
+    ns10_nand_command(n, 0); ns10_nand_command(n, 0x80);
+    ns10_nand_address(n, 1); ns10_nand_address(n, 40); ns10_nand_address(n, 0);
+    assert(ns10_nand_write_byte(n, 0x12) == NS10_OK);
+    assert(ns10_nand_write_byte(n, 0x34) == NS10_OK);
+    assert(bytes[40 * 528 + 1] == 0xff);
+    assert(ns10_nand_command(n, 0x10) == NS10_OK);
+    assert(bytes[40 * 528] == 0xff && bytes[40 * 528 + 1] == 0x12 &&
+        bytes[40 * 528 + 2] == 0x34 && bytes[40 * 528 + 3] == 0xff);
+    ns10_nand_command(n, 0x80);
+    ns10_nand_address(n, 1); ns10_nand_address(n, 40); ns10_nand_address(n, 0);
+    ns10_nand_write_byte(n, 0xf0); ns10_nand_command(n, 0x10);
+    assert(bytes[40 * 528 + 1] == 0x10);
+    ns10_nand_command(n, 0x50); ns10_nand_command(n, 0x80);
+    ns10_nand_address(n, 15); ns10_nand_address(n, 40); ns10_nand_address(n, 0);
+    ns10_nand_write_byte(n, 0xab); ns10_nand_write_byte(n, 0xcd);
+    assert(ns10_nand_command(n, 0x10) == NS10_OK);
+    assert(bytes[40 * 528 + 527] == 0xab && bytes[40 * 528 + 512] == 0xcd);
+    ns10_nand_reset(n);
+    address(n, 0, 1, 40); assert(ns10_nand_read_word(n) == 0x1034);
+    address(n, 0x50, 15, 40); assert(ns10_nand_read_byte(n) == 0xab);
+    // Reset aborts pending data without undoing completed settings writes.
+    ns10_nand_command(n, 0); ns10_nand_command(n, 0x80);
+    ns10_nand_address(n, 1); ns10_nand_address(n, 40); ns10_nand_address(n, 0);
+    ns10_nand_write_byte(n, 0); ns10_nand_reset(n);
+    assert(bytes[40 * 528 + 1] == 0x10);
+    assert(ns10_nand_command(n, 0x60) == NS10_OK);
+    ns10_nand_address(n, 0xff); ns10_nand_address(n, 0xff);
+    assert(ns10_nand_command(n, 0xd0) == NS10_INVALID_ARGUMENT);
+    assert(bytes[40 * 528 + 1] == 0x10);
+    ns10_nand_destroy(n);
+    cfg.writable_bytes = nullptr; n = ns10_nand_create(&cfg);
+    assert(ns10_nand_command(n, 0x60) == NS10_UNSUPPORTED_COMMAND);
+    assert(ns10_nand_write_byte(n, 0) == NS10_UNSUPPORTED_COMMAND);
+    ns10_nand_destroy(n);
+    std::puts("System10 NAND: buffered program, OOB wrap, block erase, reset persistence and bounds passed");
+}
+
 int main() {
     crypto_tests();
     nand_tests();
+    nand_write_tests();
 }
