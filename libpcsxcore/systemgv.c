@@ -485,7 +485,7 @@ int systemgv_test_load(const char *chd_path)
         0x3c098000, /* lui t1,0x8000: RAM address */
         0xad0910d0, /* sw t1,0x10d0(t0): MADR */
         0x3c090100, /* lui t1,0x0100: start DMA */
-        0x35290201, /* ori t1,t1,0x0201: source no-callback completion */
+        0x35290201, /* ori t1,t1,0x0201: block-mode SCSI write */
         0xad0910d8, /* sw t1,0x10d8(t0): CHCR */
         0x3c0b0003, /* lui t3,3 */
         0x240a0004, /* addiu t2,zero,4 */
@@ -655,7 +655,7 @@ static int32_t dma_words(uint32_t bcr, uint32_t chcr)
         if (blocks < 1) blocks = 1;
         words = blocks * (bcr & 0xffffu);
     }
-    else if (chcr == 0x01000200u) {
+    else if (chcr == 0x01000200u || chcr == 0x01000201u) {
         uint64_t blocks = bcr >> 16;
         if (!blocks) blocks = 0x10000u;
         words = blocks * (bcr & 0xffffu);
@@ -672,9 +672,9 @@ int systemgv_dma5(uint32_t madr, uint32_t bcr, uint32_t chcr)
     int32_t words;
     int result;
     if (!board.active || systemgv_sync(psxRegs.cycle)) return -1;
-    /* MAME's generic PSX DMA engine completes this control value when a
-     * write delegate is installed, but does not call the delegate. */
-    if (chcr == 0x01000201u) return 0;
+    /* The dispatch branch finishes 01000201 immediately for channel 5;
+     * dma_finished then invokes its write delegate using block-mode BCR.
+     * Returning before that payload leaves MODE SELECT waiting for data. */
     words = dma_words(bcr, chcr);
     if (words == -2) return 1; /* MAME leaves unrecognized control words alone. */
     if (words < 0) { board.fault = 1; return -1; }
@@ -763,10 +763,51 @@ int systemgv_selftest(void)
     CHECK(dma_words(0x00030004u, 0x11000000u) == 12);
     CHECK(dma_words(0x00030004u, 0x11400100u) == 12);
     CHECK(dma_words(0x00000004u, 0x11000000u) == 4);
+    CHECK(dma_words(0x00070001u, 0x01000201u) == 7);
+    CHECK(dma_words(0x00000001u, 0x01000201u) == 65536);
     psxHu32ref(0x1070) = SWAPu32(old_irq);
     fprintf(stderr, "SystemGV selftest: %s\n", failures ? "FAIL" : "PASS");
 #undef CHECK
     return failures ? -1 : 0;
+}
+
+/* Run after the synthetic guest checks: this deliberately changes the test
+ * target's block size and must never touch an authenticated game's CD state. */
+int systemgv_test_dma_write(void)
+{
+    static const uint8_t cdb[] = {0x15, 0, 0, 0, 12, 0};
+    static const uint8_t parameters[] = {0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 2, 0};
+    konamigv_status_t status;
+    int passed;
+    if (!board.active || board.profile || !psxRegs.ptrs.psxM) return -1;
+    systemgv_reset();
+    for (unsigned i = 0; i < sizeof(cdb); ++i)
+        psxMemWrite8(&psxRegs, 0x1f000004, cdb[i]);
+    psxMemWrite8(&psxRegs, 0x1f000010, 7); /* initiator */
+    psxMemWrite8(&psxRegs, 0x1f000008, 4); /* target */
+    psxMemWrite8(&psxRegs, 0x1f000006, 0x41); /* select with CDB */
+    psxRegs.cycle += 7000; /* allow selection and command phase */
+    if (systemgv_sync(psxRegs.cycle)) return -1;
+    (void)psxMemRead8(&psxRegs, 0x1f00000a); /* acknowledge NCR IRQ */
+    memcpy(psxRegs.ptrs.psxM + 0x1000, parameters, sizeof(parameters));
+    psxMemWrite8(&psxRegs, 0x1f000016, 0x08);
+    psxMemWrite8(&psxRegs, 0x1f000000, sizeof(parameters));
+    psxMemWrite8(&psxRegs, 0x1f000002, 0);
+    psxMemWrite8(&psxRegs, 0x1f00001c, 0);
+    psxMemWrite32(&psxRegs, 0x1f8010d0, 0x1000);
+    psxMemWrite32(&psxRegs, 0x1f8010d4, 0x00030001); /* three one-word blocks */
+    psxMemWrite32(&psxRegs, 0x1f8010d8, 0x01000201);
+    psxMemWrite8(&psxRegs, 0x1f000006, 0x90); /* DMA data-out */
+    psxRegs.cycle += 140000;
+    if (systemgv_sync(psxRegs.cycle)) return -1;
+    konamigv_get_status(board.device, &status);
+    passed = !board.fault && !status.faults && !status.dma_active &&
+        !status.dma_bytes_remaining && status.cdrom.block_size == 512 &&
+        !(psxHu32(0x10d8) & 0x01000000u);
+    fprintf(stderr, "SystemGV DMA write fixture: %s CHCR=01000201 block_size=%u remaining=%" PRIu64 " faults=%08x/%08x\n",
+        passed ? "PASS" : "FAIL", status.cdrom.block_size,
+        status.dma_bytes_remaining, board.fault, status.faults);
+    return passed ? 0 : -1;
 }
 
 uint64_t systemgv_dma_pending_bytes(void)

@@ -42,8 +42,9 @@ def main() -> int:
         if run.returncode:
             raise RuntimeError(f"GV fixture failed ({run.returncode}):\n{run.stdout}")
         expected = ("SystemGV selftest: PASS", "SystemGV MIPS fixture: PASS",
+                    "SystemGV DMA write fixture: PASS CHCR=01000201 block_size=512 remaining=0",
                     "DMA5_pending=1048576 CHCR_completed=1 IRQ10=1",
-                    "IRQ10=1 DRQ=0 DMA=2 requests remaining=1048576",
+                    "IRQ10=1 DRQ=0 DMA=3 requests remaining=1048576",
                     "CD_DMA_words=12",
                     "faults=00000000/00000000")
         missing = [token for token in expected if token not in run.stdout]

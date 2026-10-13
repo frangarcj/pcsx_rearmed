@@ -1448,6 +1448,7 @@ int main(int argc, char **argv)
         use_drc ? "drc" : "interpreter",
         psxMemRead32(&psxRegs, 0x80000100));
     systemgv_report(stderr);
+    if (systemgv_test_dma_write()) result = 1;
     GPU_close(); SPU_close(); psxShutdown(); ReleasePlugins();
     systemgv_unload();
     return result;

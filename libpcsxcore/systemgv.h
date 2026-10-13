@@ -23,6 +23,8 @@ int systemgv_set_input(const char *name, int pressed);
 int systemgv_eeprom_import(const unsigned char *image, size_t size);
 int systemgv_eeprom_export(unsigned char *image, size_t size);
 int systemgv_selftest(void);
+/* Destructive test-only SCSI data-out regression, rejected for real profiles. */
+int systemgv_test_dma_write(void);
 uint64_t systemgv_dma_pending_bytes(void);
 void systemgv_report(FILE *out);
 
