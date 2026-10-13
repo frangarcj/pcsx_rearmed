@@ -141,6 +141,8 @@ static int g_pacing = PACING_VBLANK;
 static float g_audio_base_ratio = 1.0f; /* display rate / core frame rate */
 static float g_audio_ratio = 1.0f;
 static int g_last_vcount = -1;
+static unsigned g_audio_peak;
+static uint64_t g_audio_nonzero;
 static uint64_t g_audio_put_frames; /* source frames handed to SDL */
 
 static SceUID g_vm_block = -1;
@@ -721,6 +723,13 @@ static size_t audio_batch_cb(const int16_t *data, size_t frames)
         return frames;
     }
     g_audio_put_frames += frames;
+    if (g_report_path[0]) {
+        for (size_t i = 0; i < frames * 2; i++) {
+            unsigned magnitude = data[i] < 0 ? -(int)data[i] : data[i];
+            if (magnitude > g_audio_peak) g_audio_peak = magnitude;
+            if (data[i]) g_audio_nonzero++;
+        }
+    }
 
     /* With vblank pacing the queue only caps latency (the ratio holds it at the
      * target); with audio pacing it is the clock. */
@@ -1731,6 +1740,7 @@ int main(int argc, char **argv)
     bool verify_system12_coord_span_cull = false;
     unsigned verify_system12_drc_ram_mb = 0;
     bool system12_profile = false;
+    bool other_arcade_profile = false;
     struct retro_system_av_info av;
 
     game_path[0] = '\0';
@@ -1850,9 +1860,11 @@ int main(int argc, char **argv)
             snprintf(g_inputs_path, sizeof(g_inputs_path), "%s", argv[++ret]);
             continue;
         }
-        if (!strcmp(argv[ret], "--system12")) {
+        if (!strcmp(argv[ret], "--system12") || !strcmp(argv[ret], "--arcade")) {
 #ifdef ARCADE_SYSTEM12
             if (ret + 1 >= argc || !argv[ret + 1][0]) return 4;
+            if (system12_profile) return 4;
+            other_arcade_profile = !strcmp(argv[ret], "--arcade");
             system12_profile = true;
             snprintf(game_path, sizeof(game_path), "%s", argv[++ret]);
             continue;
@@ -1862,7 +1874,7 @@ int main(int argc, char **argv)
 #endif
         }
 #ifdef ARCADE_SYSTEM12
-        if (!strcmp(argv[ret], "--report-system12")) {
+        if (!strcmp(argv[ret], "--report-system12") || !strcmp(argv[ret], "--report-arcade")) {
             if (ret + 1 >= argc || !argv[ret + 1][0] ||
                 strlen(argv[ret + 1]) >= sizeof(g_report_path)) return 4;
             snprintf(g_report_path, sizeof(g_report_path), "%s", argv[++ret]);
@@ -1883,6 +1895,10 @@ int main(int argc, char **argv)
         if (!system12_profile && is_game_path(argv[ret]))
             snprintf(game_path, sizeof(game_path), "%s", argv[ret]);
     }
+    if (other_arcade_profile && (verify_system12_drc_ram_mb || verify_system12_vram ||
+        verify_system12_framebuffer || verify_system12_texture_window ||
+        verify_system12_vram_x_wrap || verify_system12_coord_alias ||
+        verify_system12_coord_span_cull)) return 4;
     if (system12_profile && verify_smoke) {
         sceClibPrintf("pcsx-vita: --verify-smoke requires the console smoke executable\n");
         return 4;
@@ -2141,6 +2157,10 @@ int main(int argc, char **argv)
 #endif
     }
     int validation_result = 0;
+    if (g_report_path[0])
+        sceClibPrintf("pcsx-vita: arcade-audio rate=%u frames=%llu peak=%u nonzero=%llu errors=%u\n",
+            (unsigned)av.timing.sample_rate, (unsigned long long)g_audio_put_frames,
+            g_audio_peak, (unsigned long long)g_audio_nonzero, g_audio_put_errors);
     if (g_replay_active) {
         bool replay_complete = g_next_input_event == g_input_event_count &&
                                runs == validation_frames;
