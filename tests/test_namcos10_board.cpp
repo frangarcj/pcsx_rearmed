@@ -74,6 +74,9 @@ static void memm_tests()
     writev(b, 0x1fb40020, 0); /* bank 0x10 selects data ROM bank 0 */
     assert(readv(b, 0x1f400000) == 0x1357);
     uint32_t value = 0x12345678;
+    assert(ns10_board_read(b, 0x1fbf0000, 2, &value) == NS10_BOARD_OK && value == 1);
+    assert(ns10_board_write(b, 0x1fba0010, 2, 0, 0xffff) == NS10_BOARD_UNMAPPED);
+    assert(ns10_board_write(b, 0x1fba001a, 2, 0, 0xffff) == NS10_BOARD_UNMAPPED);
     assert(ns10_board_read(b, 0x1fbc0000, 2, &value) == NS10_BOARD_UNIMPLEMENTED);
     assert(ns10_board_write(b, 0x1fe00000, 2, 0, 0xffff) == NS10_BOARD_UNMAPPED);
     assert(ns10_board_read(b, 0x1fc00000, 2, &value) == NS10_BOARD_UNMAPPED);

@@ -112,7 +112,13 @@ def encode_memn_bytes(plain: bytes) -> bytes:
 
 def make_program(model: str) -> list[int]:
     """Build a small PSX MIPS program that records actual board transactions."""
-    code: list[int] = []
+    # The shared arcade BIOS polls SIO1 error flags; a console's fixed
+    # 0x01a5 status deadlocks it. Exercise real SIO lanes through KSEG1.
+    code: list[int] = [_lui(10, 0xbf80), _lhu(25, 10, 0x1054), 0,
+        _addiu(11, 0, 0xce), _sb(11, 10, 0x1058),
+        _lhu(26, 10, 0x1058), 0,
+        _addiu(11, 0, 0x50), _sh(11, 10, 0x105e),
+        _lhu(27, 10, 0x105e), 0]
     # Poll the active-low base IN1 port and preserve the last observed word in
     # upper RAM so traces can show both the pressed and released states.
     code += [_lui(8, 0x1fba), _lui(9, 0x8021), _ori(9, 9, 0x0020)]
@@ -139,7 +145,7 @@ def make_program(model: str) -> list[int]:
         # the source's passive-unscrambled NAND ROM. Execute a real MIPS helper
         # through the dynamic read/fetch path with JALR.
         code += [_lui(10, 0x1fb4), _sh(0, 10, 0), _lw(0, 10, 0), 0]
-        code += [_lui(11, 0x9f40), _ori(11, 11, 0x0100), _jalr(11), 0]
+        code += [_lui(11, 0x9f40), _ori(11, 11, 0x0400), _jalr(11), 0]
         code += [_lui(12, 0x8021), _sw(17, 12, 4)]
 
     # Read and acknowledge the source timer interrupt through the real NS10
@@ -182,7 +188,7 @@ def _make_program_image(model: str, dma_overflow: bool = False) -> bytes:
         # the dynamic bank window.
         words += []
         subroutine = [_addiu(17, 0, 0x5a), 0x03e00008, 0, 0]
-        while len(words) < 0x100 // 4:
+        while len(words) < 0x400 // 4:
             words.append(0)
         words.extend(subroutine)
     plain = bytearray(0x62000 if model == "MEMM" else 0x20000)
@@ -267,6 +273,9 @@ def check_guest_result(result: subprocess.CompletedProcess[str], model: str,
             row.split(",")[4 + 22] == f"{DMA_EXPECTED_WORD:08x}" for row in lines[1:]):
         raise RuntimeError("NAND DMA data did not reach upper PSX RAM")
     for register, expected, description in (
+        ("r25", "00000005", "SIO1 ready status without console error flags"),
+        ("r26", "000000ce", "SIO1 byte mode register lane"),
+        ("r27", "00000050", "SIO1 halfword baud register lane"),
         ("r16", "00000008", "timer interrupt status"),
         ("r18", "00000000", "timer interrupt acknowledgement"),
         ("r19", "001f001f", "MIPS-issued GPU fill/readback"),

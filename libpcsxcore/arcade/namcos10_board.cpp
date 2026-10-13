@@ -65,8 +65,11 @@ static uint32_t physical(uint32_t a)
 
 static int peripheral_unimplemented(uint32_t a)
 {
-    /* Base MAME map: EXIO, EEPROM/inputs, CD-ROM/ATA and interrupt/I2C board. */
-    return a >= 0x1fba0000u && a <= 0x1fbfffffu;
+    /* Only actual expansion apertures are unsupported. Unmapped holes in
+     * the base I/O map (e.g. the BIOS writes 1fba0010) are not devices. */
+    return (a >= 0x1fba0000u && a <= 0x1fba000bu) ||
+        (a >= 0x1fba0012u && a <= 0x1fba001bu) ||
+        (a >= 0x1fbc0000u && a <= 0x1fbc000fu);
 }
 
 static void nand_rnb_callback(NS10Board *b, size_t chip, int pin_state)
@@ -137,6 +140,10 @@ static NS10NAND *selected_nand(NS10Board *b)
 
 static int read_word(NS10Board *b, uint32_t address, uint16_t *value)
 {
+    if (address >= 0x1fbf0000u && address <= 0x1fbf000eu) {
+        *value = 1; /* MAME cdrom_unk_r: board drive-presence probe. */
+        return NS10_BOARD_OK;
+    }
     if (peripheral_unimplemented(address)) return NS10_BOARD_UNIMPLEMENTED;
     if (b->kind == NS10_BOARD_MEMM) {
         if (address >= 0x1f400000u && address <= 0x1f5ffffeu)
@@ -462,6 +469,10 @@ int ns10_board_read(NS10Board *b, uint32_t address, unsigned width, uint32_t *va
         int result = ns10_io_read(b->io, address, width, value);
         if (result == NS10_IO_OK) return NS10_BOARD_OK;
         if (result != NS10_IO_UNMAPPED) return NS10_BOARD_ARGUMENT;
+        /* Read-only/write-only delegates and holes have no opposite handler
+         * in MAME; do not mistake them for an unsupported expansion. */
+        if (physical(address) >= 0x1fba0000u && physical(address) < 0x1fba001cu)
+            return NS10_BOARD_UNMAPPED;
     }
     for (unsigned i = 0; i < width; ) {
         if (width - i >= 2) {
@@ -493,6 +504,10 @@ int ns10_board_write(NS10Board *b, uint32_t address, unsigned width,
         int result = ns10_io_write(b->io, address, width, value, mem_mask);
         if (result == NS10_IO_OK) return NS10_BOARD_OK;
         if (result != NS10_IO_UNMAPPED) return NS10_BOARD_ARGUMENT;
+        /* Read-only/write-only delegates and holes have no opposite handler
+         * in MAME; do not mistake them for an unsupported expansion. */
+        if (physical(address) >= 0x1fba0000u && physical(address) < 0x1fba001cu)
+            return NS10_BOARD_UNMAPPED;
     }
     for (unsigned i = 0; i < width; ) {
         int status;

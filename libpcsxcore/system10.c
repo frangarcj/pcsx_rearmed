@@ -9,6 +9,7 @@
 #include "psxmem.h"
 #include "arcade/namcos10_board.h"
 #include "arcade/namcos10_io.h"
+#include "arcade/psx_sio.h"
 #include "gpu_vram.h"
 
 #include <errno.h>
@@ -49,6 +50,8 @@ typedef struct ProfileRegion {
 static struct {
     NS10Board *device;
     NS10IO *io;
+    psx_sio_t *sio[2];
+    uint64_t sio_cycles, sio_fraction;
     const Profile *profile;
     Region regions[MAX_REGIONS];
     size_t region_count;
@@ -106,6 +109,13 @@ static void irq10(void *opaque, int asserted)
     (void)opaque;
     if (asserted && psxRegs.ptrs.psxH != NULL)
         psxHu32ref(0x1070) |= SWAPu32(1u << 10);
+}
+
+static void sio_irq(void *opaque, int asserted)
+{
+    unsigned port = (unsigned)(uintptr_t)opaque;
+    if (asserted && psxRegs.ptrs.psxH)
+        psxHu32ref(0x1070) |= SWAPu32(1u << (7 + port));
 }
 
 static int parse_profile_regions(const Profile *profile,
@@ -375,6 +385,11 @@ int system10_load(const char *directory)
     if (gpu_set_model(2) || gpu_set_vram_height(1024)) goto bad;
     psxRamSize = SYSTEM10_RAM_SIZE;
     psxRomSize = SYSTEM10_ROM_SIZE;
+    for (i = 0; i < 2; i++) {
+        psx_sio_callbacks_t callbacks = {0};
+        callbacks.irq = sio_irq; callbacks.opaque = (void *)(uintptr_t)i;
+        if (psx_sio_create((psx_sio_variant_t)i, &callbacks, &board.sio[i]) != PSX_SIO_OK) goto bad;
+    }
     system10_reset();
     return 0;
 bad:
@@ -388,6 +403,7 @@ void system10_unload(void)
     size_t i;
     ns10_board_destroy(board.device);
     ns10_io_destroy(board.io);
+    psx_sio_destroy(board.sio[0]); psx_sio_destroy(board.sio[1]);
     free(board.program_rom);
     free(board.flash_image);
     for (i = 0; i < board.region_count; i++) free(board.regions[i].bytes);
@@ -416,6 +432,7 @@ void system10_reset(void)
     psxRegs.biosBranchCheck = ~0u;
     psxRegs.biosFuncsHooked = 0;
     ns10_board_reset(board.device);
+    /* MAME SIO has no device_reset: keep its storage, timers and clock phase. */
     board.last_cycle = psxRegs.cycle;
     board.cycle_fraction = 0;
     board.io_elapsed_us = 0;
@@ -438,6 +455,14 @@ int system10_sync(uint32_t psx_cycle)
     microseconds = numerator / PSXCLK;
     board.cycle_fraction = numerator % PSXCLK;
     board.io_elapsed_us += microseconds;
+    /* MAME's SIO timer uses a fixed 33.8688 MHz timebase even when the
+     * System 10 CPU runs at 50.7456 MHz. Keep phase across slices/resets. */
+    numerator = board.sio_fraction + (uint64_t)elapsed * 33868800u;
+    board.sio_cycles += numerator / PSXCLK;
+    board.sio_fraction = numerator % PSXCLK;
+    if (psx_sio_advance_to_cycle(board.sio[0], board.sio_cycles) != PSX_SIO_OK ||
+        psx_sio_advance_to_cycle(board.sio[1], board.sio_cycles) != PSX_SIO_OK)
+        board.fault = 1;
     ns10_board_advance_us(board.device, microseconds);
     return board.fault ? -1 : 0;
 }
@@ -462,12 +487,40 @@ static int access_result(int result, uint32_t address, uint32_t value,
     return 1;
 }
 
+/* Source PSX SIO devices have no external peripheral on base System 10.
+ * Their reset/status/control semantics still matter to the real BIOS. */
+static int sio_access(uint32_t physical, unsigned width, uint32_t *value, int is_write, uint32_t write_mask)
+{
+    uint32_t base, data = UINT32_MAX, lane, mask;
+    psx_sio_t *sio;
+    int result;
+    if (physical < 0x1f801040u || physical >= 0x1f801060u) return 0;
+    base = physical & ~0xfu; lane = (physical & 3u) * 8;
+    if ((width != 1 && width != 2 && width != 4) || (physical & (width - 1))) {
+        board.fault = 1; return 1;
+    }
+    sio = board.sio[(base - 0x1f801040u) >> 4];
+    mask = width == 4 ? UINT32_MAX : (1u << (width * 8)) - 1;
+    if (is_write)
+        result = psx_sio_write(sio, (physical - base) >> 2, *value << lane, (write_mask & mask) << lane);
+    else {
+        result = psx_sio_read(sio, (physical - base) >> 2, mask << lane, &data);
+        *value = (data >> lane) & mask;
+    }
+    if (result != PSX_SIO_OK) board.fault = 1;
+    return 1;
+}
+
 int system10_read(uint32_t address, unsigned width, uint32_t *value)
 {
     uint32_t physical = physical_address(address), result_value = UINT32_MAX;
     int result;
     if (!board.device) return 0;
     (void)system10_sync(psxRegs.cycle);
+    if (sio_access(physical, width, &result_value, 0, 0)) {
+        if (value) *value = result_value;
+        return 1;
+    }
     result = ns10_board_read(board.device, physical, width, &result_value);
     if (result == NS10_BOARD_OK) {
         if (value != NULL) *value = result_value;
@@ -486,6 +539,7 @@ int system10_write(uint32_t address, unsigned width, uint32_t value, uint32_t me
     int result;
     if (!board.device) return 0;
     (void)system10_sync(psxRegs.cycle);
+    if (sio_access(physical, width, &value, 1, mem_mask)) return 1;
     result = ns10_board_write(board.device, physical, width, value, mem_mask);
     return access_result(result, physical, value, width, 1, 0);
 }
@@ -594,6 +648,7 @@ int system10_selftest(void)
     CHECK(system10_read(0x1fba001a, 2, &value) == 1 && (value & 8) == 0);
     psxHu32ref(0x1070) = SWAPu32(old_i_stat);
     ns10_board_reset(board.device);
+    /* MAME SIO has no device_reset: keep its storage, timers and clock phase. */
     board.last_cycle = psxRegs.cycle;
     board.cycle_fraction = 0;
     board.io_elapsed_us = 0;
@@ -606,6 +661,8 @@ int system10_selftest(void)
 void system10_report(FILE *out)
 {
     if (!board.device || out == NULL) return;
+    fprintf(out, "System10 CPU: pc=%08x SR=%08x cause=%08x I_STAT=%04x I_MASK=%04x\n",
+        psxRegs.pc, psxRegs.CP0.n.SR, psxRegs.CP0.n.Cause, psxHu16(0x1070), psxHu16(0x1074));
     fprintf(out, "System10: profile=%s board=%s crypto=%s RAM=%u ROM=%u NAND=%s x%s\n",
         board.profile->set, board.profile->board_type, board.profile->crypto,
         PSX_RAM_SIZE, PSX_ROM_SIZE, board.profile->nand_type, board.profile->nand_count);
