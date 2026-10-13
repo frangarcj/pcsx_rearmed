@@ -379,6 +379,18 @@ static void peripherals() {
     assert(m37710_read8(c, 0x34) & 8);
     m37710_write8(c, 0x35, 0xff);
     assert(m37710_read8(c, 0x35) == 7);
+    // Real C76 BIOS startup reloads the watchdog and clears one-shot start.
+    // Neither register should diagnose an unsupported peripheral: upstream
+    // ignores the reload and only stores one-shot start. Counter operation
+    // above must remain unchanged, and write-only registers read as zero.
+    const auto before = status(c);
+    m37710_write8(c, 0x60, 0x00);
+    m37710_write8(c, 0x60, 0xff);
+    m37710_write8(c, 0x42, 0x00);
+    m37710_write8(c, 0x42, 0x1f);
+    assert(status(c).unsupported_accesses == before.unsupported_accesses);
+    assert(m37710_read8(c, 0x60) == 0 && m37710_read8(c, 0x42) == 0);
+    assert(status(c).timer_ticks[0] == before.timer_ticks[0]);
     m37710_reset(c);
     assert(m37710_read8(c, 4) == 0 && m37710_read8(c, 0x40) == 0 && m37710_read16(c, 0x46) == 100);
     m37710_destroy(c);

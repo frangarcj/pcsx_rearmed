@@ -336,12 +336,15 @@ void m37710_cpu_device::bus_write8(uint32_t a, uint8_t v) {
         io[a] = (io[a] & ((v & 4) ? 0xfa : 0x0a)) | (v & 5);
         return;
     }
+    // Match upstream watchdog reload (no side effects) and one-shot start
+    // (latched only; one-shot timer execution is still unimplemented in MAME).
+    if (a == 0x60) return;
     if (a == 0x30 || a == 0x31 || a == 0x34 || a == 0x35 || a == 0x38 || a == 0x39 || a == 0x3c ||
-        a == 0x3d || a == 0x5e || a == 0x61) {
+        a == 0x3d || a == 0x42 || a == 0x5e || a == 0x61) {
         io[a] = v;
         return;
     }
-    if (a == 0x32 || a == 0x33 || a == 0x3a || a == 0x3b || a == 0x42 || a == 0x60 ||
+    if (a == 0x32 || a == 0x33 || a == 0x3a || a == 0x3b ||
         (cfg.model == M37710_MODEL_M37710S4 &&
          ((a == 0x1a || a == 0x1c) || a == 0x64 || a == 0x65 || a == 0x62))) {
         io[a] = v;

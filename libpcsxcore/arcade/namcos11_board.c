@@ -6,6 +6,7 @@
 #include "c352.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #define BANK_BYTES 0x100000u
 #define IRQ_PERIOD 141120u
@@ -113,7 +114,7 @@ static void c76_irq_ack(void *opaque, unsigned line)
 static void c76_diagnostic(void *opaque, unsigned kind, uint32_t pc, uint32_t detail)
 {
     Namcos11Board *b = opaque;
-    (void)kind; (void)pc; (void)detail;
+    fprintf(stderr, "System11 C76 diagnostic: kind=%u pc=%06x detail=%06x\n", kind, pc, detail);
     b->status.fault = 1;
 }
 static int valid_key(unsigned key)
