@@ -226,8 +226,25 @@ static void test_invalid_track_geometry_is_rejected(const char *path) {
   assert(!cd && std::strstr(error,"geometry"));
 }
 
+static void test_mode2_raw(const char *path) {
+  char error[256]{};
+  ChdCd *cd = chd_cd_open(path, nullptr, error, sizeof(error));
+  assert(cd && chd_cd_last_lba(cd) == 2);
+  nscsi_cd_media_ops_t media{}; assert(chd_cd_get_media_ops(cd, &media));
+  std::array<uint8_t, 2352> raw{};
+  std::array<uint8_t, 2048> data{};
+  assert(chd_cd_read_raw_sector(cd, 0, raw.data()) && raw[15] == 2 && raw[18] == 8);
+  assert(media.read_mode1_sector(media.opaque, 0, data.data()));
+  for (unsigned i = 0; i < data.size(); i++) assert(data[i] == uint8_t(i * 7));
+  assert(chd_cd_read_raw_sector(cd, 1, raw.data()) && raw[18] == 0x20);
+  assert(!media.read_mode1_sector(media.opaque, 1, data.data()));
+  assert(!chd_cd_read_raw_sector(cd, 2, raw.data()));
+  assert(!chd_cd_verify_sha1(cd, "1111111111111111111111111111111111111111"));
+  chd_cd_close(cd);
+}
+void test_cdxa_mode2(const char *path);
 int main(int argc, char **argv) {
-  assert(argc == 5);
+  assert(argc == 6);
   test_media_and_cdda(argv[1]);
   real_ncr_to_chd_read(argv[1]);
   test_pcm_callback_mutations_are_rejected(argv[1]);
@@ -236,5 +253,7 @@ int main(int argc, char **argv) {
   char error[256]{};
   assert(!chd_cd_open(argv[4], nullptr, error, sizeof(error)));
   assert(std::strstr(error, "malformed"));
+  test_mode2_raw(argv[5]);
+  test_cdxa_mode2(argv[5]);
   std::puts("CHD CD backend fixture: PASS");
 }

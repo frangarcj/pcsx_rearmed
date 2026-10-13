@@ -422,3 +422,17 @@ from `src/devices/sound/rf5c400.cpp/.h`, copyright Ville Linde, with improvement
 credited upstream to the hoot development team. The source revision is the
 pinned MAME revision above. Full BSD-3-Clause terms are retained in
 `rf5c400_LICENSE.txt`.
+
+## MAME SH-2 and Namco special I/O
+
+The SH-2 instruction handlers in `libpcsxcore/arcade/sh2_ops.inc` derive from
+MAME `src/devices/cpu/sh/sh.cpp` and `sh2.cpp` at the pinned revision above,
+copyright David Haywood, Juergen Buchmueller and R. Belmont (BSD-3-Clause).
+The full notice is in `libpcsxcore/arcade/sh2_LICENSE.txt`.
+
+The CDXA device map/peripheral behavior follows windyfairy’s
+`namcos12_cdxa.cpp` and SH7014 devices. JVS packet behavior follows MAME’s
+`jvshle.cpp` and `namcoio.cpp`; identities and capability responses were
+checked against the original EMIO firmware through MAME. These upstream
+components carry BSD-3-Clause notices. The standalone adapters are original
+GPL-2.0-or-later integration code.

@@ -78,8 +78,21 @@ def main() -> int:
         run(chdman, "addmeta", "-i", str(bad_decimal), "-t", "CHT2", "-ix", "0", "-vt",
             "TRACK:1 TYPE:MODE1 SUBTYPE:NONE FRAMES:18446744073709551617 "
             "PREGAP:0 PGTYPE:MODE1 PGSUB:NONE POSTGAP:2")
+        mode2 = root / "mode2.bin"
+        with mode2.open("wb") as stream:
+            for lba in range(2):
+                sector = bytearray(2352)
+                sector[0:12] = b"\x00" + b"\xff" * 10 + b"\x00"
+                sector[15] = 2
+                sector[18] = sector[22] = 0x20 if lba else 0x08
+                for i in range(2048): sector[24 + i] = (i * 7 + lba * 13) & 255
+                stream.write(sector)
+        mode2_cue = root / "mode2.cue"
+        mode2_cue.write_text('FILE "mode2.bin" BINARY\n TRACK 01 MODE2/2352\n INDEX 01 00:00:00\n')
+        mode2_chd = root / "mode2.chd"
+        run(chdman, "createcd", "-i", str(mode2_cue), "-o", str(mode2_chd), "-c", "none")
         subprocess.run([args.binary, str(chd), str(bad_type), str(bad_geometry),
-                        str(bad_decimal)], check=True)
+                        str(bad_decimal), str(mode2_chd)], check=True)
     return 0
 
 

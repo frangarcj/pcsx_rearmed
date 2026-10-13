@@ -9,7 +9,7 @@ CFLAGS ?= -std=c99 -O2 -g -Wall -Wextra -Werror
 include tools/mac-harness/libchdr.mk
 CHDOBJDIR := $(BUILD)/libchdr
 LIBCHDR_OBJECTS := $(addprefix $(CHDOBJDIR)/,$(addsuffix .o,$(basename $(notdir $(LIBCHDR_SOURCES))))) $(LIBCHDR_EXTRA_OBJECTS)
-OBJS := $(BUILD)/nscsi_bus.o $(BUILD)/nscsi_target.o $(BUILD)/ncr53cf96.o $(BUILD)/nscsi_cd.o $(BUILD)/chd_cd.o $(LIBCHDR_OBJECTS)
+OBJS := $(BUILD)/nscsi_bus.o $(BUILD)/nscsi_target.o $(BUILD)/ncr53cf96.o $(BUILD)/nscsi_cd.o $(BUILD)/chd_cd.o $(BUILD)/sh2.o $(BUILD)/system12_cdxa.o $(LIBCHDR_OBJECTS)
 override CFLAGS += $(LIBCHDR_CFLAGS)
 
 .PHONY: all test sanitize clean
@@ -28,6 +28,11 @@ $(BUILD)/nscsi_cd.o: $(ARCADE)/nscsi_cd.cpp $(ARCADE)/nscsi_cd.h $(ARCADE)/nscsi
 $(BUILD)/chd_cd.o: $(ARCADE)/chd_cd.cpp $(ARCADE)/chd_cd.h $(ARCADE)/nscsi_cd.h | $(BUILD)
 	$(CXX) $(CXXFLAGS) -MMD -MP -MF $(@:.o=.d) -I$(ARCADE) $(LIBCHDR_CFLAGS) -c $< -o $@
 
+$(BUILD)/sh2.o: $(ARCADE)/sh2.cpp $(ARCADE)/sh2.h $(ARCADE)/sh2_ops.inc | $(BUILD)
+	$(CXX) $(CXXFLAGS) -MMD -MP -MF $(@:.o=.d) -I$(ARCADE) -c $< -o $@
+$(BUILD)/system12_cdxa.o: $(ARCADE)/system12_cdxa.cpp $(ARCADE)/system12_cdxa.h | $(BUILD)
+	$(CXX) $(CXXFLAGS) -MMD -MP -MF $(@:.o=.d) -I$(ARCADE) -c $< -o $@
+
 $(CHDOBJDIR)/%.o: $(LIBCHDR)/src/%.c | $(CHDOBJDIR)
 	$(CC) $(CFLAGS) -Wno-unused-function $(LIBCHDR_CFLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
 $(CHDOBJDIR)/LzmaDec.o: $(LIBCHDR_LZMA)/src/LzmaDec.c | $(CHDOBJDIR)
@@ -35,8 +40,8 @@ $(CHDOBJDIR)/LzmaDec.o: $(LIBCHDR_LZMA)/src/LzmaDec.c | $(CHDOBJDIR)
 $(CHDOBJDIR)/zstddeclib.o: $(LIBCHDR_ZSTD)/zstddeclib.c | $(CHDOBJDIR)
 	$(CC) $(CFLAGS) -Wno-unused-function $(LIBCHDR_CFLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
 
-$(TARGET): $(OBJS) tests/test_chd_cd.cpp
-	$(CXX) $(CXXFLAGS) -MMD -MP -MF $(BUILD)/test_chd_cd.d -I$(ARCADE) $(LIBCHDR_CFLAGS) tests/test_chd_cd.cpp $(OBJS) -lz -o $@
+$(TARGET): $(OBJS) tests/test_chd_cd.cpp tests/test_system12_cdxa.cpp
+	$(CXX) $(CXXFLAGS) -MMD -MP -MF $(BUILD)/test_chd_cd.d -I$(ARCADE) $(LIBCHDR_CFLAGS) tests/test_chd_cd.cpp tests/test_system12_cdxa.cpp $(OBJS) -lz -o $@
 -include $(OBJS:.o=.d) $(BUILD)/test_chd_cd.d
 
 test: $(TARGET)

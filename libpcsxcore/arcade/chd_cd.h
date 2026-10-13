@@ -21,6 +21,10 @@ ChdCd *chd_cd_open(const char *path, const chd_cd_config_t *config,
                    char *error, size_t error_capacity);
 void chd_cd_close(ChdCd *cd);
 int chd_cd_get_media_ops(ChdCd *cd, nscsi_cd_media_ops_t *ops);
+/* Real stored 2352-byte sectors for ATAPI READ CD (MODE1_RAW/MODE2_RAW/AUDIO).
+ * Packed 2048-byte tracks are rejected rather than inventing raw ECC bytes. */
+int chd_cd_read_raw_sector(ChdCd *cd, uint32_t lba, uint8_t out[2352]);
+int chd_cd_verify_sha1(ChdCd *cd, const char *expected_hex);
 /* Advance absolute nanoseconds. Time must be monotonic. CDDA emits 44.1 kHz,
  * stereo signed PCM16 samples from the actual audio sectors to the sink. */
 int chd_cd_advance_to(ChdCd *cd, uint64_t now_ns);

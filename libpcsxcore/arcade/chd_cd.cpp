@@ -92,10 +92,10 @@ static bool parse_track(chd_file *file, unsigned index, Track &track,
     valid = valid && number_field("PREGAP:", pregap) && word_field("PGTYPE:", pgtype) &&
             word_field("PGSUB:", pgsub) && number_field("POSTGAP:", postgap);
   while (*cursor && std::isspace(static_cast<unsigned char>(*cursor))) ++cursor;
-  if (!valid || *cursor || (modern && std::strcmp(pgsub, "NONE")))
+  if (!valid || *cursor || (modern && std::strcmp(pgsub, "NONE") && std::strcmp(pgsub, "RW") && std::strcmp(pgsub, "RW_RAW")))
     return fail_text(error, error_cap, "unsupported or malformed CHD track metadata");
   if (number != index + 1 || frames == 0 ||
-      std::strcmp(subtype, "NONE") != 0)
+      (std::strcmp(subtype, "NONE") && std::strcmp(subtype, "RW_RAW") && std::strcmp(subtype, "RW")))
     return fail_text(error, error_cap, "unsupported CHD track numbering, subtype, or geometry");
   if (!std::strcmp(type, "MODE1") || !std::strcmp(type, "MODE1/2048")) {
     track.type = CD_TRACK_MODE1;
@@ -106,18 +106,21 @@ static bool parse_track(chd_file *file, unsigned index, Track &track,
   } else if (!std::strcmp(type, "AUDIO")) {
     track.type = CD_TRACK_AUDIO;
     track.data_bytes = kSectorBytes;
+  } else if (!std::strcmp(type, "MODE2_RAW")) {
+    track.type = CD_TRACK_MODE2_RAW;
+    track.data_bytes = kSectorBytes;
   } else {
     return fail_text(error, error_cap, "CHD track type is not supported by this backend");
   }
   if (pgtype[0] && pgtype[0] != 'V' &&
       std::strcmp(pgtype, "MODE1") && std::strcmp(pgtype, "MODE1/2048") &&
-      std::strcmp(pgtype, "AUDIO"))
+      std::strcmp(pgtype, "AUDIO") && std::strcmp(pgtype, "MODE2_RAW"))
     return fail_text(error, error_cap, "unsupported pregap metadata encoding");
   if (pgtype[0] == 'V') {
     if (!std::strcmp(pgtype + 1, "MODE1") || !std::strcmp(pgtype + 1, "MODE1/2048"))
       track.pg_data_bytes = kMode1Bytes;
     else if (!std::strcmp(pgtype + 1, "MODE1_RAW") || !std::strcmp(pgtype + 1, "MODE1/2352") ||
-             !std::strcmp(pgtype + 1, "AUDIO"))
+             !std::strcmp(pgtype + 1, "AUDIO") || !std::strcmp(pgtype + 1, "MODE2_RAW"))
       track.pg_data_bytes = kSectorBytes;
     else
       return fail_text(error, error_cap, "unsupported stored pregap type");
@@ -296,6 +299,13 @@ static int op_read_mode1(void *opaque, uint32_t lba, uint8_t out[kMode1Bytes]) {
   }
   uint8_t staged[kMode1Bytes];
   uint32_t offset = cd->tracks[ti].type == CD_TRACK_MODE1_RAW ? 16 : 0;
+  if (cd->tracks[ti].type == CD_TRACK_MODE2_RAW) {
+    uint8_t submode;
+    if (!read_bytes(cd, frame * cd->unit_bytes + 18, &submode, 1) || (submode & 0x20)) {
+      set_error(cd, "2048-byte request targets a MODE2 Form 2 sector"); return 0;
+    }
+    offset = 24;
+  }
   uint64_t base = frame * cd->unit_bytes + offset;
   if (!read_bytes(cd, base, staged, kMode1Bytes)) return 0;
   std::memcpy(out, staged, kMode1Bytes);
@@ -440,6 +450,24 @@ extern "C" int chd_cd_get_media_ops(ChdCd *cd, nscsi_cd_media_ops_t *ops) {
           op_last_track, op_track_for_lba, op_adr_control, op_is_audio,
           op_audio_start, op_audio_pause, op_audio_status, op_audio_gain};
   return 1;
+}
+extern "C" int chd_cd_read_raw_sector(ChdCd *cd, uint32_t lba, uint8_t out[2352]) {
+  if (!cd || !out || reject_callback_mutation(cd)) return 0;
+  uint32_t track = 0;
+  uint64_t frame = 0;
+  bool pregap = false;
+  if (!logical_frame(cd, lba, track, frame, pregap)) return 0;
+  if (cd->tracks[track].data_bytes != kSectorBytes || (pregap && !cd->tracks[track].pg_data_bytes)) {
+    set_error(cd, "raw sector request requires stored 2352-byte sector data"); return 0;
+  }
+  return read_bytes(cd, frame * cd->unit_bytes, out, kSectorBytes) ? 1 : 0;
+}
+extern "C" int chd_cd_verify_sha1(ChdCd *cd, const char *hex) {
+  if (!cd || !hex || std::strlen(hex) != 40) return 0;
+  const chd_header *header = chd_get_header(cd->file);
+  char actual[41];
+  for (unsigned i = 0; i < 20; i++) std::snprintf(actual + i * 2, 3, "%02x", header->sha1[i]);
+  return std::strcmp(actual, hex) == 0;
 }
 extern "C" int chd_cd_advance_to(ChdCd *cd, uint64_t now_ns) {
   if (reject_callback_mutation(cd)) return 0;
