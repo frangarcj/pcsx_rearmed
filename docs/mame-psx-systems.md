@@ -10,7 +10,7 @@ the installed listxml reports MAME 0.287.
 | --- | --- | ---: | --- | --- | --- |
 | `sony/psx.cpp` | Retail PlayStation | 4 | `psu`, `psj` | SCPH NTSC/PAL; controller and memory-card ports, parallel I/O, CD-ROM | Console core and native PS-X EXE smoke pass; full retail machine/BIOS/media validation remains pending |
 | `sony/zn.cpp` | Sony ZN-1/ZN-2; Capcom ZN; Tecmo TPS; Raizing ZN | 116 | `sfex`, `glpracr3`, `brvblade` | COH-1000/1001/1002 and COH-3002; variants include 1/2 MiB GPU memory, alternate sound CPUs, CAT702 security, and game I/O | Native synthetic Capcom COH1000C/1002C/3002C and Taito FX1S COH1000T MIPS/Z80, banks, SIO/MCU, EEPROM, inputs, GPU and sound pass; Street Fighter EX, Star Gladiator and Rival Schools pass short Mac interpreter/GL gameplay with QSound capture; authentic FX1 games and other daughterboards remain unverified |
-| `sony/taitogn.cpp` | Taito G-Net (ZN-derived CPU/GPU) | 41 | `psyvaria`, `gdariusg`, `aerofgtsg` | COH-1002/3002 variants, Taito Zoom sound; CompactFlash and title-specific I/O on applicable sets | Native synthetic PSX interpreter/ARM64 DRC bus and storage execution fixtures pass. All 41 source profiles select BIOS/card/media identities; source ATA, PC Card and CHD composition fixtures pass, and the loader attaches verified CHD media. Source CPU timing is integrated; authentic games, event/vblank timing equivalence, sound output and title-specific I/O remain pending |
+| `sony/taitogn.cpp` | Taito G-Net (ZN-derived CPU/GPU) | 41 | `psyvaria`, `gdariusg`, `aerofgtsg` | COH-1002/3002 variants, Taito Zoom sound; CompactFlash and title-specific I/O on applicable sets | Native synthetic PSX interpreter/ARM64 DRC bus and storage execution fixtures pass. All 41 source profiles select BIOS/card/media identities; source ATA, PC Card and CHD composition fixtures pass, and the loader attaches verified CHD media. Four representative games have [Mac interpreter/GL gameplay](gnet-mac.md), captured Zoom PCM, persistent flash and source-profile analog I/O. Broader sets, event/vblank timing equivalence, frontend sound mixing and physical Vita remain pending |
 | `konami/konamigv.cpp` | Konami System GV (Baby Phoenix) | 15 | `tmosh`, `weddingr` | CXD8530-class CPU; CXD8514/CXD8561 GPU variants, CD-ROM and game I/O | All 15 media profiles audited; seven common-map profiles have native integration and generated MIPS interpreter/DRC fixtures; authentic games and special I/O remain unverified |
 | `konami/konamigq.cpp` | Konami System GQ | 1 | `cryptklr` | CXD8530BQ/CXD8538Q; MC68000 and TMS57002 sound system | Complete source profile and local ROM/HDD preparation tested; native board execution pending |
 | `konami/ksys573.cpp` | Konami System 573 | 156 | `ddr4m`, `drmn`, `sys573` | CD-ROM, cassette, PC-card, flash and game I/O configurations | No arcade board support |
@@ -42,7 +42,7 @@ all been recalibrated. No entire family is considered finished.
 | --- | ---: | --- |
 | Retail PlayStation | 20–35% | Existing console core and native CPU/GPU smoke; native BIOS/disc, controller, sound and retail-game validation pending |
 | Sony ZN family (including Taito FX1) | 50–65% | Capcom and FX1S generated native guests pass; three Capcom games pass short Mac GL gameplay; authentic FX1 games and Tecmo/Raizing/other daughterboards pending |
-| Taito G-Net | 80–90% | Native PSX interpreter/DRC bus/storage fixtures and Zoom composition pass; all 41 source profiles and CHD/ATA/PC Card composition are implemented and component-tested. Source CPU timing is integrated; authentic games, event timing equivalence, frontend sound and title-specific I/O remain pending. The estimate has not been recalibrated from these additions. |
+| Taito G-Net | 80–90% | Native PSX interpreter/DRC bus/storage fixtures and Zoom composition pass; all 41 source profiles and CHD/ATA/PC Card composition are implemented and component-tested. Four representative games pass bounded Mac interpreter/GL gameplay with Zoom PCM, persistent flash and source-profile analog I/O. Broader sets, event timing equivalence, frontend sound mixing/bindings and physical Vita remain pending. This historical estimate has not been recalibrated from the Mac gameplay evidence. |
 | Konami System GV | 45–60% | Common native board MIPS interpreter/DRC, DMA5, IRQ10 and CHD fixture tested; authentic BIOS/CD execution, sound and special I/O pending |
 | Konami System GQ | 50–65% | HDD preparation, real CHD read/write NCR fixture, MC68000, TMS57002 and K056800/K054539 tested; complete board/gun wiring and real-game validation pending |
 | Konami System 573 | 85–95% | Security cassette, flash and shared CD/SCSI foundations; board configurations, audio, I/O and game validation pending |
@@ -174,9 +174,11 @@ machine's assets does not imply that it boots.
   and the public nonzero PCM callback, including reset/load lifetime and
   sink disable. A separate executed synthetic MIPS storage fixture verifies
   Type-1 card unlock, IDENTIFY, sector reads/writes, overlay reopen and reset
-  relock. Source CPU timing is integrated. Production PCM resampling/mixing,
-  event/vblank timing equivalence, title-specific I/O and authentic G-Net game
-  execution remain pending.
+  relock. Source CPU timing is integrated. [Four representative games](gnet-mac.md)
+  now reach player gameplay with the Mac interpreter/GL path and captured Zoom
+  PCM; mutable flash persists and source-profile analog controls are wired.
+  Production PCM resampling/mixing, event/vblank timing equivalence, physical
+  frontend analog bindings and broader authentic-game coverage remain pending.
   The [NOR engine](nor-flash.md) now has source-derived E28F400B/TE28F160
   profiles, with x16 programming, IDs, erase geometry and timing fixtures plus
   sanitizers. The [standalone G-Net flash/Zoom composition](gnet-zoom-flash-port.md)

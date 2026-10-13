@@ -55,15 +55,18 @@ overlay_file=chaoshea.overlay
 The selectable COH-3002T options are `v1`, `v2`, `mb2009`, and `mb2011`;
 COH-1002T is fixed and uses its erased EPROM region. BIOS and CHD hashes are
 checked against the generated source registry. The loader records each source
-game's machine, input, initializer, and flags, but does not apply per-game input
-variations or game-specific extensions yet.
+game's machine, input, initializer, and flags. Source-profile JP1 defaults,
+Go By RC analog controls and Mawasunda handles/outputs are applied; other
+per-game extensions remain unverified. See [representative Mac gameplay and
+startup fixes](gnet-mac.md) for the four authenticated media runs.
 
 The adapter configures the source 4 MiB PSX RAM and 2 MiB VRAM, Sony ZN CAT702,
 EEPROM and SIO devices, then routes CPU accesses through `gnet_zoom_bus_*` and
 the shared ZN map. Game profiles attach CHD-backed ATA/PC Card storage to the
 RF5C296 callbacks; BIOS-root profiles have no card. Core cycles advance Zoom
-and storage timers on monotonic board time. No authentic G-Net CHD/key package
-is available locally.
+and storage timers on monotonic board time. The Mac validation uses four
+hash-checked BIOS/CHD packages; mutable flash persists separately in
+`flash.nvram`, as described in [the Mac validation notes](gnet-mac.md).
 
 The 6.25 MHz adapter clock is the MN10200's effective execution-cycle rate:
 the pinned MAME device is configured at 12.5 MHz and converts external clocks
@@ -84,8 +87,9 @@ callback. The sink is disabled by default and persists across board resets;
 the libretro frontend still routes generic PSX SPU audio only and does not yet
 mix or resample Zoom PCM. The EEPROM API is not connected to frontend save
 storage. The native profile loader and board expose the source PC Card/ATA
-path, but frontend save-state and authentic-media boot coverage remain open;
-per-game input variations and game-specific extensions are not applied yet.
+path. Frontend save-state support, Zoom mixing, analog input bindings and
+broader authentic-media coverage remain open. The Mac harness captures Zoom
+PCM to WAV and has bounded interpreter/GL gameplay evidence for four profiles.
 
 The audio callback receives normalized stereo floats and a ZSG timestamp in
 the 25 MHz chip-clock domain. It runs synchronously while `systemgnet_sync`
@@ -99,8 +103,9 @@ The standalone Zoom regression also loads a synthetic MN10200 program that
 uploads a small TMS57002 tone routine through the board pins and captures the
 real `gnet_zoom` audio callback. It checks finite nonzero PCM, increasing ZSG
 timestamps, and identical output for one-shot versus split cycle synchronization.
-This validates the emulator's PCM path with test data; it does not supply the
-missing authenticated game sound program or sample media.
+This validates the emulator's PCM path with test data. Separately, authentic
+media runs install and execute the game sound program and samples and produce
+nonzero PCM; see [the Mac validation notes](gnet-mac.md).
 
 The selected BIOS root reports its MAME main-CPU input clock through
 `systemgnet_main_clock_hz()` and `systemgnet_report()`. The shared arcade source
@@ -120,7 +125,8 @@ passes with both the interpreter and ARM64 DRC, including the PCM assertions
 and sink-disable check. This checks the board map bridge, audio callback
 lifecycle, and 4 MiB RAM path, not MAME assets, startup firmware, game boot, or
 real-board compatibility. Registry and synthetic storage tests do not
-establish an authentic G-Net boot; no BIOS/CHD/key set has been loaded here.
+establish an authentic G-Net boot; the separate Mac media runs provide that
+evidence for four profiles.
 
 `--system-gnet-storage-fixture <chd>` is a separate test-only path. It uses a
 generated synthetic CHD and bypasses neither `systemgnet_load()` nor its
