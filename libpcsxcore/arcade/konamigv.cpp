@@ -268,6 +268,8 @@ int media_track_audio(void *opaque, unsigned track) {
 void media_cdda_start(void *opaque, uint32_t lba, uint32_t blocks) {
   auto *b = static_cast<KonamiGV *>(opaque);
   if (callback_enter(b)) {
+    if (b->config.advance_media && !b->config.advance_media(b->config.opaque,b->now_ns))
+      b->faults |= KONAMIGV_FAULT_BUS;
     b->media.cdda_start(b->media.opaque, lba, blocks);
     callback_leave(b);
   }
@@ -275,6 +277,8 @@ void media_cdda_start(void *opaque, uint32_t lba, uint32_t blocks) {
 void media_cdda_pause(void *opaque, int pause) {
   auto *b = static_cast<KonamiGV *>(opaque);
   if (callback_enter(b)) {
+    if (b->config.advance_media && !b->config.advance_media(b->config.opaque,b->now_ns))
+      b->faults |= KONAMIGV_FAULT_BUS;
     b->media.cdda_pause(b->media.opaque, pause);
     callback_leave(b);
   }
@@ -282,6 +286,8 @@ void media_cdda_pause(void *opaque, int pause) {
 void media_cdda_status(void *opaque, nscsi_cd_audio_status_t *status) {
   auto *b = static_cast<KonamiGV *>(opaque);
   if (callback_enter(b)) {
+    if (b->config.advance_media && !b->config.advance_media(b->config.opaque,b->now_ns))
+      b->faults |= KONAMIGV_FAULT_BUS;
     b->media.cdda_status(b->media.opaque, status);
     callback_leave(b);
   } else {
@@ -291,6 +297,8 @@ void media_cdda_status(void *opaque, nscsi_cd_audio_status_t *status) {
 void media_cdda_gain(void *opaque, unsigned channel, float gain) {
   auto *b = static_cast<KonamiGV *>(opaque);
   if (callback_enter(b)) {
+    if (b->config.advance_media && !b->config.advance_media(b->config.opaque,b->now_ns))
+      b->faults |= KONAMIGV_FAULT_BUS;
     b->media.cdda_set_gain(b->media.opaque, channel, gain);
     callback_leave(b);
   }

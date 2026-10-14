@@ -40,6 +40,9 @@ typedef struct konamigv_config {
   konamigv_line_cb uart_txempty[2];
   konamigv_line_cb uart_syndet[2];
   nscsi_cd_media_ops_t cd_media;
+  /* Optional backend clock, synchronized at the actual SCSI audio command
+   * timestamp before start/pause/status/gain, never just at a host frame. */
+  int (*advance_media)(void *opaque, uint64_t now_ns);
   /* Optional exact-size 93C46 image (128 bytes); NULL/0 starts erased. */
   const uint8_t *eeprom_image;
   size_t eeprom_image_bytes;

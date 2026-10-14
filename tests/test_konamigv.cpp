@@ -28,6 +28,8 @@ struct TestContext {
   std::vector<std::pair<uint64_t, int>> txd_edges;
   uint64_t now = 0;
   uint64_t sequence = 1;
+  uint64_t media_ns=UINT64_MAX;
+  unsigned audio_calls=0,clock_calls=0;
   unsigned sector_reads = 0;
   bool reenter_on_irq = false;
 };
@@ -98,9 +100,11 @@ static unsigned last_track(void *) { return 1; }
 static unsigned track_for_lba(void *, uint32_t) { return 0; }
 static uint8_t track_adr(void *, unsigned) { return 0x14; }
 static int track_audio(void *, unsigned) { return 0; }
-static void cdda_start(void *, uint32_t, uint32_t) {}
+static int media_clock(void *opaque,uint64_t ns){auto*c=static_cast<TestContext*>(opaque);assert(c->media_ns==UINT64_MAX || ns>=c->media_ns);c->media_ns=ns;c->clock_calls++;return 1;}
+static void cdda_start(void *opaque, uint32_t, uint32_t){auto*c=static_cast<TestContext*>(opaque);assert(c->media_ns!=UINT64_MAX);c->audio_calls++;}
 static void cdda_pause(void *, int) {}
-static void cdda_status(void *, nscsi_cd_audio_status_t *status) {
+static void cdda_status(void *opaque, nscsi_cd_audio_status_t *status) {
+  auto*c=static_cast<TestContext*>(opaque);assert(c->media_ns!=UINT64_MAX);c->audio_calls++;
   *status = {};
 }
 static void cdda_gain(void *, unsigned, float) {}
@@ -119,6 +123,7 @@ static KonamiGV *make_board(TestContext &ctx, const uint8_t *eeprom = nullptr,
                      track_start, last_track,    track_for_lba,  track_adr,
                      track_audio, cdda_start,    cdda_pause,     cdda_status,
                      cdda_gain};
+  config.advance_media=media_clock;
   config.eeprom_image = eeprom;
   config.eeprom_image_bytes = eeprom_bytes;
   ctx.board = konamigv_create(&config);
@@ -356,6 +361,13 @@ static void ncr_reg_write_for_cdb(KonamiGV *b,
   ncr_write(b, 3, 0x41);
 }
 
+static void cdda_clock_command_test(){
+ TestContext ctx;auto*b=make_board(ctx);advance(b,ctx,1234567);
+ ncr_reg_write_for_cdb(b,{0x42,0,0x40,1,0,0,0,0,16,0});advance(b,ctx,2000000);
+ assert(ctx.audio_calls && ctx.clock_calls && ctx.media_ns>=1234567 && ctx.media_ns<=2000000);
+ konamigv_destroy(b);
+}
+
 static void cd_dma_read_test(bool sliced) {
   TestContext ctx;
   auto *b = make_board(ctx);
@@ -435,6 +447,7 @@ int main() {
   eeprom_mmio_clock_and_busy_tests();
   uart_tx_waveform_and_loopback_tests();
   irq_ack_and_reset_pending_dma_tests();
+  cdda_clock_command_test();
   cd_dma_read_test(false);
   cd_dma_read_test(true);
   cd_dma_write_test(false);

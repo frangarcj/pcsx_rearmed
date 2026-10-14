@@ -50,3 +50,11 @@ imported for caller-owned persistence.
 
 The common board does not claim game boot. A boot path also needs the matching
 PSX BIOS, game firmware/media, and any game-specific peripheral hardware.
+
+The optional media clock callback runs at each SCSI CDDA start/pause/status/gain
+operation's actual board timestamp, before that backend operation. Native GV
+also advances the CHD audio backend at each completed device slice. This fixes
+CD playback position/status progression without resetting its epoch at a host
+frame. A real SCSI READ SUBCHANNEL component test verifies backend synchronization
+before the status callback under O2 and ASan/UBSan. CDDA speaker mixing remains
+a separate frontend task.
