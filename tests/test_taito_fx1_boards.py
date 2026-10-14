@@ -38,6 +38,9 @@ class TaitoFX1RegistryTests(unittest.TestCase):
         self.assertEqual(set(candidates), {
             "sfchamp", "sfchampo", "sfchampu", "sfchampj", "psyforce",
             "psyforcej", "psyforcex", "mgcldate", "mgcldtex",
+            "raystorm", "raystormo", "raystormu", "raystormj",
+            "gdarius", "gdarius2", "gdariusj", "gdariusu",
+            "ftimpact", "ftimpactj", "ftimpactu", "ftimpcta",
         })
 
     def test_fx1s_configuration_audio_geometry_and_regions_are_exact(self):
@@ -69,22 +72,24 @@ class TaitoFX1RegistryTests(unittest.TestCase):
                     if r["tag"] == "ym2610b:adpcma")
         self.assertEqual(mgcl["size"], 0x400000)
         zrom = self.by_set["raystorm"]
-        self.assertFalse(zrom["runtime_candidate"])
+        self.assertTrue(zrom["runtime_candidate"])
         self.assertEqual(zrom["board_type"], "FX1Z")
         self.assertIn("taito_zoom:mn10200", {r["tag"] for r in zrom["rom_regions"]})
         gdarius = self.by_set["gdarius"]
-        self.assertFalse(gdarius["runtime_candidate"])
+        self.assertTrue(gdarius["runtime_candidate"])
         self.assertEqual(gdarius["state"], "gdarius_state")
         self.assertEqual(gdarius["board_model"], "COH1002TB")
 
-    def test_undumped_region_exception_is_only_recorded_for_fx1s(self):
+    def test_undumped_region_exception_is_recorded_for_reviewed_fx1_classes(self):
         fx1s = self.by_set["sfchamp"]["optional_undumped_media_review"]
         self.assertEqual(fx1s["tag"], "upd78081")
         self.assertEqual(fx1s["filename"], "78081g503.ic655")
         self.assertEqual(fx1s["size"], 0x2000)
         self.assertEqual(fx1s["handling"], "omitted_from_media_package_no_substitute")
         self.assertIn("ZNMCU", fx1s["source_proof"])
-        self.assertIsNone(self.by_set["raystorm"]["optional_undumped_media_review"])
+        self.assertIn("ZNMCU", self.by_set["raystorm"]["optional_undumped_media_review"]["source_proof"])
+        self.assertEqual(self.by_set["raystorm"]["sound_cpu_clock_hz"],12500000)
+        self.assertEqual(self.by_set["gdarius2"]["sound_latch_device"],"M66220FP")
 
     def test_generator_is_deterministic(self):
         regenerated = profiles.build_registry()
@@ -135,7 +140,7 @@ class TaitoFX1PackagingTests(unittest.TestCase):
             with self.assertRaises(prepare.TaitoFX1PreparationError):
                 prepare.package_regions("coh1000t", self.by_set["coh1000t"], {}, Path(temp), {})
 
-    def test_reviewed_no_dump_filter_does_not_apply_to_other_variants(self):
+    def test_reviewed_no_dump_filter_rejects_unreviewed_configs(self):
         source = (profiles.DEFAULT_SOURCE / "src/mame" / profiles.DRIVER).read_text()
         sets, _, _ = mame.parse_driver(source, profiles.DRIVER)
         filtered = prepare._filter_reviewed_upd78081(sets["sfchamp"], self.by_set["sfchamp"])
@@ -143,7 +148,7 @@ class TaitoFX1PackagingTests(unittest.TestCase):
         self.assertIn("cat702_1", filtered.regions)
         self.assertIn("cat702_2", filtered.regions)
         with self.assertRaises(prepare.TaitoFX1PreparationError):
-            prepare._filter_reviewed_upd78081(sets["raystorm"], self.by_set["raystorm"])
+            prepare._filter_reviewed_upd78081(sets["raystorm"], {**self.by_set["raystorm"],"machine":"unreviewed"})
 
     def test_filtered_rom_origins_keep_source_indices(self):
         source = (profiles.DEFAULT_SOURCE / "src/mame" / profiles.DRIVER).read_text()

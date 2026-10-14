@@ -1,4 +1,4 @@
-/* GPL-2.0-or-later. Native host wiring for MAME-derived Taito FX-1S devices.
+/* GPL-2.0-or-later. Native host wiring for MAME-derived Taito FX-1S/FX1Z devices.
  * Source: MAME deb2f54fe7300e7a192690318beb860159bfd52a, sony/zn.cpp.
  * Device implementations retain their upstream BSD-3-Clause notices/licenses.
  */
@@ -9,6 +9,9 @@
 #include "psxmem.h"
 #include "r3000a.h"
 #include "arcade/taito_fx1.h"
+#include "arcade/zoom_board.h"
+#include "arcade/mb3773.h"
+#include <math.h>
 #include "arcade/zn_board.h"
 #include "arcade/psx_sio.h"
 #include "arcade/pcm_wav.h"
@@ -40,6 +43,14 @@ static const char *const region_files[REGION_COUNT] = {
 };
 static struct {
     TaitoFx1 *device;
+    zoom_board *zoom;
+    MB3773 *watchdog;
+    uint8_t fram[0x200];
+    int synthetic;
+    unsigned main_bank;
+    uint64_t bank_writes, zoom_nonzero;
+    void (*zoom_output)(void *, float, float, uint64_t);
+    void *zoom_opaque;
     ZNMCU *mcu;
     zn_board_t zn;
     psx_sio_t *sio[2];
@@ -115,6 +126,25 @@ static void audio_sample(void *opaque, int16_t left, int16_t right)
     if (r > board.peak) board.peak = r;
     if (pcm_wav_append4(&board.wav, channels, 1)) board.fault = 1;
 }
+static void zoom_sample(void *opaque, float left, float right, uint64_t cycle)
+{
+    int16_t channels[4] = {0};
+    float stereo[] = {left, right};
+    (void)opaque;
+    if (!isfinite(left) || !isfinite(right)) { board.fault = 1; return; }
+    if (left || right) board.zoom_nonzero++;
+    if (board.zoom_output) board.zoom_output(board.zoom_opaque, left, right, cycle);
+    for (unsigned i = 0; i < 2; ++i) {
+        float value = stereo[i] * 32768.0f;
+        if (value > 32767) value = 32767;
+        if (value < -32768) value = -32768;
+        channels[i] = (int16_t)value;
+        unsigned peak = channels[i] < 0 ? -(int)channels[i] : channels[i];
+        if (peak > board.peak) board.peak = peak;
+    }
+    if (pcm_wav_append4(&board.wav, channels, 1)) board.fault = 1;
+}
+
 static int create_devices(void)
 {
     zn_board_config_t zcfg = {0}; zn_board_callbacks_t zcb = {0};
@@ -131,10 +161,20 @@ static int create_devices(void)
     mcfg.dsw = read_dsw; mcfg.dsr = mcu_dsr; mcfg.txd = mcu_txd;
     if (zn_mcu_create(&mcfg, &board.mcu)) return -1;
     memcpy(keys[0], board.regions[4], 8); memcpy(keys[1], board.regions[5], 8);
-    zcfg.model = ZN_BOARD_ZN1; zcfg.ram_bytes = 0x400000; zcfg.vram_bytes = 0x100000;
+    zcfg.model = ZN_BOARD_ZN1; zcfg.ram_bytes = 0x400000; zcfg.vram_bytes = !strcmp(board.profile->expected[13], "2097152") ? 0x200000 : 0x100000;
     zcfg.cat702_count = 2; zcfg.cat702_keys = (const uint8_t (*)[8])keys; zcfg.mcu = board.mcu;
     zcb.read_input = read_input; zcb.cat702_dataout = cat_txd;
     if (!zn_board_init(&board.zn, &zcfg, &zcb)) return -1;
+    if (!strcmp(board.profile->expected[4], "FX1Z")) {
+        zoom_board_config zoom = {0}; MB3773Config watchdog = {0};
+        zoom.boot_flash = board.regions[2]; zoom.boot_flash_size = board.profile->sizes[2];
+        zoom.sample_rom = board.regions[3]; zoom.sample_rom_size = board.profile->sizes[3];
+        zoom.audio_frame = zoom_sample;
+        watchdog.request_soft_reset = request_reset;
+        memset(board.fram, 0xff, sizeof(board.fram));
+        if (zoom_board_create(&zoom, &board.zoom) || mb3773_create(&watchdog, &board.watchdog)) return -1;
+        return 0;
+    }
     cfg.banked_rom = board.regions[1]; cfg.banked_rom_size = board.profile->sizes[1];
     cfg.audio_rom = board.regions[2]; cfg.audio_rom_size = board.profile->sizes[2];
     cfg.adpcm_a = board.regions[3]; cfg.adpcm_a_size = board.profile->sizes[3];
@@ -205,57 +245,69 @@ static int validate_media(const Profile *p, uint8_t *const *regions)
                 marked[dst] = 1; crc = crc_byte(crc, regions[region][dst]);
             }
             if ((crc ^ UINT32_MAX) != c->crc) {
-                fprintf(stderr, "Taito FX1S: %s source ROM CRC mismatch (load at 0x%x)\n", region_files[region], c->offset);
+                fprintf(stderr, "Taito FX1: %s source ROM CRC mismatch (load at 0x%x)\n", region_files[region], c->offset);
                 free(marked); return -1;
             }
         }
         for (j = 0; j < p->sizes[region]; j++) if (!marked[j] && regions[region][j] != p->erase[region]) {
-            fprintf(stderr, "Taito FX1S: %s source padding mismatch at 0x%zx\n", region_files[region], j);
+            fprintf(stderr, "Taito FX1: %s source padding mismatch at 0x%zx\n", region_files[region], j);
             free(marked); return -1;
         }
         free(marked);
     }
     return 0;
 }
-int systemtaito_load(const char *directory)
+static int load_board(const char *directory, int fx1z, int synthetic)
 {
     unsigned i;
-    if (board.device || systemzn_active() || system10_active() || system11_active() || system12_active() ||
+    if (systemtaito_active() || systemzn_active() || system10_active() || system11_active() || system12_active() ||
         psxRegs.ptrs.psxM || !directory) return -1;
     if (read_config(directory, &board.profile)) return -1;
+    if (fx1z != !strcmp(board.profile->expected[4], "FX1Z")) {
+        fprintf(stderr, "Taito: selected loader expects %s; package is %s\n", fx1z ? "FX1Z" : "FX1S", board.profile->expected[4]);
+        board.profile = NULL; return -1;
+    }
     for (i = 0; i < REGION_COUNT; i++) if (load_region(directory, i)) goto bad;
+    board.synthetic = synthetic;
+    if (fx1z && !synthetic && validate_media(board.profile, board.regions)) goto bad;
     /* Source hashes are verified by prepare_taito_fx1_board.py. This host also
      * accepts explicitly synthetic packages for native wiring tests. */
-    if (create_devices() || gpu_set_model(2) || gpu_set_vram_height(512)) goto bad;
+    if (create_devices() || gpu_set_model(2) || gpu_set_vram_height(board.zn.vram_bytes == 0x200000 ? 1024 : 512)) goto bad;
     psxRamSize = 0x400000; psxRomSize = 0x80000; board.last_cycle = psxRegs.cycle;
     return 0;
 bad:
-    fprintf(stderr, "Taito FX1S: board initialization failed\n"); systemtaito_unload(); return -1;
+    fprintf(stderr, "Taito FX1: board initialization failed\n"); systemtaito_unload(); return -1;
 }
+int systemtaito_load(const char *directory) { return load_board(directory, 0, 0); }
+int systemtaito_load_fx1z(const char *directory) { return load_board(directory, 1, 0); }
+int systemtaito_test_load_fx1z(const char *directory) { return load_board(directory, 1, 1); }
 static void invalidate_bank(void);
 static void destroy_devices(void)
 {
     unsigned i;
-    pcm_wav_close(&board.wav); taito_fx1_destroy(board.device); zn_board_destroy(&board.zn);
+    pcm_wav_close(&board.wav); taito_fx1_destroy(board.device);
+    zoom_board_destroy(board.zoom); mb3773_destroy(board.watchdog); zn_board_destroy(&board.zn);
     zn_mcu_destroy(board.mcu); for (i = 0; i < 2; i++) psx_sio_destroy(board.sio[i]);
     for (i = 0; i < REGION_COUNT; i++) free(board.regions[i]);
     memset(&board, 0, sizeof(board));
 }
 void systemtaito_unload(void)
 {
-    if (board.device) invalidate_bank();
+    if (systemtaito_active()) invalidate_bank();
     destroy_devices();
     if (!psxRegs.ptrs.psxM && !systemzn_active() && !system10_active() && !system11_active() && !system12_active()) {
         psxRamSize = 0x200000; psxRomSize = 0x80000; gpu_set_model(2); gpu_set_vram_height(512);
     }
 }
-int systemtaito_active(void) { return board.device != NULL; }
+int systemtaito_active(void) { return board.device || board.zoom; }
 static void map_bank(void)
 {
     taito_fx1_status_t status; unsigned segment, page;
     const uint32_t bases[] = {0x1f000000, 0x9f000000, 0xbf000000};
-    if (!board.device || DISABLE_MEM_LUTS || !psxRegs.ptrs.memRLUT || !psxRegs.ptrs.memWLUT) return;
-    taito_fx1_get_status(board.device, &status);
+    if (!systemtaito_active() || DISABLE_MEM_LUTS || !psxRegs.ptrs.memRLUT || !psxRegs.ptrs.memWLUT) return;
+    memset(&status, 0, sizeof(status));
+    if (board.zoom) status.main_bank_offset = board.main_bank * 0x800000;
+    else taito_fx1_get_status(board.device, &status);
     for (segment = 0; segment < 3; segment++) {
         uintptr_t ptr = status.main_bank_offset + 0x800000 <= board.profile->sizes[1] ?
             (uintptr_t)(board.regions[1] + status.main_bank_offset) - bases[segment] : INVALID_PTR_VAL;
@@ -282,29 +334,40 @@ static void invalidate_bank(void)
 }
 void systemtaito_mem_reset(void)
 {
-    if (!board.device) return;
+    if (!systemtaito_active()) return;
     memcpy(psxRegs.ptrs.psxR, board.regions[0], 0x80000);
     memset(psxRegs.ptrs.psxM, 0, PSX_RAM_SIZE); memset(psxRegs.ptrs.psxP, 0xff, 0x10000);
     map_bank();
 }
 void systemtaito_reset(void)
 {
-    if (!board.device) return;
+    if (!systemtaito_active()) return;
+    board.reset_pending = board.sound_barrier = board.fault = 0; board.peak = 0;
     /* zn_state and CAT702/ZNMCU/AT28C16/SIO have no source reset override.
      * Retain common I/O, in-flight serial transactions and absolute clock. */
-    taito_fx1_reset(board.device); map_bank();
+    if (board.zoom) {
+        board.main_bank = 0;
+        if (mb3773_reset(board.watchdog) || zoom_board_set_sound_reset(board.zoom, 1) ||
+            zoom_board_set_sound_reset(board.zoom, 0)) board.fault = 1;
+    } else taito_fx1_reset(board.device);
+    map_bank();
     board.last_cycle = psxRegs.cycle; board.sound_fraction = 0;
-    board.reset_pending = board.sound_barrier = board.fault = 0; board.peak = 0;
 }
 int systemtaito_sync(uint32_t cycle)
 {
     uint32_t delta; unsigned i; taito_fx1_status_t status;
-    if (!board.device) return 0;
+    if (!systemtaito_active()) return 0;
     delta = cycle - board.last_cycle; board.last_cycle = cycle;
     if (delta > UINT64_MAX - board.cycles) { board.fault = 1; return -1; }
     board.cycles += delta;
     /* Advance serial edges first, at each deadline, then the remaining timer span. */
     for (i = 0; i < 2; i++) if (psx_sio_advance_to_cycle(board.sio[i], board.cycles)) board.fault = 1;
+    if (board.zoom) {
+        uint64_t mn = board.cycles / PSXCLK * 6250000u + board.cycles % PSXCLK * 6250000u / PSXCLK;
+        if (advance_pins(board.cycles) || mb3773_advance_to_us(board.watchdog, cycle_us(board.cycles)) ||
+            zoom_board_sync_to_cycle(board.zoom, mn)) board.fault = 1;
+        return board.fault || zoom_board_fault(board.zoom) ? -1 : board.reset_pending;
+    }
     if (advance_pins(board.cycles) || taito_fx1_advance_to_us(board.device, cycle_us(board.cycles)) < 0) board.fault = 1;
     board.sound_fraction += (uint64_t)delta * TAITO_FX1_AUDIO_CLOCK_HZ;
     if (taito_fx1_run_sound_cycles(board.device, board.sound_fraction / PSXCLK) < 0) board.fault = 1;
@@ -328,13 +391,73 @@ static int sio_bus(uint32_t address, unsigned width, uint32_t *value, int write)
     }
     return 1;
 }
+static int fx1z_read(uint32_t physical, unsigned width, uint32_t *value)
+{
+    if (physical >= 0x1f000000 && physical < 0x1f800000) {
+        size_t offset = board.main_bank * 0x800000 + physical - 0x1f000000;
+        if (offset > board.profile->sizes[1] || width > board.profile->sizes[1] - offset) return -1;
+        *value = 0;
+        for (unsigned i = 0; i < width; ++i) *value |= (uint32_t)board.regions[1][offset + i] << (i * 8);
+        return 1;
+    }
+    if (physical >= 0x1fb00000 && physical + width <= 0x1fb00400) {
+        *value = 0;
+        for (unsigned i = 0; i < width; ++i) {
+            unsigned off = physical + i - 0x1fb00000;
+            uint8_t byte = off & 1 ? 0xff : board.fram[off >> 1];
+            *value |= (uint32_t)byte << (i * 8);
+        }
+        return 1;
+    }
+    if ((physical >= 0x1fbc0000 && physical + width <= 0x1fbc0004) ||
+        (physical >= 0x1fbe0000 && physical + width <= 0x1fbe0200)) {
+        uint32_t raw = zoom_board_main_read32(board.zoom, physical & ~3u, UINT32_MAX);
+        *value = raw >> ((physical & 3) * 8);
+        if (width < 4) *value &= (1u << (width * 8)) - 1;
+        return 1;
+    }
+    return 0;
+}
+
+static int fx1z_write(uint32_t physical, unsigned width, uint32_t value)
+{
+    if (physical == 0x1fb40000) {
+        board.main_bank = value & 3; board.bank_writes++;
+        return mb3773_write_ck(board.watchdog, (value >> 5) & 1) ? -1 : 1;
+    }
+    if (physical >= 0x1fb00000 && physical + width <= 0x1fb00400) {
+        for (unsigned i = 0; i < width; ++i) {
+            unsigned off = physical + i - 0x1fb00000;
+            if (!(off & 1)) board.fram[off >> 1] = value >> (i * 8);
+        }
+        return 1;
+    }
+    if (physical >= 0x1fbe0000 && physical + width <= 0x1fbe0200) {
+        uint32_t shift = (physical & 3) * 8;
+        uint32_t mask = width == 4 ? UINT32_MAX : ((1u << (width * 8)) - 1) << shift;
+        return zoom_board_main_write32(board.zoom, physical & ~3u, value << shift, mask) ? -1 : 1;
+    }
+    if ((physical >= 0x1fb80000 && physical + width <= 0x1fb80004) ||
+        (physical >= 0x1fba0000 && physical < 0x1fba0002)) {
+        for (unsigned i = 0; i < width; i += 2) {
+            if (physical >= 0x1fba0000 && physical + i >= 0x1fba0002) break;
+            uint16_t mask = width == 1 ? (physical & 1 ? 0xff00 : 0x00ff) : 0xffff;
+            uint16_t data = value >> (i * 8);
+            if (width == 1 && (physical & 1)) data <<= 8;
+            if (zoom_board_main_write16(board.zoom, (physical + i) & ~1u, data, mask)) return -1;
+        }
+        return 1;
+    }
+    return 0;
+}
+
 int systemtaito_read(uint32_t address, unsigned width, uint32_t *value)
 {
     int result; uint32_t physical = physical_address(address);
-    if (!board.device || !value || (width != 1 && width != 2 && width != 4) || (physical & (width - 1))) return 0;
+    if (!systemtaito_active() || !value || (width != 1 && width != 2 && width != 4) || (physical & (width - 1))) return 0;
     systemtaito_sync(psxRegs.cycle);
     if (sio_bus(physical, width, value, 0)) return 1;
-    result = taito_fx1_main_read(board.device, physical, width, value);
+    result = board.zoom ? fx1z_read(physical, width, value) : taito_fx1_main_read(board.device, physical, width, value);
     if (!result) result = zn_board_read(&board.zn, physical, width, value);
     if (result < 0) { board.fault = 1; *value = UINT32_MAX; }
     return result != 0;
@@ -342,10 +465,10 @@ int systemtaito_read(uint32_t address, unsigned width, uint32_t *value)
 int systemtaito_write(uint32_t address, unsigned width, uint32_t value)
 {
     int result; uint32_t physical = physical_address(address);
-    if (!board.device || (width != 1 && width != 2 && width != 4) || (physical & (width - 1))) return 0;
+    if (!systemtaito_active() || (width != 1 && width != 2 && width != 4) || (physical & (width - 1))) return 0;
     systemtaito_sync(psxRegs.cycle);
     if (sio_bus(physical, width, &value, 1)) return 1;
-    result = taito_fx1_main_write(board.device, physical, width, value);
+    result = board.zoom ? fx1z_write(physical, width, value) : taito_fx1_main_write(board.device, physical, width, value);
     if (!result) result = zn_board_write(&board.zn, physical, width, value);
     if (result < 0) board.fault = 1;
     if (result > 0 && physical == 0x1fb40000) map_bank();
@@ -363,7 +486,8 @@ static const struct InputBinding { const char *name; unsigned port, mask; } inpu
 int systemtaito_set_input(const char *name, int pressed)
 {
     unsigned i;
-    if (!board.device || !name || (pressed != 0 && pressed != 1)) return -1;
+    if (!systemtaito_active() || !name || (pressed != 0 && pressed != 1)) return -1;
+    if (!strcmp(board.profile->expected[7], "raystorm") && (!strcmp(name, "p1_button3") || !strcmp(name, "p2_button3"))) return -1;
     for (i = 0; i < sizeof(input_bindings) / sizeof(input_bindings[0]); i++) if (!strcmp(name, input_bindings[i].name)) {
         uint8_t *input = input_bindings[i].port == 6 ? &board.dsw : &board.inputs[input_bindings[i].port];
         if (pressed) *input &= ~input_bindings[i].mask; else *input |= input_bindings[i].mask;
@@ -372,16 +496,35 @@ int systemtaito_set_input(const char *name, int pressed)
     return -1;
 }
 int systemtaito_eeprom_import(const unsigned char *image, size_t size)
-{ return board.device ? zn_board_eeprom_import(&board.zn, image, size) : -1; }
+{
+    if (!systemtaito_active() || !image || size != (board.zoom ? 2592u : 2080u)) return -1;
+    if (zn_board_eeprom_import(&board.zn, image, 2080)) return -1;
+    if (board.zoom) memcpy(board.fram, image + 2080, 512);
+    return 0;
+}
 int systemtaito_eeprom_export(unsigned char *image, size_t size)
-{ return board.device ? zn_board_eeprom_export(&board.zn, image, size) : -1; }
+{
+    if (!systemtaito_active() || !image || size != (board.zoom ? 2592u : 2080u)) return -1;
+    if (zn_board_eeprom_export(&board.zn, image, 2080)) return -1;
+    if (board.zoom) memcpy(image + 2080, board.fram, 512);
+    return 0;
+}
 int systemtaito_open_audio(const char *path)
-{ return board.device ? pcm_wav_open(&board.wav, path, TAITO_FX1_YM_CLOCK_HZ / 144) : -1; }
+{ return systemtaito_active() ? pcm_wav_open(&board.wav, path, board.zoom ? 25000000 / 768 : TAITO_FX1_YM_CLOCK_HZ / 144) : -1; }
+void systemtaito_set_zoom_audio_output(void (*output)(void *, float, float, uint64_t), void *opaque)
+{ board.zoom_output = output; board.zoom_opaque = opaque; }
 int systemtaito_close_audio(void) { return pcm_wav_close(&board.wav); }
 void systemtaito_report(FILE *out)
 {
     taito_fx1_status_t s; uint32_t sio_status[2]; unsigned i;
-    if (!out || !board.device) return;
+    if (!out || !systemtaito_active()) return;
+    if (board.zoom) {
+        fprintf(out, "Taito FX1Z set=%s model=%s RAM=%u VRAM=%zu bank=%u bank_writes=%" PRIu64 " cycles=%" PRIu64 " MN_pc=%06x MN_cycles=%" PRIu64 " Zoom_frames=%" PRIu64 " nonzero=%" PRIu64 " peak=%u watchdog=%" PRIu64 " faults=%x/%x media=%s\n",
+            board.profile->expected[1], board.profile->expected[5], PSX_RAM_SIZE, board.zn.vram_bytes, board.main_bank, board.bank_writes, board.cycles,
+            zoom_board_sound_pc(board.zoom), zoom_board_main_cycles(board.zoom), zoom_board_audio_frames(board.zoom), board.zoom_nonzero, board.peak,
+            board.reset_requests, board.fault, zoom_board_fault(board.zoom), board.synthetic ? "SYNTHETIC_FIXTURE" : "SOURCE_VERIFIED");
+        return;
+    }
     taito_fx1_get_status(board.device, &s);
     for (i = 0; i < 2; i++) psx_sio_read(board.sio[i], 1, UINT32_MAX, &sio_status[i]);
     fprintf(out, "Taito FX1S set=%s model=COH1000T ram=4MiB vram=1MiB gpu=type2 bios=512KiB "
@@ -400,12 +543,14 @@ static int selftest_active(void)
     uint32_t value; taito_fx1_status_t s;
     unsigned i;
     if (!board.profile->eligible || board.profile->sizes[0] != 0x80000 || board.zn.ram_bytes != 0x400000 ||
-        board.zn.vram_bytes != 0x100000 || board.zn.cat702_count != 2) return -1;
-    if (!zn_board_read(&board.zn, 0x1fa10200, 4, &value) || value != 0x61) return -1;
+        board.zn.vram_bytes != (uint32_t)strtoul(board.profile->expected[13], NULL, 10) || board.zn.cat702_count != 2) return -1;
+    if (!zn_board_read(&board.zn, 0x1fa10200, 4, &value) || value != (board.zn.vram_bytes == 0x200000 ? 0x69 : 0x61)) return -1;
     for (i = 0; i < 2; i++) if (psx_sio_read(board.sio[i], 1, UINT32_MAX, &value)) return -1;
-    taito_fx1_get_status(board.device, &s);
+    memset(&s, 0, sizeof(s));
+    if (board.zoom) { s.main_bank = board.main_bank; s.main_bank_offset = board.main_bank * 0x800000; }
+    else taito_fx1_get_status(board.device, &s);
     if (s.main_bank < 2) {
-        if (taito_fx1_main_read(board.device, 0x1f000000, 4, &value) != TAITO_FX1_HANDLED) return -1;
+        if (systemtaito_read(0x1f000000, 4, &value) != TAITO_FX1_HANDLED) return -1;
         for (i = 0; i < 4; i++) if (((value >> (i * 8)) & 0xff) != board.regions[1][s.main_bank_offset + i]) return -1;
     }
     /* znt2p disables these bits; unknown controls must not silently become buttons. */
@@ -417,7 +562,7 @@ int systemtaito_selftest(void)
     uint32_t saved_cycle = psxRegs.cycle, value;
     uint64_t epoch; unsigned i; int result = -1;
     uint8_t image[AT28C16_IMAGE_BYTES], expected[AT28C16_IMAGE_BYTES];
-    if (board.device) return selftest_active();
+    if (systemtaito_active()) return selftest_active();
     /* Inactive trace must never alter an initialized console's LUTs or IRQ register. */
     if (psxRegs.ptrs.psxM) return -1;
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "Taito FX1S selftest failed line %d: %s\n", __LINE__, #x); systemtaito_report(stderr); goto done; } } while (0)

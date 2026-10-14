@@ -210,8 +210,30 @@ static void test_reset_epoch_keeps_devices_monotonic()
     zoom_board_destroy(board);
 }
 
+static void test_readonly_fx1z_sample_rom()
+{
+    std::vector<uint8_t> boot(ZOOM_BOOT_FLASH_BYTES, 0xf6);
+    size_t p = 0;
+    emit_store8(boot, p, 0x5a, 0xe00000);
+    emit(boot, p, {0xea, 0xfe});
+    std::vector<uint8_t> samples(0x400000);
+    zoom_board_config config{};
+    config.boot_flash = boot.data(); config.boot_flash_size = boot.size();
+    config.sample_rom = samples.data(); config.sample_rom_size = samples.size();
+    zoom_board *board = nullptr;
+    assert(zoom_board_create(&config, &board) == ZOOM_BOARD_OK);
+    // ROM boards start the actual sound CPU without G-Net's flash reset line.
+    assert(zoom_board_run(board, 100) >= 100);
+    assert(zoom_board_shared_read(board, 0) == 0x5a);
+    assert(zoom_board_fault(board) == ZOOM_FAULT_NONE);
+    zoom_board_destroy(board);
+    config.sample_rom_size = 0x300000;
+    assert(zoom_board_create(&config, &board) == ZOOM_BOARD_ARGUMENT);
+}
+
 int main()
 {
+    test_readonly_fx1z_sample_rom();
     test_executed_sound_cpu_bus_and_lanes();
     test_readonly_mn_flash_and_reset_flash_commands();
     test_reset_epoch_keeps_devices_monotonic();

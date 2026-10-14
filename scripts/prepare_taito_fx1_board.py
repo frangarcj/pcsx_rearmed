@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Verify local Taito FX-1S ROMs and assemble raw board regions.
+"""Verify local Taito FX-1S/FX1Z ROMs and assemble raw board regions.
 
-The output is a media package for the FX-1S adapter. It does not claim that
+The output is a media package for the FX-1S/FX1Z adapters. It does not claim that
 the complete board, sound path, or a game boots.
 """
 from __future__ import annotations
@@ -28,6 +28,9 @@ OUTPUTS = {
     "cat702_2": "cat702_key1.bin",
 }
 
+FX1Z_OUTPUTS = {"maincpu:rom":"main.bin", "bankedroms":"banked.bin",
+                "taito_zoom:mn10200":"audiocpu.bin", "taito_zoom:zsg2":"adpcma.bin",
+                "cat702_1":"cat702_key0.bin", "cat702_2":"cat702_key1.bin"}
 
 class TaitoFX1PreparationError(Exception):
     """A MAME profile, source declaration, or local archive is unsupported."""
@@ -65,9 +68,9 @@ def _filter_reviewed_upd78081(romset: mame.RomSet,
     if region is None:
         return romset
     review = profile.get("optional_undumped_media_review")
-    if (profile.get("state") != "taito_fx1s_state" or
-            profile.get("machine") != "coh1000ta" or not review):
-        raise TaitoFX1PreparationError("upd78081 NO_DUMP region is outside the reviewed FX1S exception")
+    if (profile.get("state") not in profiles.TAITO_CLASSES or
+            profile.get("machine") not in ("coh1000ta", "coh1000tb", "coh1002tb") or not review):
+        raise TaitoFX1PreparationError("upd78081 NO_DUMP region is outside the reviewed FX1 exception")
     specs = [romset.files[op.file_index] for op in region.operations
              if isinstance(op, mame.LoadOp)]
     if (region.size != 0x2000 or len(specs) != 1 or
@@ -109,18 +112,18 @@ def _load_set(set_name: str, source: Path, rompath: Path,
         raise TaitoFX1PreparationError(f"{set_name} is not defined by {profiles.DRIVER}")
     if not profile.get("runtime_candidate"):
         reason = "; ".join(profile.get("unsupported_requirements", [])) or "no adapter profile"
-        raise TaitoFX1PreparationError(f"{set_name} is outside the supported FX1S scope: {reason}")
-    expected_tags = set(profiles.FX1S_REQUIRED_REGIONS + [profiles.OPTIONAL_UNDUMPED])
+        raise TaitoFX1PreparationError(f"{set_name} is outside the supported FX1 scope: {reason}")
+    expected_tags = set(profile["required_regions"] + [profiles.OPTIONAL_UNDUMPED])
     if set(romset.regions) != expected_tags:
-        raise TaitoFX1PreparationError("FX1S ROM region tags differ from the reviewed source profile")
+        raise TaitoFX1PreparationError("FX1 ROM region tags differ from the reviewed source profile")
     if romset.disks:
-        raise TaitoFX1PreparationError("FX1S profile unexpectedly requires CHD/disk media")
+        raise TaitoFX1PreparationError("FX1 profile unexpectedly requires CHD/disk media")
     if romset.bios:
-        raise TaitoFX1PreparationError("unexpected selectable BIOS on FX1S set")
+        raise TaitoFX1PreparationError("unexpected selectable BIOS on FX1 set")
     romset = _filter_reviewed_upd78081(romset, profile)
     regions, origins = assemble_verified(romset, rompath, parents, None, archive)
-    if set(regions) != set(profiles.FX1S_REQUIRED_REGIONS):
-        raise TaitoFX1PreparationError("assembled FX1S regions are incomplete")
+    if set(regions) != set(profile["required_regions"]):
+        raise TaitoFX1PreparationError("assembled FX1 regions are incomplete")
     # The reviewed NO_DUMP removal leaves original source indices intact.
     # They identify ROM declarations, not positions in the filtered list.
     files_by_index = {spec.index: spec for spec in romset.files}
@@ -132,22 +135,20 @@ def _load_set(set_name: str, source: Path, rompath: Path,
 def package_regions(set_name: str, profile: dict[str, Any],
                     regions: dict[str, bytes], output_dir: Path,
                     source_metadata: dict[str, Any]) -> dict[str, Any]:
-    if (not profile.get("runtime_candidate") or
-            profile.get("state") != "taito_fx1s_state" or
-            profile.get("machine") != "coh1000ta" or
-            profile.get("input") != "znt2p"):
-        raise TaitoFX1PreparationError(f"{set_name} does not select the supported FX1S source configuration")
-    if set(regions) != set(profiles.FX1S_REQUIRED_REGIONS):
-        raise TaitoFX1PreparationError("FX1S region set is incomplete or contains unsupported data")
+    if not profile.get("runtime_candidate"):
+        raise TaitoFX1PreparationError(f"{set_name} does not select the supported FX1 source configuration")
+    if set(regions) != set(profile["required_regions"]):
+        raise TaitoFX1PreparationError("FX1 region set is incomplete or contains unsupported data")
     expected_sizes = {row["tag"]: row["size"] for row in profile["rom_regions"]
-                      if row["tag"] in profiles.FX1S_REQUIRED_REGIONS}
+                      if row["tag"] in profile["required_regions"]}
     actual_sizes = {tag: len(data) for tag, data in regions.items()}
     if actual_sizes != expected_sizes:
         raise TaitoFX1PreparationError(
-            "FX1S ROM region sizes differ from source: " +
+            "FX1 ROM region sizes differ from source: " +
             ", ".join(f"{tag}={actual_sizes[tag]:#x} expected {expected_sizes[tag]:#x}"
                       for tag in sorted(expected_sizes) if actual_sizes[tag] != expected_sizes[tag]))
-    payloads = {filename: regions[tag] for tag, filename in OUTPUTS.items()}
+    outputs = OUTPUTS if profile["board_type"] == "FX1S" else FX1Z_OUTPUTS
+    payloads = {filename: regions[tag] for tag, filename in outputs.items()}
     board_ini = "\n".join([
         "format=pcsx-aow-taito-fx1-v1",
         f"mame_set={set_name}",

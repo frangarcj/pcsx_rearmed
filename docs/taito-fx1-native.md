@@ -12,7 +12,10 @@ upstream BSD-3-Clause notices and redistribution terms. See
 The source registry contains 22 Taito FX-1 declarations. Nine game profiles are
 eligible for this FX1S adapter: `sfchamp`, `sfchampo`, `sfchampu`, `sfchampj`,
 `psyforce`, `psyforcej`, `psyforcex`, `mgcldate`, and `mgcldtex`. BIOS roots and
-FX1Z/ZSG2 configurations are rejected. Regenerate the native table with:
+The shared host now also accepts the twelve FX1Z profiles through the explicit
+`--taito-fx1z` loader, using their ROM-backed Zoom daughterboard and FRAM. The
+BIOS root remains rejected. See [FX1Z Mac validation](taito-fx1z-mac.md).
+Regenerate the native table with:
 
 ```sh
 python3 scripts/generate_taito_fx1_profiles.py

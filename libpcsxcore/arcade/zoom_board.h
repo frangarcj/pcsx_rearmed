@@ -66,6 +66,10 @@ typedef struct zoom_board_config {
     zoom_audio_frame_fn audio_frame;
     /* Called at the exact MN10200-domain timestamp before the corresponding
      * ZSG-2/TMS device advancement and any sample callbacks. */
+    /* ROM-backed FX1Z: packed source ZSG2 region, exactly 4 or 6 MiB.
+     * When present the flash sample callbacks/arrays are not used. */
+    const uint8_t *sample_rom;
+    size_t sample_rom_size;
     void *time_opaque;
     zoom_time_sync_fn time_sync;
 } zoom_board_config;
@@ -76,8 +80,9 @@ void zoom_board_destroy(zoom_board *board); /* not from a device callback */
  * use this to refuse destruction without freeing callback-owned state. */
 int zoom_board_is_busy(const zoom_board *board);
 
-/* The main-board sound reset input is active high. The board starts held in
- * reset, matching taitogn_state::driver_reset. Deasserting it applies the
+/* The main-board sound reset input is active high. Flash boards start held in
+ * reset, matching taitogn_state::driver_reset; ROM-backed FX1Z starts running.
+ * Deasserting the input applies the
  * source Zoom device reset and starts the MN10200 at its reset PC. */
 int zoom_board_set_sound_reset(zoom_board *board, int asserted);
 /* Applies taito_zoom_device::device_reset at the current synchronized time:

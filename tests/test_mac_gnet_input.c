@@ -79,6 +79,11 @@ int main(void)
     memset(&e,0,sizeof(e));e.type=SDL_EVENT_WINDOW_FOCUS_LOST;
     assert(SDL_PushEvent(&e));poll_interactive_input();assert(!coin && !fire && !start);
     puts("Tecmo TPS SDL keyboard/gamepad controls and focus release PASS");
+    board.family=105; interactive_focused=1;
+    key(SDL_SCANCODE_5,1);key(SDL_SCANCODE_1,1);key(SDL_SCANCODE_A,1);assert(coin && fire && start);
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_WINDOW_FOCUS_LOST;
+    assert(SDL_PushEvent(&e));poll_interactive_input();assert(!coin && !fire && !start);
+    puts("FX1Z SDL input translation and focus release PASS");
     SDL_CloseGamepad(interactive_pads[0]);interactive_pads[0]=NULL;
     SDL_CloseJoystick(joy);assert(SDL_DetachVirtualJoystick(id));
     SDL_DestroyWindow(w);SDL_Quit();

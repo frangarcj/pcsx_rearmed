@@ -173,7 +173,7 @@
         "filename": "78081g503.ic655",
         "status": "NO_DUMP",
         "handling": "omitted_from_media_package_no_substitute",
-        "source_proof": "FX1S uses taito_fx1s_state/coh1000ta; class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "source_proof": "taito_fx1s_state/coh1000ta class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
         "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
       },
       "runtime_candidate": false,
@@ -203,11 +203,25 @@
       "gpu_device": "CXD8561Q",
       "gpu_clock_hz": 53693175,
       "sound_cpu_device": "MN10200",
+      "sound_cpu_clock_hz": 12500000,
       "sound_device": "ZSG-2/TMS57002",
+      "sound_clock_hz": 25000000,
+      "sound_latch_device": "M66220FP",
       "sample_region": "taito_zoom:zsg2",
+      "watchdog_device": "MB3773",
+      "bank_select_register": 531890176,
+      "bank_select_mask": 3,
+      "watchdog_clock_bit": 5,
       "is_bios_root": false,
       "bios_parent": "coh1000t",
-      "required_regions": [],
+      "required_regions": [
+        "maincpu:rom",
+        "cat702_1",
+        "cat702_2",
+        "bankedroms",
+        "taito_zoom:mn10200",
+        "taito_zoom:zsg2"
+      ],
       "rom_regions": [
         {
           "tag": "maincpu:rom",
@@ -380,13 +394,17 @@
       "optional_undumped_regions": [
         "upd78081"
       ],
-      "optional_undumped_media_review": null,
-      "runtime_candidate": false,
-      "unsupported_requirements": [
-        "unsupported board class/config/input: taito_fx1z_state / coh1000tb / znt2p",
-        "missing FX1S media regions: audiocpu, ym2610b:adpcma",
-        "unsupported FX1S regions: taito_zoom:mn10200, taito_zoom:zsg2"
-      ]
+      "optional_undumped_media_review": {
+        "tag": "upd78081",
+        "size": 8192,
+        "filename": "78081g503.ic655",
+        "status": "NO_DUMP",
+        "handling": "omitted_from_media_package_no_substitute",
+        "source_proof": "taito_fx1z_state/coh1000tb class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
+      },
+      "runtime_candidate": true,
+      "unsupported_requirements": []
     },
     {
       "year": 1996,
@@ -410,11 +428,25 @@
       "gpu_device": "CXD8561Q",
       "gpu_clock_hz": 53693175,
       "sound_cpu_device": "MN10200",
+      "sound_cpu_clock_hz": 12500000,
       "sound_device": "ZSG-2/TMS57002",
+      "sound_clock_hz": 25000000,
+      "sound_latch_device": "M66220FP",
       "sample_region": "taito_zoom:zsg2",
+      "watchdog_device": "MB3773",
+      "bank_select_register": 531890176,
+      "bank_select_mask": 3,
+      "watchdog_clock_bit": 5,
       "is_bios_root": false,
       "bios_parent": "coh1000t",
-      "required_regions": [],
+      "required_regions": [
+        "maincpu:rom",
+        "cat702_1",
+        "cat702_2",
+        "bankedroms",
+        "taito_zoom:mn10200",
+        "taito_zoom:zsg2"
+      ],
       "rom_regions": [
         {
           "tag": "maincpu:rom",
@@ -587,13 +619,17 @@
       "optional_undumped_regions": [
         "upd78081"
       ],
-      "optional_undumped_media_review": null,
-      "runtime_candidate": false,
-      "unsupported_requirements": [
-        "unsupported board class/config/input: taito_fx1z_state / coh1000tb / znt2p",
-        "missing FX1S media regions: audiocpu, ym2610b:adpcma",
-        "unsupported FX1S regions: taito_zoom:mn10200, taito_zoom:zsg2"
-      ]
+      "optional_undumped_media_review": {
+        "tag": "upd78081",
+        "size": 8192,
+        "filename": "78081g503.ic655",
+        "status": "NO_DUMP",
+        "handling": "omitted_from_media_package_no_substitute",
+        "source_proof": "taito_fx1z_state/coh1000tb class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
+      },
+      "runtime_candidate": true,
+      "unsupported_requirements": []
     },
     {
       "year": 1996,
@@ -617,11 +653,25 @@
       "gpu_device": "CXD8561Q",
       "gpu_clock_hz": 53693175,
       "sound_cpu_device": "MN10200",
+      "sound_cpu_clock_hz": 12500000,
       "sound_device": "ZSG-2/TMS57002",
+      "sound_clock_hz": 25000000,
+      "sound_latch_device": "M66220FP",
       "sample_region": "taito_zoom:zsg2",
+      "watchdog_device": "MB3773",
+      "bank_select_register": 531890176,
+      "bank_select_mask": 3,
+      "watchdog_clock_bit": 5,
       "is_bios_root": false,
       "bios_parent": "coh1000t",
-      "required_regions": [],
+      "required_regions": [
+        "maincpu:rom",
+        "cat702_1",
+        "cat702_2",
+        "bankedroms",
+        "taito_zoom:mn10200",
+        "taito_zoom:zsg2"
+      ],
       "rom_regions": [
         {
           "tag": "maincpu:rom",
@@ -794,13 +844,17 @@
       "optional_undumped_regions": [
         "upd78081"
       ],
-      "optional_undumped_media_review": null,
-      "runtime_candidate": false,
-      "unsupported_requirements": [
-        "unsupported board class/config/input: taito_fx1z_state / coh1000tb / znt2p",
-        "missing FX1S media regions: audiocpu, ym2610b:adpcma",
-        "unsupported FX1S regions: taito_zoom:mn10200, taito_zoom:zsg2"
-      ]
+      "optional_undumped_media_review": {
+        "tag": "upd78081",
+        "size": 8192,
+        "filename": "78081g503.ic655",
+        "status": "NO_DUMP",
+        "handling": "omitted_from_media_package_no_substitute",
+        "source_proof": "taito_fx1z_state/coh1000tb class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
+      },
+      "runtime_candidate": true,
+      "unsupported_requirements": []
     },
     {
       "year": 1997,
@@ -824,11 +878,25 @@
       "gpu_device": "CXD8561Q",
       "gpu_clock_hz": 53693175,
       "sound_cpu_device": "MN10200",
+      "sound_cpu_clock_hz": 12500000,
       "sound_device": "ZSG-2/TMS57002",
+      "sound_clock_hz": 25000000,
+      "sound_latch_device": "M66220FP",
       "sample_region": "taito_zoom:zsg2",
+      "watchdog_device": "MB3773",
+      "bank_select_register": 531890176,
+      "bank_select_mask": 3,
+      "watchdog_clock_bit": 5,
       "is_bios_root": false,
       "bios_parent": "coh1000t",
-      "required_regions": [],
+      "required_regions": [
+        "maincpu:rom",
+        "cat702_1",
+        "cat702_2",
+        "bankedroms",
+        "taito_zoom:mn10200",
+        "taito_zoom:zsg2"
+      ],
       "rom_regions": [
         {
           "tag": "maincpu:rom",
@@ -1001,13 +1069,17 @@
       "optional_undumped_regions": [
         "upd78081"
       ],
-      "optional_undumped_media_review": null,
-      "runtime_candidate": false,
-      "unsupported_requirements": [
-        "unsupported board class/config/input: taito_fx1z_state / coh1000tb / znt2p",
-        "missing FX1S media regions: audiocpu, ym2610b:adpcma",
-        "unsupported FX1S regions: taito_zoom:mn10200, taito_zoom:zsg2"
-      ]
+      "optional_undumped_media_review": {
+        "tag": "upd78081",
+        "size": 8192,
+        "filename": "78081g503.ic655",
+        "status": "NO_DUMP",
+        "handling": "omitted_from_media_package_no_substitute",
+        "source_proof": "taito_fx1z_state/coh1000tb class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
+      },
+      "runtime_candidate": true,
+      "unsupported_requirements": []
     },
     {
       "year": 1997,
@@ -1031,11 +1103,25 @@
       "gpu_device": "CXD8561Q",
       "gpu_clock_hz": 53693175,
       "sound_cpu_device": "MN10200",
+      "sound_cpu_clock_hz": 12500000,
       "sound_device": "ZSG-2/TMS57002",
+      "sound_clock_hz": 25000000,
+      "sound_latch_device": "M66220FP",
       "sample_region": "taito_zoom:zsg2",
+      "watchdog_device": "MB3773",
+      "bank_select_register": 531890176,
+      "bank_select_mask": 3,
+      "watchdog_clock_bit": 5,
       "is_bios_root": false,
       "bios_parent": "coh1000t",
-      "required_regions": [],
+      "required_regions": [
+        "maincpu:rom",
+        "cat702_1",
+        "cat702_2",
+        "bankedroms",
+        "taito_zoom:mn10200",
+        "taito_zoom:zsg2"
+      ],
       "rom_regions": [
         {
           "tag": "maincpu:rom",
@@ -1200,13 +1286,17 @@
       "optional_undumped_regions": [
         "upd78081"
       ],
-      "optional_undumped_media_review": null,
-      "runtime_candidate": false,
-      "unsupported_requirements": [
-        "unsupported board class/config/input: gdarius_state / coh1002tb / znt2p",
-        "missing FX1S media regions: audiocpu, ym2610b:adpcma",
-        "unsupported FX1S regions: taito_zoom:mn10200, taito_zoom:zsg2"
-      ]
+      "optional_undumped_media_review": {
+        "tag": "upd78081",
+        "size": 8192,
+        "filename": "78081g503.ic655",
+        "status": "NO_DUMP",
+        "handling": "omitted_from_media_package_no_substitute",
+        "source_proof": "gdarius_state/coh1002tb class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
+      },
+      "runtime_candidate": true,
+      "unsupported_requirements": []
     },
     {
       "year": 1997,
@@ -1230,11 +1320,25 @@
       "gpu_device": "CXD8561Q",
       "gpu_clock_hz": 53693175,
       "sound_cpu_device": "MN10200",
+      "sound_cpu_clock_hz": 12500000,
       "sound_device": "ZSG-2/TMS57002",
+      "sound_clock_hz": 25000000,
+      "sound_latch_device": "M66220FP",
       "sample_region": "taito_zoom:zsg2",
+      "watchdog_device": "MB3773",
+      "bank_select_register": 531890176,
+      "bank_select_mask": 3,
+      "watchdog_clock_bit": 5,
       "is_bios_root": false,
       "bios_parent": "coh1000t",
-      "required_regions": [],
+      "required_regions": [
+        "maincpu:rom",
+        "cat702_1",
+        "cat702_2",
+        "bankedroms",
+        "taito_zoom:mn10200",
+        "taito_zoom:zsg2"
+      ],
       "rom_regions": [
         {
           "tag": "maincpu:rom",
@@ -1399,13 +1503,17 @@
       "optional_undumped_regions": [
         "upd78081"
       ],
-      "optional_undumped_media_review": null,
-      "runtime_candidate": false,
-      "unsupported_requirements": [
-        "unsupported board class/config/input: gdarius_state / coh1002tb / znt2p",
-        "missing FX1S media regions: audiocpu, ym2610b:adpcma",
-        "unsupported FX1S regions: taito_zoom:mn10200, taito_zoom:zsg2"
-      ]
+      "optional_undumped_media_review": {
+        "tag": "upd78081",
+        "size": 8192,
+        "filename": "78081g503.ic655",
+        "status": "NO_DUMP",
+        "handling": "omitted_from_media_package_no_substitute",
+        "source_proof": "gdarius_state/coh1002tb class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
+      },
+      "runtime_candidate": true,
+      "unsupported_requirements": []
     },
     {
       "year": 1997,
@@ -1429,11 +1537,25 @@
       "gpu_device": "CXD8561Q",
       "gpu_clock_hz": 53693175,
       "sound_cpu_device": "MN10200",
+      "sound_cpu_clock_hz": 12500000,
       "sound_device": "ZSG-2/TMS57002",
+      "sound_clock_hz": 25000000,
+      "sound_latch_device": "M66220FP",
       "sample_region": "taito_zoom:zsg2",
+      "watchdog_device": "MB3773",
+      "bank_select_register": 531890176,
+      "bank_select_mask": 3,
+      "watchdog_clock_bit": 5,
       "is_bios_root": false,
       "bios_parent": "coh1000t",
-      "required_regions": [],
+      "required_regions": [
+        "maincpu:rom",
+        "cat702_1",
+        "cat702_2",
+        "bankedroms",
+        "taito_zoom:mn10200",
+        "taito_zoom:zsg2"
+      ],
       "rom_regions": [
         {
           "tag": "maincpu:rom",
@@ -1598,13 +1720,17 @@
       "optional_undumped_regions": [
         "upd78081"
       ],
-      "optional_undumped_media_review": null,
-      "runtime_candidate": false,
-      "unsupported_requirements": [
-        "unsupported board class/config/input: gdarius_state / coh1002tb / znt2p",
-        "missing FX1S media regions: audiocpu, ym2610b:adpcma",
-        "unsupported FX1S regions: taito_zoom:mn10200, taito_zoom:zsg2"
-      ]
+      "optional_undumped_media_review": {
+        "tag": "upd78081",
+        "size": 8192,
+        "filename": "78081g503.ic655",
+        "status": "NO_DUMP",
+        "handling": "omitted_from_media_package_no_substitute",
+        "source_proof": "gdarius_state/coh1002tb class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
+      },
+      "runtime_candidate": true,
+      "unsupported_requirements": []
     },
     {
       "year": 1997,
@@ -1628,11 +1754,25 @@
       "gpu_device": "CXD8561Q",
       "gpu_clock_hz": 53693175,
       "sound_cpu_device": "MN10200",
+      "sound_cpu_clock_hz": 12500000,
       "sound_device": "ZSG-2/TMS57002",
+      "sound_clock_hz": 25000000,
+      "sound_latch_device": "M66220FP",
       "sample_region": "taito_zoom:zsg2",
+      "watchdog_device": "MB3773",
+      "bank_select_register": 531890176,
+      "bank_select_mask": 3,
+      "watchdog_clock_bit": 5,
       "is_bios_root": false,
       "bios_parent": "coh1000t",
-      "required_regions": [],
+      "required_regions": [
+        "maincpu:rom",
+        "cat702_1",
+        "cat702_2",
+        "bankedroms",
+        "taito_zoom:mn10200",
+        "taito_zoom:zsg2"
+      ],
       "rom_regions": [
         {
           "tag": "maincpu:rom",
@@ -1797,13 +1937,17 @@
       "optional_undumped_regions": [
         "upd78081"
       ],
-      "optional_undumped_media_review": null,
-      "runtime_candidate": false,
-      "unsupported_requirements": [
-        "unsupported board class/config/input: gdarius_state / coh1002tb / znt2p",
-        "missing FX1S media regions: audiocpu, ym2610b:adpcma",
-        "unsupported FX1S regions: taito_zoom:mn10200, taito_zoom:zsg2"
-      ]
+      "optional_undumped_media_review": {
+        "tag": "upd78081",
+        "size": 8192,
+        "filename": "78081g503.ic655",
+        "status": "NO_DUMP",
+        "handling": "omitted_from_media_package_no_substitute",
+        "source_proof": "gdarius_state/coh1002tb class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
+      },
+      "runtime_candidate": true,
+      "unsupported_requirements": []
     },
     {
       "year": 1996,
@@ -2020,7 +2164,7 @@
         "filename": "78081g503.ic655",
         "status": "NO_DUMP",
         "handling": "omitted_from_media_package_no_substitute",
-        "source_proof": "FX1S uses taito_fx1s_state/coh1000ta; class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "source_proof": "taito_fx1s_state/coh1000ta class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
         "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
       },
       "runtime_candidate": true,
@@ -2241,7 +2385,7 @@
         "filename": "78081g503.ic655",
         "status": "NO_DUMP",
         "handling": "omitted_from_media_package_no_substitute",
-        "source_proof": "FX1S uses taito_fx1s_state/coh1000ta; class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "source_proof": "taito_fx1s_state/coh1000ta class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
         "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
       },
       "runtime_candidate": true,
@@ -2462,7 +2606,7 @@
         "filename": "78081g503.ic655",
         "status": "NO_DUMP",
         "handling": "omitted_from_media_package_no_substitute",
-        "source_proof": "FX1S uses taito_fx1s_state/coh1000ta; class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "source_proof": "taito_fx1s_state/coh1000ta class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
         "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
       },
       "runtime_candidate": true,
@@ -2683,7 +2827,7 @@
         "filename": "78081g503.ic655",
         "status": "NO_DUMP",
         "handling": "omitted_from_media_package_no_substitute",
-        "source_proof": "FX1S uses taito_fx1s_state/coh1000ta; class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "source_proof": "taito_fx1s_state/coh1000ta class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
         "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
       },
       "runtime_candidate": true,
@@ -2904,7 +3048,7 @@
         "filename": "78081g503.ic655",
         "status": "NO_DUMP",
         "handling": "omitted_from_media_package_no_substitute",
-        "source_proof": "FX1S uses taito_fx1s_state/coh1000ta; class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "source_proof": "taito_fx1s_state/coh1000ta class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
         "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
       },
       "runtime_candidate": true,
@@ -2932,11 +3076,25 @@
       "gpu_device": "CXD8561Q",
       "gpu_clock_hz": 53693175,
       "sound_cpu_device": "MN10200",
+      "sound_cpu_clock_hz": 12500000,
       "sound_device": "ZSG-2/TMS57002",
+      "sound_clock_hz": 25000000,
+      "sound_latch_device": "M66220FP",
       "sample_region": "taito_zoom:zsg2",
+      "watchdog_device": "MB3773",
+      "bank_select_register": 531890176,
+      "bank_select_mask": 3,
+      "watchdog_clock_bit": 5,
       "is_bios_root": false,
       "bios_parent": "coh1000t",
-      "required_regions": [],
+      "required_regions": [
+        "maincpu:rom",
+        "cat702_1",
+        "cat702_2",
+        "bankedroms",
+        "taito_zoom:mn10200",
+        "taito_zoom:zsg2"
+      ],
       "rom_regions": [
         {
           "tag": "maincpu:rom",
@@ -3093,13 +3251,17 @@
       "optional_undumped_regions": [
         "upd78081"
       ],
-      "optional_undumped_media_review": null,
-      "runtime_candidate": false,
-      "unsupported_requirements": [
-        "unsupported board class/config/input: taito_fx1z_state / coh1000tb / raystorm",
-        "missing FX1S media regions: audiocpu, ym2610b:adpcma",
-        "unsupported FX1S regions: taito_zoom:mn10200, taito_zoom:zsg2"
-      ]
+      "optional_undumped_media_review": {
+        "tag": "upd78081",
+        "size": 8192,
+        "filename": "78081g503.ic655",
+        "status": "NO_DUMP",
+        "handling": "omitted_from_media_package_no_substitute",
+        "source_proof": "taito_fx1z_state/coh1000tb class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
+      },
+      "runtime_candidate": true,
+      "unsupported_requirements": []
     },
     {
       "year": 1996,
@@ -3123,11 +3285,25 @@
       "gpu_device": "CXD8561Q",
       "gpu_clock_hz": 53693175,
       "sound_cpu_device": "MN10200",
+      "sound_cpu_clock_hz": 12500000,
       "sound_device": "ZSG-2/TMS57002",
+      "sound_clock_hz": 25000000,
+      "sound_latch_device": "M66220FP",
       "sample_region": "taito_zoom:zsg2",
+      "watchdog_device": "MB3773",
+      "bank_select_register": 531890176,
+      "bank_select_mask": 3,
+      "watchdog_clock_bit": 5,
       "is_bios_root": false,
       "bios_parent": "coh1000t",
-      "required_regions": [],
+      "required_regions": [
+        "maincpu:rom",
+        "cat702_1",
+        "cat702_2",
+        "bankedroms",
+        "taito_zoom:mn10200",
+        "taito_zoom:zsg2"
+      ],
       "rom_regions": [
         {
           "tag": "maincpu:rom",
@@ -3284,13 +3460,17 @@
       "optional_undumped_regions": [
         "upd78081"
       ],
-      "optional_undumped_media_review": null,
-      "runtime_candidate": false,
-      "unsupported_requirements": [
-        "unsupported board class/config/input: taito_fx1z_state / coh1000tb / raystorm",
-        "missing FX1S media regions: audiocpu, ym2610b:adpcma",
-        "unsupported FX1S regions: taito_zoom:mn10200, taito_zoom:zsg2"
-      ]
+      "optional_undumped_media_review": {
+        "tag": "upd78081",
+        "size": 8192,
+        "filename": "78081g503.ic655",
+        "status": "NO_DUMP",
+        "handling": "omitted_from_media_package_no_substitute",
+        "source_proof": "taito_fx1z_state/coh1000tb class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
+      },
+      "runtime_candidate": true,
+      "unsupported_requirements": []
     },
     {
       "year": 1996,
@@ -3314,11 +3494,25 @@
       "gpu_device": "CXD8561Q",
       "gpu_clock_hz": 53693175,
       "sound_cpu_device": "MN10200",
+      "sound_cpu_clock_hz": 12500000,
       "sound_device": "ZSG-2/TMS57002",
+      "sound_clock_hz": 25000000,
+      "sound_latch_device": "M66220FP",
       "sample_region": "taito_zoom:zsg2",
+      "watchdog_device": "MB3773",
+      "bank_select_register": 531890176,
+      "bank_select_mask": 3,
+      "watchdog_clock_bit": 5,
       "is_bios_root": false,
       "bios_parent": "coh1000t",
-      "required_regions": [],
+      "required_regions": [
+        "maincpu:rom",
+        "cat702_1",
+        "cat702_2",
+        "bankedroms",
+        "taito_zoom:mn10200",
+        "taito_zoom:zsg2"
+      ],
       "rom_regions": [
         {
           "tag": "maincpu:rom",
@@ -3475,13 +3669,17 @@
       "optional_undumped_regions": [
         "upd78081"
       ],
-      "optional_undumped_media_review": null,
-      "runtime_candidate": false,
-      "unsupported_requirements": [
-        "unsupported board class/config/input: taito_fx1z_state / coh1000tb / raystorm",
-        "missing FX1S media regions: audiocpu, ym2610b:adpcma",
-        "unsupported FX1S regions: taito_zoom:mn10200, taito_zoom:zsg2"
-      ]
+      "optional_undumped_media_review": {
+        "tag": "upd78081",
+        "size": 8192,
+        "filename": "78081g503.ic655",
+        "status": "NO_DUMP",
+        "handling": "omitted_from_media_package_no_substitute",
+        "source_proof": "taito_fx1z_state/coh1000tb class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
+      },
+      "runtime_candidate": true,
+      "unsupported_requirements": []
     },
     {
       "year": 1996,
@@ -3505,11 +3703,25 @@
       "gpu_device": "CXD8561Q",
       "gpu_clock_hz": 53693175,
       "sound_cpu_device": "MN10200",
+      "sound_cpu_clock_hz": 12500000,
       "sound_device": "ZSG-2/TMS57002",
+      "sound_clock_hz": 25000000,
+      "sound_latch_device": "M66220FP",
       "sample_region": "taito_zoom:zsg2",
+      "watchdog_device": "MB3773",
+      "bank_select_register": 531890176,
+      "bank_select_mask": 3,
+      "watchdog_clock_bit": 5,
       "is_bios_root": false,
       "bios_parent": "coh1000t",
-      "required_regions": [],
+      "required_regions": [
+        "maincpu:rom",
+        "cat702_1",
+        "cat702_2",
+        "bankedroms",
+        "taito_zoom:mn10200",
+        "taito_zoom:zsg2"
+      ],
       "rom_regions": [
         {
           "tag": "maincpu:rom",
@@ -3666,13 +3878,17 @@
       "optional_undumped_regions": [
         "upd78081"
       ],
-      "optional_undumped_media_review": null,
-      "runtime_candidate": false,
-      "unsupported_requirements": [
-        "unsupported board class/config/input: taito_fx1z_state / coh1000tb / raystorm",
-        "missing FX1S media regions: audiocpu, ym2610b:adpcma",
-        "unsupported FX1S regions: taito_zoom:mn10200, taito_zoom:zsg2"
-      ]
+      "optional_undumped_media_review": {
+        "tag": "upd78081",
+        "size": 8192,
+        "filename": "78081g503.ic655",
+        "status": "NO_DUMP",
+        "handling": "omitted_from_media_package_no_substitute",
+        "source_proof": "taito_fx1z_state/coh1000tb class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
+      },
+      "runtime_candidate": true,
+      "unsupported_requirements": []
     },
     {
       "year": 1995,
@@ -3897,7 +4113,7 @@
         "filename": "78081g503.ic655",
         "status": "NO_DUMP",
         "handling": "omitted_from_media_package_no_substitute",
-        "source_proof": "FX1S uses taito_fx1s_state/coh1000ta; class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "source_proof": "taito_fx1s_state/coh1000ta class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
         "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
       },
       "runtime_candidate": true,
@@ -4126,7 +4342,7 @@
         "filename": "78081g503.ic655",
         "status": "NO_DUMP",
         "handling": "omitted_from_media_package_no_substitute",
-        "source_proof": "FX1S uses taito_fx1s_state/coh1000ta; class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "source_proof": "taito_fx1s_state/coh1000ta class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
         "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
       },
       "runtime_candidate": true,
@@ -4355,7 +4571,7 @@
         "filename": "78081g503.ic655",
         "status": "NO_DUMP",
         "handling": "omitted_from_media_package_no_substitute",
-        "source_proof": "FX1S uses taito_fx1s_state/coh1000ta; class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "source_proof": "taito_fx1s_state/coh1000ta class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
         "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
       },
       "runtime_candidate": true,
@@ -4584,7 +4800,7 @@
         "filename": "78081g503.ic655",
         "status": "NO_DUMP",
         "handling": "omitted_from_media_package_no_substitute",
-        "source_proof": "FX1S uses taito_fx1s_state/coh1000ta; class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+        "source_proof": "taito_fx1s_state/coh1000ta class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
         "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"
       },
       "runtime_candidate": true,

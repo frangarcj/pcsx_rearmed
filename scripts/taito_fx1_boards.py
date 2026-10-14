@@ -20,6 +20,8 @@ DEFAULT_OUTPUT = Path(__file__).with_name("taito_fx1_boards.json")
 OPTIONAL_UNDUMPED = "upd78081"
 FX1S_REQUIRED_REGIONS = ["maincpu:rom", "cat702_1", "cat702_2", "bankedroms",
                          "audiocpu", "ym2610b:adpcma"]
+FX1Z_REQUIRED_REGIONS = ["maincpu:rom", "cat702_1", "cat702_2", "bankedroms",
+                         "taito_zoom:mn10200", "taito_zoom:zsg2"]
 TAITO_CLASSES = ("taito_fx1s_state", "taito_fx1z_state", "gdarius_state")
 
 
@@ -153,6 +155,26 @@ def _fx1s_device_facts(source: str) -> dict[str, Any]:
             "bank_select_mask": 0x03, "watchdog_clock_bit": 5}
 
 
+def _fx1z_device_facts(source: str, source_dir: Path) -> dict[str, Any]:
+    body = _function_body(source, r"class\s+taito_fx1z_state\b", "taito_fx1z_state")
+    required = ('TAITO_ZOOM(config, m_zoom)', 'MB3773(config, m_mb3773)',
+                'nvram_device::DEFAULT_ALL_1', 'set_base(m_fram.get(), 0x200)',
+                'map(0x1fb00000, 0x1fb003ff)', 'map(0x1fbe0000, 0x1fbe01ff)',
+                'umask32(0x00ff00ff)', 'm_spu->add_route(0, m_speaker, 0.3, 0)')
+    if not all(r in body for r in required):
+        raise TaitoFX1ProfileError('FX1Z composition/map differs from reviewed source')
+    zoom = (source_dir / 'src/mame/sony/taito_zm.cpp').read_text()
+    if not all(r in zoom for r in ("MN1020012A(config, m_soundcpu, XTAL(25'000'000)/2)",
+            "TMS57002(config, m_tms57002, XTAL(25'000'000)/2)",
+            "ZSG2(config, m_zsg2, XTAL(25'000'000))", 'map(0x080000, 0x0fffff).rom()')):
+        raise TaitoFX1ProfileError('FX1Z Zoom clocks/ROM map differ from source')
+    return {'sound_cpu_device':'MN10200', 'sound_cpu_clock_hz':12500000,
+            'sound_device':'ZSG-2/TMS57002', 'sound_clock_hz':25000000,
+            'sound_latch_device':'M66220FP', 'sample_region':'taito_zoom:zsg2',
+            'watchdog_device':'MB3773', 'bank_select_register':0x1fb40000,
+            'bank_select_mask':3, 'watchdog_clock_bit':5}
+
+
 def _region_info(romset: mame.RomSet) -> list[dict[str, Any]]:
     result = []
     for region in romset.regions.values():
@@ -193,7 +215,7 @@ def _verify_unused_upd78081(source: str, romset: mame.RomSet,
     region = romset.regions.get(OPTIONAL_UNDUMPED)
     if region is None:
         return None
-    if game["state"] != "taito_fx1s_state" or game["machine"] != "coh1000ta":
+    if game["state"] not in TAITO_CLASSES or game["machine"] not in ("coh1000ta", "coh1000tb", "coh1002tb"):
         return None
     specs = [romset.files[op.file_index] for op in region.operations
              if isinstance(op, mame.LoadOp)]
@@ -203,8 +225,8 @@ def _verify_unused_upd78081(source: str, romset: mame.RomSet,
     if (spec.filename != "78081g503.ic655" or spec.expected_size != 0x2000
             or spec.status != "no_dump" or spec.crc32 is not None or spec.sha1 is not None):
         raise TaitoFX1ProfileError("unreviewed upd78081 NO_DUMP media declaration")
-    class_body = _function_body(source, r"class\s+taito_fx1s_state\b", "taito_fx1s_state")
-    config_body = _function_body(source, r"void\s+coh1000ta\s*\(\s*machine_config\s*&config\s*\)", "coh1000ta")
+    class_body = _function_body(source, r"class\s+" + re.escape(game["state"]) + r"\b", game["state"])
+    config_body = _function_body(source, r"void\s+" + re.escape(game["machine"]) + r"\s*\(\s*machine_config\s*&config\s*\)", game["machine"])
     base_body = _function_body(source, r"void\s+zn_state::zn_base\s*\(\s*machine_config\s*&config\s*\)", "zn_base")
     if "upd78081" in class_body or "UPD78081" in config_body:
         raise TaitoFX1ProfileError("FX1S now instantiates or references upd78081")
@@ -213,7 +235,7 @@ def _verify_unused_upd78081(source: str, romset: mame.RomSet,
     return {"tag": OPTIONAL_UNDUMPED, "size": 0x2000,
             "filename": spec.filename, "status": "NO_DUMP",
             "handling": "omitted_from_media_package_no_substitute",
-            "source_proof": "FX1S uses taito_fx1s_state/coh1000ta; class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
+            "source_proof": f"{game['state']}/{game['machine']} class/config do not instantiate upd78081, while zn_state::zn_base instantiates the distinct ZNMCU",
             "known_limitation": "upd78081 image remains undumped; no emulation or firmware-completeness claim is made"}
 
 
@@ -233,6 +255,7 @@ def build_registry(source_dir: Path = DEFAULT_SOURCE) -> dict[str, Any]:
     if len(coverage) != 116 or any(row["status"] != "parsed" for row in coverage):
         raise TaitoFX1ProfileError("generic parser did not classify every ROM_START in sony/zn.cpp")
     fx1s_devices = _fx1s_device_facts(source)
+    fx1z_devices = _fx1z_device_facts(source, source_dir)
     bios_roots = [row["set"] for row in game_rows.values()
                   if "MACHINE_IS_BIOS_ROOT" in row["flags"]]
     if bios_roots != ["coh1000t"]:
@@ -248,18 +271,21 @@ def build_registry(source_dir: Path = DEFAULT_SOURCE) -> dict[str, Any]:
         is_root = "MACHINE_IS_BIOS_ROOT" in game["flags"]
         unsupported: list[str] = []
         supported = (game["state"] == "taito_fx1s_state" and
-                     game["machine"] == "coh1000ta" and game["input"] == "znt2p")
+                     game["machine"] == "coh1000ta" and game["input"] == "znt2p") or (
+                     game["state"] in ("taito_fx1z_state", "gdarius_state") and
+                     game["machine"] in ("coh1000tb", "coh1002tb") and game["input"] in ("raystorm", "znt2p"))
         if not supported:
             unsupported.append(f"unsupported board class/config/input: {game['state']} / {game['machine']} / {game['input']}")
-        missing = [tag for tag in FX1S_REQUIRED_REGIONS if tag not in region_map]
+        required_regions = FX1S_REQUIRED_REGIONS if board["board_type"] == "FX1S" else FX1Z_REQUIRED_REGIONS
+        missing = [tag for tag in required_regions if tag not in region_map]
         if missing:
             unsupported.append("missing FX1S media regions: " + ", ".join(missing))
-        extras = [tag for tag in region_map if tag not in FX1S_REQUIRED_REGIONS and tag != OPTIONAL_UNDUMPED]
+        extras = [tag for tag in region_map if tag not in required_regions and tag != OPTIONAL_UNDUMPED]
         if extras:
             unsupported.append("unsupported FX1S regions: " + ", ".join(extras))
         if romset.disks:
             unsupported.append("requires disk/CHD media")
-        required_nodump = [file["filename"] for tag in FX1S_REQUIRED_REGIONS
+        required_nodump = [file["filename"] for tag in required_regions
                            for file in region_map.get(tag, {}).get("files", [])
                            if file["status"] == "no_dump"]
         if required_nodump:
@@ -270,11 +296,10 @@ def build_registry(source_dir: Path = DEFAULT_SOURCE) -> dict[str, Any]:
             board.update(fx1s_devices)
         optional = _verify_unused_upd78081(source, romset, game)
         if game["machine"] in ("coh1000tb", "coh1002tb"):
-            board.update({"sound_cpu_device": "MN10200", "sound_device": "ZSG-2/TMS57002",
-                          "sample_region": "taito_zoom:zsg2"})
+            board.update(fx1z_devices)
         profiles.append({**game, **board, "is_bios_root": is_root,
                          "bios_parent": _bios_parent(name, game_rows),
-                         "required_regions": FX1S_REQUIRED_REGIONS if supported else [],
+                         "required_regions": required_regions if supported else [],
                          "rom_regions": regions,
                          "disk_media": [disk.name for disk in romset.disks],
                          "optional_undumped_regions": [OPTIONAL_UNDUMPED] if OPTIONAL_UNDUMPED in region_map else [],

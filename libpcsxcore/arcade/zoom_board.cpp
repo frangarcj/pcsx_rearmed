@@ -374,9 +374,14 @@ int zoom_board_create(const zoom_board_config *config, zoom_board **out)
     if (!out || !config || !config->boot_flash || config->boot_flash_size != ZOOM_BOOT_FLASH_BYTES)
         return ZOOM_BOARD_ARGUMENT;
     *out = nullptr;
-    for (unsigned i = 0; i < 3; ++i)
-        if (!config->sample_flash[i] || config->sample_flash_size[i] != ZOOM_SAMPLE_FLASH_BYTES)
-            return ZOOM_BOARD_ARGUMENT;
+    if (config->sample_rom) {
+        if ((config->sample_rom_size != 0x400000 && config->sample_rom_size != 0x600000) ||
+            config->flash_read16 || config->flash_write16) return ZOOM_BOARD_ARGUMENT;
+    } else {
+        for (unsigned i = 0; i < 3; ++i)
+            if (!config->sample_flash[i] || config->sample_flash_size[i] != ZOOM_SAMPLE_FLASH_BYTES)
+                return ZOOM_BOARD_ARGUMENT;
+    }
     auto *b = new (std::nothrow) zoom_board;
     if (!b) return ZOOM_BOARD_NOMEM;
     b->config = *config;
@@ -402,13 +407,17 @@ int zoom_board_create(const zoom_board_config *config, zoom_board **out)
 
     ZSG2Config zsg_config{};
     zsg_config.clock_hz = ZSG2_DEFAULT_CLOCK;
-    zsg_config.sample_rom_size = 0x600000;
-    zsg_config.external_read = zsg_external_read;
+    zsg_config.sample_rom = config->sample_rom;
+    zsg_config.sample_rom_size = config->sample_rom ? config->sample_rom_size : 0x600000;
+    zsg_config.external_read = config->sample_rom ? nullptr : zsg_external_read;
     zsg_config.rom_opaque = b;
     zsg_config.sample = zsg_sample;
     zsg_config.sample_opaque = b;
     if (zsg2_create(&zsg_config, &b->zsg) != ZSG2_OK) {
         tms57002_destroy(b->dsp); mn10200_destroy(b->cpu); delete b; return ZOOM_BOARD_NOMEM;
+    }
+    if (config->sample_rom && zoom_board_set_sound_reset(b, 0) != ZOOM_BOARD_OK) {
+        zoom_board_destroy(b); return ZOOM_BOARD_DEVICE;
     }
     *out = b;
     return ZOOM_BOARD_OK;

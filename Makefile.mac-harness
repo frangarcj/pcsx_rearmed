@@ -128,7 +128,7 @@ $(BUILD)/libpcsxcore/arcade/tms57002/tms57002_core.o \
 $(BUILD)/libpcsxcore/arcade/tms57002/tms57kdec.o \
 $(BUILD)/libpcsxcore/arcade/tms57002/tmsops.o: $(GNET_TMS_HEADER)
 
-.PHONY: all clean smoke board-test system11-test system10-test systemgv-test tecmo-tps-test capcom-zn-test taito-fx1-test systemgnet-test gpu-type1-test devices-test FORCE
+.PHONY: all clean smoke board-test system11-test system10-test systemgv-test tecmo-tps-test taito-fx1z-test capcom-zn-test taito-fx1-test systemgnet-test gpu-type1-test devices-test FORCE
 all: $(TARGET)
 $(TARGET): $(OBJECTS) $(SHELF_LIB)
 	$(CXX) -arch arm64 -Wl,-dead_strip -o $@ $(OBJECTS) -lz -lm $(GPU_LIBS)
@@ -178,6 +178,9 @@ tecmo-tps-test: $(TARGET)
 	python3 tests/check_tecmo_tps_harness.py --harness $(TARGET)
 capcom-zn-test: $(TARGET)
 	python3 tests/check_capcom_zn_harness.py --harness $(TARGET)
+taito-fx1z-test: $(TARGET)
+	python3 scripts/generate_taito_fx1_profiles.py --check
+	python3 tests/check_taito_fx1z_harness.py --harness $(TARGET)
 taito-fx1-test: $(TARGET)
 	python3 tests/check_taito_fx1_harness.py --harness $(TARGET)
 ifeq ($(DRC),1)
