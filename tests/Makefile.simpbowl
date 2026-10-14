@@ -1,0 +1,20 @@
+.DEFAULT_GOAL := test
+CC ?= clang
+BUILD ?= build/simpbowl-tests
+OPT ?= -O2 -g
+CFLAGS := -std=c99 $(OPT) -Wall -Wextra -Werror
+ARCADE := libpcsxcore/arcade
+.PHONY: test sanitize clean
+$(BUILD)/test-upd4701: tests/test_upd4701.c $(ARCADE)/upd4701.c $(ARCADE)/upd4701.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) tests/test_upd4701.c $(ARCADE)/upd4701.c -o $@
+$(BUILD)/test-simpbowl: tests/test_simpbowl_io.c $(ARCADE)/simpbowl_io.c $(ARCADE)/simpbowl_io.h $(ARCADE)/upd4701.c $(ARCADE)/nor_flash.c
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) tests/test_simpbowl_io.c $(ARCADE)/simpbowl_io.c $(ARCADE)/upd4701.c $(ARCADE)/nor_flash.c -o $@
+test: $(BUILD)/test-upd4701 $(BUILD)/test-simpbowl
+	$(BUILD)/test-upd4701
+	$(BUILD)/test-simpbowl
+sanitize:
+	$(MAKE) -f tests/Makefile.simpbowl BUILD=$(BUILD)/sanitize OPT='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' test
+clean:
+	rm -rf $(BUILD)

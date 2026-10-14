@@ -24,6 +24,9 @@
 #include "psxcounters.h"
 #include "psxevents.h"
 #include "gpu.h"
+#ifdef PCSX_SYSTEM_GV
+#include "systemgv.h"
+#endif
 #include "arcade/psx_screen_clock.h"
 #ifdef PCSX_SYSTEM12
 #include "system12.h"
@@ -455,6 +458,9 @@ static void deliverVblankEnd(const psx_screen_time *when)
     u32 status, field = 0;
     hSyncCount = 0;
     frame_counter++;
+#ifdef PCSX_SYSTEM_GV
+    systemgv_frame();
+#endif
     gpuSyncPluginSR();
     status = SWAP32(HW_GPU_STATUS) | PSXGPU_FIELD;
     if ((status & PSXGPU_ILACE_BITS) == PSXGPU_ILACE_BITS) {

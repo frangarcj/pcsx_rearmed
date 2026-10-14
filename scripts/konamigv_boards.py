@@ -138,7 +138,7 @@ def _io_class_facts(game: dict[str, Any]) -> tuple[list[str], list[str]]:
                 ["Tokimeki sensor/printer controller and print media path"])
     if state == "simpbowl_state" and machine == "simpbowl" and inp == "simpbowl":
         return (["Simpsons Bowling 4x Fujitsu flash map", "UPD4701 trackball", "MB89371 dual UART", "93C46 EEPROM"],
-                ["trackball interface", "flash command protocol"])
+                [])
     raise KonamiGVProfileError(f"unreviewed System GV state/input pair {state}/{inp}")
 
 

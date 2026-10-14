@@ -14,6 +14,7 @@
 #endif
 #include "arcade/chd_cd.h"
 #include "arcade/konamigv.h"
+#include "arcade/simpbowl_io.h"
 #include "gpu_vram.h"
 
 #include <CommonCrypto/CommonDigest.h>
@@ -24,6 +25,7 @@
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #if !defined(PCSX_SYSTEM12)
 #error Konami GV host integration requires runtime PSX memory sizing.
@@ -39,8 +41,11 @@ typedef struct GvProfile {
     const char *eeprom_sha1;
 } GvProfile;
 
-/* Exact shared-map games from scripts/konamigv_boards.json. */
+/* Exact supported profiles from scripts/konamigv_boards.json. */
 static const GvProfile gv_profiles[] = {
+    {"simpbowl", "konamigv", "empty_init", "MACHINE_IMPERFECT_SOUND",
+     "829uaa02", "2ec4cc608d5582e478ee047b60ccee67b52f060c", "GOOD",
+     "16ae7f81cbe841c429c5c7326cf83e87db1782bf"},
     {"hyperath", "konamigv", "empty_init", "MACHINE_IMPERFECT_SOUND",
      "gv021-j1", "579442444025b18da658cd6455c51459fbc3de0e", "GOOD",
      "a0f203a999757fba68b391c525ac4b9684a57ba9"},
@@ -68,6 +73,12 @@ typedef struct GvBoard {
     KonamiGV *device;
     psx_sio_t *sio[2];
     ChdCd *cd;
+    SimpBowlIO *simp;
+    uint8_t *flash;
+    uint16_t track[2];
+    char flash_path[GV_MAX_PATH];
+    uint8_t flash_key[20];
+    int flash_warm;
     const GvProfile *profile;
     uint8_t *bios, *eeprom;
     uint8_t device_eeprom[GV_EEPROM_BYTES];
@@ -318,8 +329,7 @@ static int validate_ini(const char *directory, const GvProfile *profile)
     char disk_filename[128];
     static const struct { const char *key, *value; } common[] = {
         {"format", "pcsx-aow-system-gv-v1"}, {"bios_parent", "konamigv"},
-        {"mame_machine", "konamigv"}, {"mame_input", "konamigv"},
-        {"mame_state", "konamigv_state"}, {"cpu_device", "CXD8530BQ"},
+        {"cpu_device", "CXD8530BQ"},
         {"cpu_clock_hz", "67737600"}, {"gpu_device", "CXD8514Q"},
         {"gpu_clock_hz", "53693175"}, {"main_ram_size", "2097152"},
         {"vram_size", "1048576"}, {"scsi_device", "NCR53CF96"},
@@ -328,7 +338,7 @@ static int validate_ini(const char *directory, const GvProfile *profile)
         {"duart_clock_hz", "4000000"}, {"spu_clock_hz", "33868800"},
         {"game_execution_verified", "false"}, {"region.maincpu:rom", "bios.bin"},
         {"region.maincpu:rom.size", "524288"}, {"region.eeprom", "eeprom.bin"},
-        {"region.eeprom.size", "128"}, {"unsupported_game_io", ""}
+        {"region.eeprom.size", "128"}
     };
     size_t i;
     if (snprintf(disk_filename, sizeof(disk_filename), "%s.chd", profile->disk) >=
@@ -341,6 +351,12 @@ static int validate_ini(const char *directory, const GvProfile *profile)
         strcmp(ini_value(values, "disk.cdrom"), disk_filename) ||
         strcmp(ini_value(values, "disk.cdrom.sha1"), profile->disk_sha1) ||
         strcmp(ini_value(values, "disk.cdrom.status"), profile->disk_status)) return -1;
+    int special = !strcmp(profile->set, "simpbowl");
+    if (strcmp(ini_value(values,"mame_machine"), special?"simpbowl":"konamigv") ||
+        strcmp(ini_value(values,"mame_input"), special?"simpbowl":"konamigv") ||
+        strcmp(ini_value(values,"mame_state"), special?"simpbowl_state":"konamigv_state") ||
+        (*ini_value(values,"unsupported_game_io") && (!special ||
+          strcmp(ini_value(values,"unsupported_game_io"),"trackball interface; flash command protocol")))) return -1;
     for (i = 0; i < sizeof(common) / sizeof(common[0]); i++)
         if (strcmp(ini_value(values, common[i].key), common[i].value)) return -1;
     return 0;
@@ -365,6 +381,51 @@ static int validate_chd_hash(const char *path, const char *expected)
     return !strcmp(digest, expected) ? 0 : -1;
 }
 
+/* A separate mutable image, bound to the exact original BIOS/EEPROM/CD set.
+ * Missing state starts erased; invalid existing state is never overwritten. */
+static int init_simp(const char *directory, int fixture)
+{
+    char binding[256];uint8_t header[64]={0},digest[20];
+    if(snprintf(board.flash_path,sizeof(board.flash_path),"%s/%s",directory,
+        fixture?"simpbowl.fixture.flash.nvram":"flash.nvram")>=(int)sizeof(board.flash_path))return -1;
+    snprintf(binding,sizeof(binding),"%s|%s|%s|%s",fixture?"SIMP-FIXTURE":"simpbowl",
+        GV_BIOS_SHA1,"16ae7f81cbe841c429c5c7326cf83e87db1782bf","2ec4cc608d5582e478ee047b60ccee67b52f060c");
+    CC_SHA1(binding,(CC_LONG)strlen(binding),board.flash_key);
+    board.flash=malloc(SIMPBOWL_FLASH_BYTES);if(!board.flash)return -1;
+    memset(board.flash,0xff,SIMPBOWL_FLASH_BYTES);
+    FILE *f=fopen(board.flash_path,"rb");
+    if(f){
+        int failed=fread(header,1,64,f)!=64 || memcmp(header,"PCSX-SIMP-FLASH1",16) ||
+          memcmp(header+16,board.flash_key,20) || header[56]!=0 || header[57]!=0 || header[58]!=0x80 || header[59]!=0 ||
+          header[60]!=1 || header[61]!=0 || header[62]!=0 || header[63]!=0 ||
+          fread(board.flash,1,SIMPBOWL_FLASH_BYTES,f)!=SIMPBOWL_FLASH_BYTES || fgetc(f)!=EOF || ferror(f);
+        if(fclose(f))failed=1;
+        CC_SHA1(board.flash,SIMPBOWL_FLASH_BYTES,digest);if(memcmp(header+36,digest,20))failed=1;
+        if(failed){fprintf(stderr,"SystemGV: invalid or wrong-profile flash.nvram\n");return -1;}
+        board.flash_warm=1;
+    }else if(errno!=ENOENT){fprintf(stderr,"SystemGV: cannot read flash.nvram\n");return -1;}
+    board.simp=simpbowl_io_create(board.flash,SIMPBOWL_FLASH_BYTES);
+    board.track[0]=0xfff; // source TRACK0_X PORT_REVERSE default
+    return board.simp?0:-1;
+}
+const char *systemgv_flash_path(void){return board.simp?board.flash_path:NULL;}
+int systemgv_flush_flash(void)
+{
+    if(!board.simp)return 0;char temporary[GV_MAX_PATH];uint8_t header[64]={0};
+    if(snprintf(temporary,sizeof(temporary),"%s.tmp.%ld",board.flash_path,(long)getpid())>=(int)sizeof(temporary))return -1;
+    memcpy(header,"PCSX-SIMP-FLASH1",16);memcpy(header+16,board.flash_key,20);
+    CC_SHA1(board.flash,SIMPBOWL_FLASH_BYTES,header+36);header[58]=0x80;header[60]=1;
+    FILE *f=fopen(temporary,"wb");if(!f)return -1;
+    int failed=fwrite(header,1,64,f)!=64 || fwrite(board.flash,1,SIMPBOWL_FLASH_BYTES,f)!=SIMPBOWL_FLASH_BYTES;
+    if(fclose(f))failed=1;
+    if(failed || rename(temporary,board.flash_path)){remove(temporary);return -1;}return 0;
+}
+int systemgv_has_trackball(void){return board.active && board.simp!=NULL;}
+unsigned systemgv_analog_max(const char *name){return systemgv_has_trackball() && name && (!strcmp(name,"p1trackx") || !strcmp(name,"p1tracky"))?0xfff:0;}
+int systemgv_set_analog(const char *name,unsigned value){if(!systemgv_analog_max(name) || value>0xfff)return -1;board.track[name[7]=='y']=value;return 0;}
+int systemgv_trackball_delta(int x,int y){if(!systemgv_has_trackball())return -1;board.track[0]=(board.track[0]+(uint32_t)x)&0xfff;board.track[1]=(board.track[1]+(uint32_t)y)&0xfff;return 0;}
+void systemgv_frame(void){if(board.active && board.simp)simpbowl_io_frame(board.simp,board.track[0],board.track[1]);}
+
 static int sync_devices(uint64_t now_ns)
 {
     konamigv_status_t after;
@@ -377,6 +438,7 @@ static int sync_devices(uint64_t now_ns)
         board.fault = 1;
         return -1;
     }
+    if(board.simp && simpbowl_io_advance_to(board.simp,now_ns)){board.fault=1;return -1;}
     board.now_ns = now_ns;
     return 0;
 }
@@ -441,7 +503,7 @@ int systemgv_load(const char *directory)
     if (read_ini(directory, values)) return -1;
     profile = find_profile(ini_value(values, "mame_set"));
     if (!profile || validate_ini(directory, profile) || validate_manifest(directory, profile)) {
-        fprintf(stderr, "SystemGV: profile is not a supported common-map game\n");
+        fprintf(stderr, "SystemGV: profile is not a supported GV configuration\n");
         return -1;
     }
     board.profile = profile;
@@ -463,6 +525,7 @@ int systemgv_load(const char *directory)
         goto fail;
     }
     if (activate_device(&media)) goto fail;
+    if(!strcmp(profile->set,"simpbowl") && init_simp(directory,0))goto fail;
     return 0;
 fail:
     systemgv_unload();
@@ -534,11 +597,68 @@ fail:
     return -1;
 }
 
+/* Explicit synthetic MIPS only; the original profile loader cannot accept it. */
+int systemgv_test_load_simpbowl(const char *chd_path)
+{
+    static const uint32_t guest[]={
+        0x3c08bf68u, 0x35080000u, 0x3c0a8000u, 0x354a0000u, 0x3c090000u, 0x3529091au,
+        0xa5090082u, 0x3c090000u, 0x35290012u, 0xa5090084u, 0x3c090000u, 0x35290000u,
+        0xa5090086u, 0x95090080u, 0x00000000u, 0xad490100u, 0x3c090000u, 0x352902aau,
+        0xa5090082u, 0x3c090000u, 0x35290005u, 0xa5090084u, 0x3c090000u, 0x35290000u,
+        0xa5090086u, 0x95090088u, 0x00000000u, 0x3c090000u, 0x3529aaaau, 0xa5090080u,
+        0x3c090000u, 0x35290155u, 0xa5090082u, 0x3c090000u, 0x35290002u, 0xa5090084u,
+        0x3c090000u, 0x35290000u, 0xa5090086u, 0x3c090000u, 0x35295555u, 0xa5090080u,
+        0x3c090000u, 0x352902aau, 0xa5090082u, 0x3c090000u, 0x35290005u, 0xa5090084u,
+        0x3c090000u, 0x35290000u, 0xa5090086u, 0x95090088u, 0x00000000u, 0x3c090000u,
+        0x3529a0a0u, 0xa5090080u, 0x3c090000u, 0x3529091au, 0xa5090082u, 0x3c090000u,
+        0x35290012u, 0xa5090084u, 0x3c090000u, 0x35290000u, 0xa5090086u, 0x3c090000u,
+        0x35293412u, 0xa5090080u, 0x3c090000u, 0x3529091au, 0xa5090082u, 0x3c090000u,
+        0x35290012u, 0xa5090084u, 0x3c090000u, 0x35290000u, 0xa5090086u, 0x95090080u,
+        0x00000000u, 0xad490104u, 0x3c090000u, 0x352902aau, 0xa5090082u, 0x3c090000u,
+        0x35290005u, 0xa5090084u, 0x3c090000u, 0x35290000u, 0xa5090086u, 0x95090088u,
+        0x00000000u, 0x3c090000u, 0x3529aaaau, 0xa5090080u, 0x3c090000u, 0x35290155u,
+        0xa5090082u, 0x3c090000u, 0x35290002u, 0xa5090084u, 0x3c090000u, 0x35290000u,
+        0xa5090086u, 0x3c090000u, 0x35295555u, 0xa5090080u, 0x3c090000u, 0x352902aau,
+        0xa5090082u, 0x3c090000u, 0x35290005u, 0xa5090084u, 0x3c090000u, 0x35290000u,
+        0xa5090086u, 0x95090088u, 0x00000000u, 0x3c090000u, 0x35299090u, 0xa5090080u,
+        0x3c090000u, 0x35290000u, 0xa5090082u, 0x3c090000u, 0x35290000u, 0xa5090084u,
+        0x3c090000u, 0x35290000u, 0xa5090086u, 0x95090080u, 0x00000000u, 0xad490108u,
+        0x95090080u, 0x00000000u, 0xad49010cu, 0x3c090000u, 0x35290000u, 0xa5090082u,
+        0x3c090000u, 0x35290000u, 0xa5090084u, 0x3c090000u, 0x35290000u, 0xa5090086u,
+        0x3c090000u, 0x3529f0f0u, 0xa5090080u, 0x3c090000u, 0x352902aau, 0xa5090082u,
+        0x3c090000u, 0x35292005u, 0xa5090084u, 0x3c090000u, 0x35290040u, 0xa5090086u,
+        0x95090088u, 0x00000000u, 0x3c090000u, 0x3529aaaau, 0xa5090080u, 0x3c090000u,
+        0x35290155u, 0xa5090082u, 0x3c090000u, 0x35292002u, 0xa5090084u, 0x3c090000u,
+        0x35290040u, 0xa5090086u, 0x3c090000u, 0x35295555u, 0xa5090080u, 0x3c090000u,
+        0x352902aau, 0xa5090082u, 0x3c090000u, 0x35292005u, 0xa5090084u, 0x3c090000u,
+        0x35290040u, 0xa5090086u, 0x95090088u, 0x00000000u, 0x3c090000u, 0x3529a0a0u,
+        0xa5090080u, 0x3c090000u, 0x3529091au, 0xa5090082u, 0x3c090000u, 0x35292012u,
+        0xa5090084u, 0x3c090000u, 0x35290040u, 0xa5090086u, 0x3c090000u, 0x35297856u,
+        0xa5090080u, 0x3c090000u, 0x3529091au, 0xa5090082u, 0x3c090000u, 0x35292012u,
+        0xa5090084u, 0x3c090000u, 0x35290040u, 0xa5090086u, 0x95090080u, 0x00000000u,
+        0xad490124u, 0x3c0c0010u, 0x358c0000u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x8d0900c0u, 0x00000000u, 0xad490110u, 0x8d0900c4u, 0x00000000u, 0xad490114u,
+        0x910900c9u, 0x00000000u, 0x8d0900c0u, 0x00000000u, 0xad490118u, 0x8d0900c4u,
+        0x00000000u, 0xad49011cu, 0x3c095349u, 0x35294d50u, 0xad490120u, 0x1000ffffu,
+        0x00000000u,
+    };
+    char directory[GV_MAX_PATH];const char *slash=strrchr(chd_path,'/');
+    if(slash){size_t n=slash-chd_path;if(n>=sizeof(directory))return -1;memcpy(directory,chd_path,n);directory[n]=0;}
+    else strcpy(directory,".");
+    if(systemgv_test_load(chd_path))return -1;
+    if(init_simp(directory,1)){systemgv_unload();return -1;}
+    memset(board.bios,0,GV_BIOS_BYTES);
+    for(unsigned i=0;i<sizeof(guest)/sizeof(guest[0]);i++){uint32_t w=SWAPu32(guest[i]);memcpy(board.bios+i*4,&w,4);}
+    return 0;
+}
+
 void systemgv_unload(void)
 {
 #ifndef DRC_DISABLE
     if (board.active) new_dynarec_set_code_span_provider(NULL);
 #endif
+    if (board.simp) simpbowl_io_destroy(board.simp);
+    free(board.flash);
     if (board.device) konamigv_destroy(board.device);
     for (unsigned i = 0; i < 2; ++i) psx_sio_destroy(board.sio[i]);
     if (board.cd) chd_cd_close(board.cd);
@@ -612,12 +732,14 @@ int systemgv_read(uint32_t address, unsigned width, uint32_t *value)
     if (!overlaps(physical, width, 0x1f000000, 0x20) &&
         !overlaps(physical, width, 0x1f100000, 12) &&
         !overlaps(physical, width, 0x1f680000, 16) &&
+        !(board.simp && (overlaps(physical,width,0x1f680080,16) || overlaps(physical,width,0x1f6800c0,10))) &&
         !overlaps(physical, width, 0x1f801040, 32)) return 0;
     if (systemgv_sync(psxRegs.cycle)) { *value = UINT32_MAX; return -1; }
     result = sony_sio_bus(physical, width, value,
                           width == 4 ? UINT32_MAX : (1u << (width * 8)) - 1, 0);
     if (result) { board.mmio_reads++; return result; }
-    result = konamigv_read(board.device, physical, width, value);
+    result = board.simp ? simpbowl_io_read(board.simp,physical,width,value) : 0;
+    if(!result) result = konamigv_read(board.device, physical, width, value);
     if (result < 0) { board.fault = 1; *value = UINT32_MAX; return -1; }
     if (result) board.mmio_reads++;
     return result;
@@ -633,12 +755,14 @@ int systemgv_write(uint32_t address, unsigned width, uint32_t value,
     if (!overlaps(physical, width, 0x1f000000, 0x20) &&
         !overlaps(physical, width, 0x1f180000, 4) &&
         !overlaps(physical, width, 0x1f680000, 16) &&
+        !(board.simp && overlaps(physical,width,0x1f680080,16)) &&
         !overlaps(physical, width, 0x1f780000, 4) &&
         !overlaps(physical, width, 0x1f801040, 32)) return 0;
     if (systemgv_sync(psxRegs.cycle)) return -1;
     result = sony_sio_bus(physical, width, &value, mem_mask, 1);
     if (result) { board.mmio_writes++; return result; }
-    result = konamigv_write(board.device, physical, width, value, mem_mask);
+    result = board.simp ? simpbowl_io_write(board.simp,physical,width,value,mem_mask) : 0;
+    if(!result) result = konamigv_write(board.device, physical, width, value, mem_mask);
     if (result < 0) { board.fault = 1; return -1; }
     if (result) board.mmio_writes++;
     return result;
@@ -823,6 +947,9 @@ void systemgv_report(FILE *out)
     konamigv_status_t status;
     if (!board.active || !out) return;
     konamigv_get_status(board.device, &status);
+    if(board.simp){SimpBowlIOStatus st;simpbowl_io_status(board.simp,&st);
+      fprintf(out,"Simpsons IO: flash_address=%08x reads=%" PRIu64 " writes=%" PRIu64 " frames=%" PRIu64 " reset_reads=%" PRIu64 " track=%03x/%03x faults=%u warm=%d\n",st.address,st.reads,st.writes,st.frames,st.reset_reads,st.x,st.y,st.fault,board.flash_warm);
+    }
     fprintf(out, "SystemGV: profile=%s CPU=CXD8530BQ source_clock=67737600 source_clocks_per_mame_cycle=4 PSXCLK=%u GPU=CXD8514Q VRAM=1048576 RAM=%u\n",
             board.profile ? board.profile->set : "synthetic-fixture", PSXCLK, PSX_RAM_SIZE);
     fprintf(out, "SystemGV: NCR=%" PRIu64 "Hz IRQ10=%u DRQ=%u DMA=%" PRIu64

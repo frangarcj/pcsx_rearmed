@@ -4,9 +4,14 @@
 #define systemgnet_set_analog gnet_test_analog
 #define systemzn_set_gun_position judge_test_gun
 #define systemgq_set_gun_position gq_test_gun
+#define systemgv_has_trackball gv_test_has_trackball
+#define systemgv_trackball_delta gv_test_track_delta
 #include "../frontend/mac_harness.c"
 #undef main
 #include <assert.h>
+static int gv_dx,gv_dy;
+int gv_test_has_trackball(void){return selected_board && selected_board->family==102;}
+int gv_test_track_delta(int x,int y){gv_dx+=x;gv_dy+=y;return 0;}
 static unsigned gq_x[3],gq_y[3];
 int gq_test_gun(unsigned p,unsigned x,unsigned y){assert(p<3);gq_x[p]=x;gq_y[p]=y;return 0;}
 static unsigned judge_x[2],judge_y[2];
@@ -234,6 +239,23 @@ int main(void)
     assert(SDL_SetJoystickVirtualAxis(joy,SDL_GAMEPAD_AXIS_LEFTX,32767));assert(SDL_SetJoystickVirtualAxis(joy,SDL_GAMEPAD_AXIS_LEFTY,-32768));
     SDL_UpdateJoysticks();frame_counter++;poll_interactive_input();assert(gq_x[0]==0x1bc && gq_y[0]==0);
     puts("GQ SDL source 9-bit gun X, mouse/gamepad extrema, offscreen trigger and focus release PASS");
+    board.family=102;interactive_focused=1;interactive_gv_track_frame=~0u;
+    frame_counter++;poll_interactive_input();assert(gv_dx==-63 && gv_dy==-64);
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_MOUSE_MOTION;e.motion.windowID=SDL_GetWindowID(w);e.motion.xrel=3.5f;e.motion.yrel=-2.5f;
+    assert(SDL_PushEvent(&e));poll_interactive_input();assert(gv_dx==-66 && gv_dy==-66);
+    e.motion.xrel=.5f;e.motion.yrel=-.5f;assert(SDL_PushEvent(&e));poll_interactive_input();assert(gv_dx==-67 && gv_dy==-67);
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_MOUSE_BUTTON_DOWN;e.button.button=SDL_BUTTON_LEFT;
+    assert(SDL_PushEvent(&e));poll_interactive_input();assert(fire);
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_WINDOW_FOCUS_LOST;assert(SDL_PushEvent(&e));poll_interactive_input();assert(!fire && !interactive_mouse_trigger);
+    SDL_AudioSpec gv_spec={SDL_AUDIO_S16,2,44100};
+    assert(SDL_InitSubSystem(SDL_INIT_AUDIO));interactive_audio=SDL_CreateAudioStream(&gv_spec,&gv_spec);assert(interactive_audio);
+    interactive_volume=100;int16_t gv_source[600],gv_output[600];
+    for(unsigned n=0;n<300;n++){gv_source[2*n]=4000;gv_source[2*n+1]=-12000;}
+    interactive_zn_spu_pcm(gv_source,sizeof(gv_source));assert(SDL_FlushAudioStream(interactive_audio));
+    assert(SDL_GetAudioStreamData(interactive_audio,gv_output,sizeof(gv_output))==sizeof(gv_output));
+    for(unsigned n=0;n<300;n++)assert(gv_output[2*n]==-9000 && gv_output[2*n+1]==3000);
+    assert(!interactive_audio_error);SDL_DestroyAudioStream(interactive_audio);interactive_audio=NULL;
+    puts("GV SDL fractional reversed-X trackball, frame-sampled gamepad, held mouse/focus release and source swapped SPU0.75 stereo PASS");
     refresh_interactive_gamepads();
     SDL_CloseGamepad(interactive_pads[0]);interactive_pads[0]=NULL;
     SDL_CloseJoystick(joy);assert(SDL_DetachVirtualJoystick(id));

@@ -10,6 +10,7 @@ int systemgv_load(const char *directory);
 /* Test-only boot path. The BIOS image is generated in memory and is never
  * accepted by the source-profile loader; `chd_path` must still be a real CHD. */
 int systemgv_test_load(const char *chd_path);
+int systemgv_test_load_simpbowl(const char *chd_path);
 void systemgv_unload(void);
 int systemgv_active(void);
 void systemgv_mem_reset(void);
@@ -19,6 +20,13 @@ int systemgv_read(uint32_t address, unsigned width, uint32_t *value);
 int systemgv_write(uint32_t address, unsigned width, uint32_t value,
                    uint32_t mem_mask);
 int systemgv_dma5(uint32_t madr, uint32_t bcr, uint32_t chcr);
+const char *systemgv_flash_path(void);
+int systemgv_flush_flash(void);
+int systemgv_has_trackball(void);
+unsigned systemgv_analog_max(const char *name);
+int systemgv_set_analog(const char *name,unsigned value);
+int systemgv_trackball_delta(int x,int y);
+void systemgv_frame(void);
 int systemgv_set_input(const char *name, int pressed);
 int systemgv_eeprom_import(const unsigned char *image, size_t size);
 int systemgv_eeprom_export(unsigned char *image, size_t size);
