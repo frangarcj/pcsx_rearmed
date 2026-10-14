@@ -340,10 +340,7 @@
         "MB89371 dual UART",
         "93C46 EEPROM"
       ],
-      "unsupported_game_io": [
-        "two lightguns and crosshair inputs",
-        "flash command protocol"
-      ],
+      "unsupported_game_io": [],
       "rom_regions": [
         {
           "tag": "maincpu:rom",

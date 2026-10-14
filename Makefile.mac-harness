@@ -107,7 +107,7 @@ CXXSOURCES := libpcsxcore/arcade/adsp2181.cpp libpcsxcore/arcade/rax_sound.cpp l
   libpcsxcore/arcade/nscsi_bus.cpp libpcsxcore/arcade/nscsi_target.cpp
 ifeq ($(HAVE_CHD),1)
 CFLAGS += -DPCSX_SYSTEM_GV -DPCSX_SYSTEM_GNET -DPCSX_SYSTEM_GQ
-SOURCES += libpcsxcore/arcade/tokimeki_io.c libpcsxcore/arcade/upd4701.c libpcsxcore/arcade/simpbowl_io.c libpcsxcore/arcade/btchamp_io.c libpcsxcore/systemgv.c libpcsxcore/systemgnet.c libpcsxcore/systemgq.c libpcsxcore/arcade/k056800.c libpcsxcore/arcade/k054539.c
+SOURCES += libpcsxcore/arcade/tokimeki_io.c libpcsxcore/arcade/upd4701.c libpcsxcore/arcade/simpbowl_io.c libpcsxcore/arcade/btchamp_io.c libpcsxcore/arcade/kdeadeye_io.c libpcsxcore/systemgv.c libpcsxcore/systemgnet.c libpcsxcore/systemgq.c libpcsxcore/arcade/k056800.c libpcsxcore/arcade/k054539.c
 CFLAGS += -DPCSX_SYSTEM12_CDXA
 CXXSOURCES += libpcsxcore/arcade/sh2.cpp libpcsxcore/arcade/system12_cdxa.cpp
 CXXSOURCES += libpcsxcore/arcade/konamigv.cpp libpcsxcore/arcade/nscsi_cd.cpp libpcsxcore/arcade/konamigq.cpp libpcsxcore/arcade/nscsi_hd.cpp

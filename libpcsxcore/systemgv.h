@@ -12,6 +12,7 @@ int systemgv_load(const char *directory);
 int systemgv_test_load(const char *chd_path);
 int systemgv_test_load_tokimeki(const char *chd_path);
 int systemgv_test_load_simpbowl(const char *chd_path);
+int systemgv_test_load_kdeadeye(const char *chd_path);
 void systemgv_unload(void);
 int systemgv_active(void);
 void systemgv_mem_reset(void);
@@ -23,6 +24,8 @@ int systemgv_write(uint32_t address, unsigned width, uint32_t value,
 int systemgv_dma5(uint32_t madr, uint32_t bcr, uint32_t chcr);
 const char *systemgv_flash_path(void);
 int systemgv_flush_flash(void);
+int systemgv_has_guns(void);
+int systemgv_set_gun_position(unsigned player,unsigned x,unsigned y);
 int systemgv_has_trackball(void);
 unsigned systemgv_trackball_players(void);
 int systemgv_trackball_reverse_x(void);

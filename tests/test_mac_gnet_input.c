@@ -4,6 +4,8 @@
 #define systemgnet_set_analog gnet_test_analog
 #define systemzn_set_gun_position judge_test_gun
 #define systemgq_set_gun_position gq_test_gun
+#define systemgv_has_guns gv_test_has_guns
+#define systemgv_set_gun_position gv_test_gun
 #define systemgv_has_trackball gv_test_has_trackball
 #define systemgv_trackball_delta gv_test_track_delta
 #define systemgv_trackball_players gv_test_track_players
@@ -16,13 +18,16 @@
 #include "../frontend/mac_harness.c"
 #undef main
 #include <assert.h>
+static int gv_gun_mode;static unsigned gv_gun_x[2],gv_gun_y[2];
+int gv_test_has_guns(void){return gv_gun_mode && selected_board && selected_board->family==102;}
+int gv_test_gun(unsigned p,unsigned x,unsigned y){assert(p<2 && x<=0xffff && y<=0xffff);gv_gun_x[p]=x;gv_gun_y[p]=y;return 0;}
 static int gv_dx,gv_dy,gv_sensor_mode,gv_btc_mode,gv_p2dx,gv_p2dy;static unsigned gv_heart=31,gv_gsr,gv_pulses;
 int gv_test_has_sensors(void){return gv_sensor_mode && selected_board && selected_board->family==102;}
 int gv_test_sensor_values(unsigned *h,unsigned *g){if(!gv_test_has_sensors())return -1;*h=gv_heart;*g=gv_gsr;return 0;}
 int gv_test_sensor_set(const char *name,unsigned value){if(!strcmp(name,"heartbeat")){assert(value<=101);gv_heart=value;}else{assert(!strcmp(name,"gsr") && value<=128);gv_gsr=value;}return 0;}
 int gv_test_sensor_input(const char *name,int down){assert(!strcmp(name,"heartbeat_pulse"));if(down)gv_pulses++;return 0;}
 
-int gv_test_has_trackball(void){return selected_board && selected_board->family==102;}
+int gv_test_has_trackball(void){return !gv_gun_mode && selected_board && selected_board->family==102;}
 int gv_test_track_delta(int x,int y){gv_dx+=x;gv_dy+=y;return 0;}
 unsigned gv_test_track_players(void){return gv_btc_mode?2:1;}
 int gv_test_track_reverse(void){return !gv_btc_mode;}
@@ -296,6 +301,22 @@ int main(void)
     assert(SDL_SetJoystickVirtualAxis(btc_joy,SDL_GAMEPAD_AXIS_LEFTX,-32768));
     assert(SDL_SetJoystickVirtualAxis(btc_joy,SDL_GAMEPAD_AXIS_LEFTY,32767));
     SDL_UpdateJoysticks();frame_counter++;poll_interactive_input();assert(gv_p2dx==-64 && gv_p2dy==63);
+    gv_gun_mode=1;interactive_judge_mouse_aim=0;frame_counter++;poll_interactive_input();
+    assert(gv_gun_x[0]==0x1bb && gv_gun_y[0]==0 && gv_gun_x[1]==0x4c && gv_gun_y[1]==0xef);
+    assert(aim_interactive_mouse(SDL_GetWindowID(w),0,0));assert(gv_gun_x[0]==0x4c && gv_gun_y[0]==0);
+    assert(aim_interactive_mouse(SDL_GetWindowID(w),799,599));assert(gv_gun_x[0]==0x1bb && gv_gun_y[0]==0xef);
+    assert(!aim_interactive_mouse(SDL_GetWindowID(w),-10,300));assert(gv_gun_x[0]==0 && gv_gun_y[0]==0xff);
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_MOUSE_BUTTON_DOWN;e.button.windowID=SDL_GetWindowID(w);
+    e.button.button=SDL_BUTTON_LEFT;e.button.x=-10;e.button.y=300;
+    assert(SDL_PushEvent(&e));poll_interactive_input();assert(fire && interactive_mouse_trigger && gv_gun_x[0]==0);
+    assert(aim_interactive_mouse(SDL_GetWindowID(w),799,599));frame_counter++;poll_interactive_input();
+    assert(gv_gun_x[0]==0x1bb && gv_gun_y[0]==0xef); /* Mouse owns P1 until stick moves. */
+    interactive_replay=1;unsigned oldx=gv_gun_x[0];
+    e.type=SDL_EVENT_MOUSE_MOTION;e.motion.windowID=SDL_GetWindowID(w);e.motion.x=0;e.motion.y=0;
+    assert(SDL_PushEvent(&e));poll_interactive_input();assert(gv_gun_x[0]==oldx);interactive_replay=0;
+    e.type=SDL_EVENT_WINDOW_FOCUS_LOST;assert(SDL_PushEvent(&e));poll_interactive_input();assert(!fire && !interactive_mouse_trigger);
+    interactive_focused=1;gv_gun_mode=0;
+    puts("Dead Eye SDL two-player raw gun bounds, mouse priority, offscreen trigger, replay and focus PASS");
     SDL_CloseGamepad(interactive_pads[1]);interactive_pads[1]=NULL;
     SDL_CloseJoystick(btc_joy);SDL_DetachVirtualJoystick(btc_id);gv_btc_mode=0;
     puts("Beat the Champ SDL unreversed mouse and independent second trackball gamepad PASS");

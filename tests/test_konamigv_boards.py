@@ -53,7 +53,7 @@ class KonamiGVProfilesTest(unittest.TestCase):
         self.assertEqual([], self.profiles["hyperath"]["unsupported_game_io"])
         self.assertEqual([], self.profiles["btchamp"]["unsupported_game_io"])
         self.assertTrue(any("printer" in item.lower() for item in self.profiles["tmosh"]["unsupported_game_io"]))
-        self.assertTrue(any("lightgun" in item.lower() for item in self.profiles["kdeadeye"]["unsupported_game_io"]))
+        self.assertEqual([], self.profiles["kdeadeye"]["unsupported_game_io"])
         bad = {profile["set"] for profile in self.registry["profiles"]
                if any(disk["status"] == "BAD_DUMP" for disk in profile["disk_media"])}
         self.assertEqual({"lacrazyc", "susume", "powyak96", "weddingr", "btchamp",

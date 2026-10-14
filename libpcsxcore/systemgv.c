@@ -17,6 +17,7 @@
 #include "arcade/simpbowl_io.h"
 #include "arcade/tokimeki_io.h"
 #include "arcade/btchamp_io.h"
+#include "arcade/kdeadeye_io.h"
 #include "gpu_vram.h"
 
 #include <CommonCrypto/CommonDigest.h>
@@ -33,7 +34,7 @@
 #error Konami GV host integration requires runtime PSX memory sizing.
 #endif
 
-enum { GV_BIOS_BYTES = 0x80000, GV_EEPROM_BYTES = 0x80, GV_MAX_INI = 32,
+enum { GV_BIOS_BYTES = 0x80000, GV_EEPROM_BYTES = 0x80, GV_MAX_INI = 34, GV_BASE_INI = 31,
        GV_MAX_VALUE = 256, GV_MAX_PATH = 4096 };
 #define GV_MAME_COMMIT "deb2f54fe7300e7a192690318beb860159bfd52a"
 #define GV_BIOS_SHA1 "02a82a2fe1fba0404517c3602324bfa64e23e478"
@@ -45,6 +46,9 @@ typedef struct GvProfile {
 
 /* Exact supported profiles from scripts/konamigv_boards.json. */
 static const GvProfile gv_profiles[] = {
+    {"kdeadeye", "konamigv", "empty_init", "MACHINE_NOT_WORKING | MACHINE_IMPERFECT_GRAPHICS | MACHINE_IMPERFECT_SOUND",
+     "054uaa01", "a05079e4e5024ca66b7f6b81de74695d86c62dd8", "GOOD",
+     "cbb855c475269077803c380dbc3621e522efe51e"},
     {"btchamp", "konamigv", "empty_init", "MACHINE_NOT_WORKING | MACHINE_IMPERFECT_SOUND",
      "btchamp", "c9c858e9034826e1a12c3c003dd068a49a3577e1", "BAD_DUMP",
      "d3babf481fd89db3aec17f589d0d3d999a2aa6e1"},
@@ -87,6 +91,7 @@ typedef struct GvBoard {
     SimpBowlIO *simp;
     TokimekiIO *tok;
     BtChampIO *btc;
+    KDeadEyeIO *dead;
     uint16_t btc_track[2][2];
     systemgv_printer_capture_cb capture;
     void *capture_opaque;
@@ -162,7 +167,7 @@ static const char *const ini_keys[GV_MAX_INI] = {
     "eeprom_device", "duart_device", "duart_clock_hz", "spu_clock_hz",
     "game_execution_verified", "region.maincpu:rom", "region.maincpu:rom.size",
     "region.eeprom", "region.eeprom.size", "disk.cdrom", "disk.cdrom.sha1",
-    "disk.cdrom.status", "unsupported_game_io", ""
+    "disk.cdrom.status", "unsupported_game_io", "region.flash", "region.flash.size", ""
 };
 
 static uint32_t physical_address(uint32_t address)
@@ -200,6 +205,7 @@ static uint32_t read_input(void *opaque, unsigned port)
       if(port==1)return 0xfffffbffu|(tokimeki_io_device_bit(board.tok)<<10);
       return UINT32_MAX;
     }
+    if(board.dead)return port<2?board.inputs[port]|0x7fu:UINT32_MAX;
     return port < 3 ? board.inputs[port] : UINT32_MAX;
 }
 
@@ -272,7 +278,8 @@ static int read_ini(const char *directory, IniEntry values[GV_MAX_INI])
 {
     char path[GV_MAX_PATH], line[512];
     FILE *file;
-    unsigned seen = 0, count = 0, i;
+    uint64_t seen = 0;
+    unsigned i;
     if (snprintf(path, sizeof(path), "%s/board.ini", directory) >= (int)sizeof(path))
         return -1;
     file = fopen(path, "r");
@@ -287,14 +294,13 @@ static int read_ini(const char *directory, IniEntry values[GV_MAX_INI])
         if (!equal || strchr(equal + 1, '=')) goto bad;
         *equal++ = 0;
         for (i = 0; i < GV_MAX_INI - 1 && strcmp(ini_keys[i], line); i++) {}
-        if (i == GV_MAX_INI - 1 || (seen & (1u << i)) ||
+        if (i == GV_MAX_INI - 1 || (seen & (UINT64_C(1) << i)) ||
             strlen(equal) >= sizeof(values[i].value)) goto bad;
         strcpy(values[i].value, equal);
-        seen |= 1u << i;
-        count++;
+        seen |= UINT64_C(1) << i;
     }
-    if (ferror(file) || count != GV_MAX_INI - 1 || seen != ((1u << (GV_MAX_INI - 1)) - 1))
-        goto bad;
+    unsigned required=!strcmp(values[1].value,"kdeadeye")?GV_MAX_INI-1:GV_BASE_INI;
+    if (ferror(file) || seen != ((UINT64_C(1) << required) - 1))goto bad;
     fclose(file);
     return 0;
 bad:
@@ -375,15 +381,18 @@ static int validate_ini(const char *directory, const GvProfile *profile)
         strcmp(ini_value(values, "disk.cdrom"), disk_filename) ||
         strcmp(ini_value(values, "disk.cdrom.sha1"), profile->disk_sha1) ||
         strcmp(ini_value(values, "disk.cdrom.status"), profile->disk_status)) return -1;
-    int special = !strcmp(profile->set,"simpbowl"),tok=!strncmp(profile->set,"tmosh",5),btc=!strcmp(profile->set,"btchamp");
-    const char *machine=tok?"tmosh":special?"simpbowl":btc?"btchamp":"konamigv";
+    int special = !strcmp(profile->set,"simpbowl"),tok=!strncmp(profile->set,"tmosh",5),btc=!strcmp(profile->set,"btchamp"),dead=!strcmp(profile->set,"kdeadeye");
+    const char *machine=tok?"tmosh":special?"simpbowl":btc?"btchamp":dead?"kdeadeye":"konamigv";
     const char *state=tok?"tokimeki_state":special?"simpbowl_state":"konamigv_state";
     const char *io=ini_value(values,"unsupported_game_io");
     if(strcmp(ini_value(values,"mame_machine"),machine) || strcmp(ini_value(values,"mame_input"),machine) ||
        strcmp(ini_value(values,"mame_state"),state) || (*io &&
-       (btc?strcmp(io,"dual trackball serial/read interface; flash command protocol"):
+       (dead?strcmp(io,"two lightguns and crosshair inputs; flash command protocol"):
+        btc?strcmp(io,"dual trackball serial/read interface; flash command protocol"):
         tok?strcmp(io,"Tokimeki sensor/printer controller and print media path"):
         special?strcmp(io,"trackball interface; flash command protocol"):1)))return -1;
+    if(dead && (strcmp(ini_value(values,"region.flash"),"flash.bin") ||
+                 strcmp(ini_value(values,"region.flash.size"),"524288")))return -1;
     for (i = 0; i < sizeof(common) / sizeof(common[0]); i++)
         if (strcmp(ini_value(values, common[i].key), common[i].value)) return -1;
     return 0;
@@ -409,9 +418,10 @@ static int validate_chd_hash(const char *path, const char *expected)
 }
 
 /* A separate mutable image, bound to the exact original BIOS/EEPROM/CD set.
- * Missing state starts erased; invalid existing state is never overwritten. */
+ * Missing state uses a verified source seed when supplied, otherwise erased.
+ * Invalid existing state is never overwritten. */
 static int init_flash_state(const char *directory,const char *filename,
-                            const char magic[16],const char *binding,uint32_t bytes)
+                            const char magic[16],const char *binding,uint32_t bytes,const uint8_t *seed)
 {
     uint8_t header[64]={0},digest[20];
     if(snprintf(board.flash_path,sizeof(board.flash_path),"%s/%s",directory,
@@ -419,7 +429,7 @@ static int init_flash_state(const char *directory,const char *filename,
     CC_SHA1(binding,(CC_LONG)strlen(binding),board.flash_key);
     board.flash_bytes=bytes;memcpy(board.flash_magic,magic,16);
     board.flash=malloc(bytes);if(!board.flash)return -1;
-    memset(board.flash,0xff,bytes);
+    if(seed)memcpy(board.flash,seed,bytes);else memset(board.flash,0xff,bytes);
     FILE *f=fopen(board.flash_path,"rb");
     if(f){
         int failed=fread(header,1,64,f)!=64 || memcmp(header,magic,16) ||
@@ -440,7 +450,7 @@ static int init_simp(const char *directory, int fixture)
     snprintf(binding,sizeof(binding),"%s|%s|%s|%s",fixture?"SIMP-FIXTURE":"simpbowl",
         GV_BIOS_SHA1,"16ae7f81cbe841c429c5c7326cf83e87db1782bf","2ec4cc608d5582e478ee047b60ccee67b52f060c");
     if(init_flash_state(directory,fixture?"simpbowl.fixture.flash.nvram":"flash.nvram",
-        "PCSX-SIMP-FLASH1",binding,SIMPBOWL_FLASH_BYTES))return -1;
+        "PCSX-SIMP-FLASH1",binding,SIMPBOWL_FLASH_BYTES,NULL))return -1;
     board.simp=simpbowl_io_create(board.flash,SIMPBOWL_FLASH_BYTES);
     board.track[0]=0xfff; // source TRACK0_X PORT_REVERSE default
     return board.simp?0:-1;
@@ -450,9 +460,29 @@ static int init_btc(const char *directory)
     char binding[256];
     snprintf(binding,sizeof(binding),"btchamp|%s|%s|%s",GV_BIOS_SHA1,
         board.profile->eeprom_sha1,board.profile->disk_sha1);
-    if(init_flash_state(directory,"flash.nvram","PCSX-BTC-FLASH01",binding,BTCHAMP_FLASH_BYTES))return -1;
+    if(init_flash_state(directory,"flash.nvram","PCSX-BTC-FLASH01",binding,BTCHAMP_FLASH_BYTES,NULL))return -1;
     board.btc=btchamp_io_create(board.flash,board.flash_bytes);
     return board.btc?0:-1;
+}
+static int init_dead(const char *directory)
+{
+    uint8_t *seed=NULL;
+    if(read_exact_file(directory,"flash.bin",KDEADEYE_FLASH_BYTES,&seed) ||
+       !file_sha1(seed,KDEADEYE_FLASH_BYTES,KDEADEYE_FLASH_SHA1)){
+        free(seed);fprintf(stderr,"SystemGV: Dead Eye source flash size or SHA1 mismatch\n");return -1;
+    }
+    char binding[256];
+    snprintf(binding,sizeof(binding),"kdeadeye|%s|%s|%s|%s",GV_BIOS_SHA1,
+        board.profile->eeprom_sha1,board.profile->disk_sha1,KDEADEYE_FLASH_SHA1);
+    int failed=init_flash_state(directory,"flash.nvram","PCSX-DEAD-FLASH1",binding,KDEADEYE_FLASH_BYTES,seed);
+    free(seed);if(failed)return -1;
+    board.dead=kdeadeye_io_create(board.flash,board.flash_bytes);
+    return board.dead?0:-1;
+}
+int systemgv_has_guns(void){return board.active && board.dead!=NULL;}
+int systemgv_set_gun_position(unsigned p,unsigned x,unsigned y){
+    if(!systemgv_has_guns() || p>=2 || x>0xffff || y>0xffff)return -1;
+    kdeadeye_io_set_axis(board.dead,p,0,x);kdeadeye_io_set_axis(board.dead,p,1,y);return 0;
 }
 const char *systemgv_flash_path(void){return board.flash?board.flash_path:NULL;}
 int systemgv_flush_flash(void)
@@ -470,12 +500,17 @@ int systemgv_flush_flash(void)
 int systemgv_has_trackball(void){return board.active && (board.simp || board.btc);}
 unsigned systemgv_trackball_players(void){return !systemgv_has_trackball()?0:board.btc?2:1;}
 int systemgv_trackball_reverse_x(void){return board.simp!=NULL;}
-unsigned systemgv_analog_max(const char *name){if(systemgv_has_sensors() && name){if(!strcmp(name,"heartbeat"))return 101;if(!strcmp(name,"gsr"))return 128;}return systemgv_has_trackball() && name &&
+unsigned systemgv_analog_max(const char *name){
+ if(systemgv_has_guns() && name && strlen(name)==6 && name[0]=='p' &&
+    (name[1]=='1' || name[1]=='2') && !strncmp(name+2,"gun",3) &&
+    (name[5]=='x' || name[5]=='y'))return 0xffff;
+ if(systemgv_has_sensors() && name){if(!strcmp(name,"heartbeat"))return 101;if(!strcmp(name,"gsr"))return 128;}return systemgv_has_trackball() && name &&
  ((!strcmp(name,"p1trackx") || !strcmp(name,"p1tracky")) ||
  (board.btc && (!strcmp(name,"p2trackx") || !strcmp(name,"p2tracky"))))?0xfff:0;}
 static unsigned tok_heart=31,tok_gsr=0,tok_meta=3;
 int systemgv_sensor_values(unsigned *heart,unsigned *gsr){if(!systemgv_has_sensors())return -1;if(heart)*heart=tok_heart;if(gsr)*gsr=tok_gsr;return 0;}
 int systemgv_set_analog(const char *name,unsigned value){
+ if(board.dead){if(!systemgv_analog_max(name) || value>0xffff)return -1;return kdeadeye_io_set_axis(board.dead,name[1]-'1',name[5]=='y',value);}
  if(board.tok){unsigned max=systemgv_analog_max(name);if(!max || value>max)return -1;if(!strcmp(name,"heartbeat"))tok_heart=value;else tok_gsr=value;tokimeki_io_inputs(board.tok,tok_heart,tok_gsr,tok_meta);return 0;}
  if(!systemgv_analog_max(name) || value>0xfff)return -1;
  if(board.btc)board.btc_track[name[1]-'1'][name[7]=='y']=value;else board.track[name[7]=='y']=value;return 0;}
@@ -532,6 +567,7 @@ static int sync_devices(uint64_t now_ns)
         return -1;
     }
     if(board.tok && tokimeki_io_advance_to(board.tok,now_ns)){board.fault=1;return -1;}
+    if(board.dead && kdeadeye_io_advance_to(board.dead,now_ns)){board.fault=1;return -1;}
     if(board.btc && btchamp_io_advance_to(board.btc,now_ns)){board.fault=1;return -1;}
     if(board.simp && simpbowl_io_advance_to(board.simp,now_ns)){board.fault=1;return -1;}
     board.now_ns = now_ns;
@@ -625,6 +661,7 @@ int systemgv_load(const char *directory)
     if (activate_device(&media)) goto fail;
     if(!strcmp(profile->set,"simpbowl") && init_simp(directory,0))goto fail;
     if(!strcmp(profile->set,"btchamp") && init_btc(directory))goto fail;
+    if(!strcmp(profile->set,"kdeadeye") && init_dead(directory))goto fail;
     if(!strncmp(profile->set,"tmosh",5)){
       TokimekiIOConfig cfg={0};cfg.device_initial=!strcmp(profile->set,"tmoshs")?0xf073:0xf0ba;
       cfg.manual_layout=!strcmp(profile->set,"tmoshsp");cfg.capture=capture_printer;cfg.printed=printed_page;
@@ -699,6 +736,35 @@ int systemgv_test_load(const char *chd_path)
 fail:
     systemgv_unload();
     return -1;
+}
+
+/* Explicit synthetic MIPS only; never accepted by the original profile loader. */
+int systemgv_test_load_kdeadeye(const char *chd_path)
+{
+    static const uint32_t guest[]={
+        0x3c08bf68u, 0x3c0a8000u, 0x8d090080u, 0x00000000u, 0xad490100u, 0x8d090090u,
+        0x00000000u, 0xad490104u, 0x8d0900a0u, 0x00000000u, 0xad490108u, 0x8d0900b0u,
+        0x00000000u, 0xad49010cu, 0x8d0900c0u, 0x00000000u, 0xad490110u, 0x3c08bf10u,
+        0x8d090000u, 0x00000000u, 0xad490114u, 0x8d090004u, 0x00000000u, 0xad490118u,
+        0x8d090008u, 0x00000000u, 0xad49011cu, 0x3c08bf38u, 0x24090090u, 0xa5090000u,
+        0x8d090000u, 0x00000000u, 0xad490120u, 0x240900ffu, 0xa5090000u, 0x24090040u,
+        0xa5090100u, 0x24091234u, 0xa5090100u, 0x240900ffu, 0xa5090000u, 0x95090100u,
+        0x00000000u, 0xad490124u, 0x3c08bf68u, 0xad0900e0u, 0x3c094445u, 0x35294144u,
+        0xad490128u, 0x1000ffffu, 0x00000000u,
+    };
+    char directory[GV_MAX_PATH];const char *slash=strrchr(chd_path,'/');
+    if(slash){size_t n=slash-chd_path;if(n>=sizeof(directory))return -1;memcpy(directory,chd_path,n);directory[n]=0;}
+    else strcpy(directory,".");
+    if(systemgv_test_load(chd_path))return -1;
+    if(init_flash_state(directory,"kdeadeye.fixture.flash.nvram","PCSX-DEAD-TEST01",
+                        "KDEADEYE-SYNTHETIC-FIXTURE",KDEADEYE_FLASH_BYTES,NULL))goto fail;
+    board.dead=kdeadeye_io_create(board.flash,board.flash_bytes);if(!board.dead)goto fail;
+    for(unsigned i=0;i<3;i++)board.inputs[i]=UINT32_MAX;
+    memset(board.bios,0,GV_BIOS_BYTES);
+    for(unsigned i=0;i<sizeof(guest)/sizeof(guest[0]);i++){uint32_t w=SWAPu32(guest[i]);memcpy(board.bios+i*4,&w,4);}
+    return 0;
+fail:
+    systemgv_unload();return -1;
 }
 
 /* Explicit synthetic MIPS only; the original profile loader cannot accept it. */
@@ -1074,6 +1140,7 @@ void systemgv_unload(void)
 #endif
     if(board.tok)tokimeki_io_destroy(board.tok);
     if(board.btc)btchamp_io_destroy(board.btc);
+    if(board.dead)kdeadeye_io_destroy(board.dead);
     if (board.simp) simpbowl_io_destroy(board.simp);
     free(board.flash);
     if (board.device) konamigv_destroy(board.device);
@@ -1153,6 +1220,9 @@ int systemgv_read(uint32_t address, unsigned width, uint32_t *value)
         !(board.simp && (overlaps(physical,width,0x1f680080,16) || overlaps(physical,width,0x1f6800c0,10))) &&
         !(board.tok && overlaps(physical,width,0x1f680080,2)) &&
         !(board.btc && (overlaps(physical,width,0x1f380000,BTCHAMP_FLASH_BYTES) || overlaps(physical,width,0x1f680080,8))) &&
+        !(board.dead && (overlaps(physical,width,0x1f380000,KDEADEYE_FLASH_BYTES) ||
+          overlaps(physical,width,0x1f680080,4) || overlaps(physical,width,0x1f680090,4) ||
+          overlaps(physical,width,0x1f6800a0,4) || overlaps(physical,width,0x1f6800b0,4) || overlaps(physical,width,0x1f6800c0,4))) &&
         !overlaps(physical, width, 0x1f801040, 32)) return 0;
     if (systemgv_sync(psxRegs.cycle)) { *value = UINT32_MAX; return -1; }
     result = sony_sio_bus(physical, width, value,
@@ -1161,6 +1231,7 @@ int systemgv_read(uint32_t address, unsigned width, uint32_t *value)
     result=tok_bus(physical,width,value,0,0);if(result){board.mmio_reads++;return result;}
     result = board.simp ? simpbowl_io_read(board.simp,physical,width,value) : 0;
     if(!result && board.btc)result=btchamp_io_read(board.btc,physical,width,value);
+    if(!result && board.dead)result=kdeadeye_io_read(board.dead,physical,width,value);
     if(!result) result = konamigv_read(board.device, physical, width, value);
     if (result < 0) { board.fault = 1; *value = UINT32_MAX; return -1; }
     if (result) board.mmio_reads++;
@@ -1180,6 +1251,7 @@ int systemgv_write(uint32_t address, unsigned width, uint32_t value,
         !(board.simp && overlaps(physical,width,0x1f680080,16)) &&
         !(board.tok && overlaps(physical,width,0x1f680090,2)) &&
         !(board.btc && (overlaps(physical,width,0x1f380000,BTCHAMP_FLASH_BYTES) || overlaps(physical,width,0x1f680088,2) || overlaps(physical,width,0x1f6800e0,4))) &&
+        !(board.dead && (overlaps(physical,width,0x1f380000,KDEADEYE_FLASH_BYTES) || overlaps(physical,width,0x1f6800e0,4))) &&
         !overlaps(physical, width, 0x1f780000, 4) &&
         !overlaps(physical, width, 0x1f801040, 32)) return 0;
     if (systemgv_sync(psxRegs.cycle)) return -1;
@@ -1191,6 +1263,7 @@ int systemgv_write(uint32_t address, unsigned width, uint32_t value,
     result=tok_bus(physical,width,&value,mem_mask,1);if(result){board.mmio_writes++;return result;}
     result = board.simp ? simpbowl_io_write(board.simp,physical,width,value,mem_mask) : 0;
     if(!result && board.btc)result=btchamp_io_write(board.btc,physical,width,value,mem_mask);
+    if(!result && board.dead)result=kdeadeye_io_write(board.dead,physical,width,value,mem_mask);
     if(!result) result = konamigv_write(board.device, physical, width, value, mem_mask);
     if (result < 0) { board.fault = 1; return -1; }
     if (result) board.mmio_writes++;
@@ -1267,6 +1340,12 @@ int systemgv_set_input(const char *name, int pressed)
     };
     size_t i;
     if (!board.active || !name || (pressed != 0 && pressed != 1)) return -1;
+    if(board.dead){
+      if(!strcmp(name,"p1button1") || !strcmp(name,"p2button1"))
+        return kdeadeye_io_trigger(board.dead,name[1]-'1',pressed);
+      if(strcmp(name,"p1start") && strcmp(name,"p2start") && strcmp(name,"coin1") &&
+         strcmp(name,"coin2") && strcmp(name,"service") && strcmp(name,"test"))return -1;
+    }
     if(board.tok){
       if(!strcmp(name,"heartbeat_pulse")){tokimeki_io_pulse(board.tok,pressed);return 0;}
       if(!strcmp(name,"printer_empty") || !strcmp(name,"printer_fault")){
@@ -1384,6 +1463,11 @@ void systemgv_report(FILE *out)
     konamigv_status_t status;
     if (!board.active || !out) return;
     konamigv_get_status(board.device, &status);
+    if(board.dead){KDeadEyeIOStatus st;kdeadeye_io_status(board.dead,&st);
+      fprintf(out,"DeadEye IO: flash_reads=%" PRIu64 " flash_writes=%" PRIu64 " gun_reads=%" PRIu64 " button_reads=%" PRIu64 " noop_writes=%" PRIu64 " gun=%04x/%04x,%04x/%04x buttons=%04x faults=%u warm=%d\n",
+       st.flash_reads,st.flash_writes,st.gun_reads,st.button_reads,st.noop_writes,
+       st.gun[0][0],st.gun[0][1],st.gun[1][0],st.gun[1][1],st.buttons,st.fault,board.flash_warm);
+    }
     if(board.btc){BtChampIOStatus st;btchamp_io_status(board.btc,&st);
       fprintf(out,"BeatChamp IO: flash_reads=%" PRIu64 " flash_writes=%" PRIu64 " track_reads=%" PRIu64 " control_writes=%" PRIu64 " frames=%" PRIu64 " track=%03x/%03x,%03x/%03x faults=%u warm=%d\n",
        st.flash_reads,st.flash_writes,st.track_reads,st.control_writes,st.frames,st.track[0][0],st.track[0][1],st.track[1][0],st.track[1][1],st.fault,board.flash_warm);

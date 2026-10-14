@@ -132,7 +132,7 @@ def _io_class_facts(game: dict[str, Any]) -> tuple[list[str], list[str]]:
                 [])
     if state == "konamigv_state" and machine == "kdeadeye":
         return (["gun X/Y ports for both players", "buttons port", "Sharp LH28F400 flash", "MB89371 dual UART", "93C46 EEPROM"],
-                ["two lightguns and crosshair inputs", "flash command protocol"])
+                [])
     if state == "tokimeki_state" and machine == "tmosh" and inp == "tmosh":
         return (["tokimeki serial sensor/printer port", "heartbeat sensor", "GSR sensor", "printer timing/video", "MB89371 dual UART", "93C46 EEPROM"],
                 ["Tokimeki sensor/printer controller and print media path"])

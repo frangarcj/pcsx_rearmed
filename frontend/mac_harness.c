@@ -442,6 +442,13 @@ static volatile int pause_requested;
 static unsigned char interactive_key_down[sizeof(interactive_keys) / sizeof(interactive_keys[0])];
 static int interactive_mouse_trigger, interactive_mouse_sensor;
 static int interactive_judge_mouse_aim;
+static int interactive_gv_guns(void) {
+#ifdef PCSX_SYSTEM_GV
+  return selected_board && selected_board->family==102 && systemgv_has_guns();
+#else
+  return 0;
+#endif
+}
 static int interactive_replay, interactive_focused = 1;
 static int interactive_mouse_wheel = 128, interactive_mouse_handle = 128;
 static unsigned interactive_analog_frame;
@@ -503,6 +510,14 @@ static float interactive_gv_mouse_remainder[2];
 static void poll_interactive_analog(void)
 {
 #ifdef PCSX_SYSTEM_GV
+  if(interactive_gv_guns() && !interactive_replay && interactive_focused){
+    for(unsigned p=0;p<2;p++)if(interactive_pads[p] && (p || !interactive_judge_mouse_aim)){
+      unsigned x=SDL_GetGamepadAxis(interactive_pads[p],SDL_GAMEPAD_AXIS_LEFTX)+32768;
+      unsigned y=SDL_GetGamepadAxis(interactive_pads[p],SDL_GAMEPAD_AXIS_LEFTY)+32768;
+      systemgv_set_gun_position(p,0x4c+(uint64_t)x*(0x1bb-0x4c)/65535,(uint64_t)y*0xef/65535);
+    }
+    return;
+  }
   if(selected_board && selected_board->family==102 && systemgv_has_trackball() &&
       !interactive_replay && interactive_focused && interactive_gv_track_frame!=frame_counter){
     interactive_gv_track_frame=frame_counter;
@@ -636,6 +651,12 @@ static int aim_interactive_mouse(SDL_WindowID id, float px, float py)
 #endif
   int inside = gun_pointer_position(px * pw / w, py * ph / h, rect, &x, &y);
   if(rect[2]>1 && rect[3]>1){
+#ifdef PCSX_SYSTEM_GV
+    if(interactive_gv_guns()){
+      interactive_judge_mouse_aim=1;
+      systemgv_set_gun_position(0,inside?0x4c+(uint64_t)x*(0x1bb-0x4c)/65535:0,inside?(uint64_t)y*0xef/65535:0xff);
+    }else
+#endif
 #ifdef PCSX_SYSTEM_GQ
     if(selected_board && selected_board->family==113){
       interactive_judge_mouse_aim=1;
@@ -669,7 +690,7 @@ static void poll_interactive_input(void)
       refresh_interactive_gamepads();
     if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || event.type == SDL_EVENT_GAMEPAD_BUTTON_UP)
       update_pads = 1;
-    if(selected_board && (selected_board->family==112 || selected_board->family==113) && event.type==SDL_EVENT_GAMEPAD_AXIS_MOTION && interactive_pads[0] && event.gaxis.which==SDL_GetGamepadID(interactive_pads[0]))interactive_judge_mouse_aim=0;
+    if(selected_board && (selected_board->family==112 || selected_board->family==113 || interactive_gv_guns()) && event.type==SDL_EVENT_GAMEPAD_AXIS_MOTION && interactive_pads[0] && event.gaxis.which==SDL_GetGamepadID(interactive_pads[0]))interactive_judge_mouse_aim=0;
     if (interactive_replay || !interactive_focused) {
       if (event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_ESCAPE) {
         pause_requested = 1; pcsx_menu_backdrop_request = 1;
@@ -712,17 +733,17 @@ static void poll_interactive_input(void)
       }
     }
 #endif
-    if (selected_board && (selected_board->family==112 || selected_board->family==113 || (selected_board->family == 12 && system12_analog_max("p1gunx")))) {
+    if (selected_board && (selected_board->family==112 || selected_board->family==113 || interactive_gv_guns() || (selected_board->family == 12 && system12_analog_max("p1gunx")))) {
       if (event.type == SDL_EVENT_MOUSE_MOTION) {
         aim_interactive_mouse(event.motion.windowID, event.motion.x, event.motion.y);
       }
       if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
         int inside=aim_interactive_mouse(event.button.windowID,event.button.x,event.button.y);
-        int pressed=event.type==SDL_EVENT_MOUSE_BUTTON_DOWN && (selected_board->family==112 || selected_board->family==113 || inside);
+        int pressed=event.type==SDL_EVENT_MOUSE_BUTTON_DOWN && (selected_board->family==112 || selected_board->family==113 || interactive_gv_guns() || inside);
         if (event.button.button == SDL_BUTTON_LEFT) {
           interactive_mouse_trigger = pressed; set_interactive_control("p1button1", 0);
         }
-        if (event.button.button == SDL_BUTTON_RIGHT) {
+        if (event.button.button == SDL_BUTTON_RIGHT && !interactive_gv_guns()) {
           interactive_mouse_sensor = pressed; set_interactive_control((selected_board->family==112 || selected_board->family==113)?"p1button2":"p1button7", 0);
         }
       }
@@ -1225,6 +1246,7 @@ int main(int argc, char **argv)
   int i, board_test = 0, audio_test_fixture = 0, verify = 0, result = 0, gpu_type1_test = 0;
   int gq_fixture = 0;
   int gv_fixture = 0;
+  int gv_dead_fixture = 0;
   int gv_simp_fixture = 0;
   int gv_tok_fixture = 0;
   const char *printer_dir = NULL;
@@ -1273,6 +1295,7 @@ int main(int argc, char **argv)
     else if (!strcmp(argv[i],"--disc") && i+1<argc) disc=argv[++i];
     else if (!strcmp(argv[i],"--bios") && i+1<argc) bios_path=argv[++i];
     else if (!strcmp(argv[i],"--gl-1x")) gl_native_resolution=1;
+    else if(!strcmp(argv[i],"--system-gv-kdeadeye-fixture") && i+1<argc){board=argv[++i];board_family=102;gv_dead_fixture=1;}
     else if(!strcmp(argv[i],"--system-gv-tokimeki-fixture") && i+1<argc){board=argv[++i];board_family=102;gv_tok_fixture=1;}
     else if (!strcmp(argv[i], "--system-gv-simpbowl-fixture") && i+1<argc){board=argv[++i];board_family=102;gv_simp_fixture=1;}
     else if (!strcmp(argv[i], "--system-gv-fixture") && i + 1 < argc) {
@@ -1588,14 +1611,14 @@ int main(int argc, char **argv)
     usage(argv[0]); return 2;
   }
 #ifndef PCSX_SYSTEM_GV
-  if (gv_fixture || gv_simp_fixture || gv_tok_fixture || (board && board_family == 102)) {
+  if (gv_fixture || gv_dead_fixture || gv_simp_fixture || gv_tok_fixture || (board && board_family == 102)) {
     fprintf(stderr, "Rebuild with BOARD=1 and HAVE_CHD=1 for Konami GV.\n"); return 2;
   }
 #endif
 #ifndef PCSX_SYSTEM_GQ
   if(gq_fixture || (board && board_family==113)){fprintf(stderr,"Rebuild with BOARD=1 and HAVE_CHD=1 for Konami GQ.\n");return 2;}
 #endif
-  if((gv_simp_fixture || gv_tok_fixture) && (interactive || use_drc || board_test)){usage(argv[0]);return 2;}
+  if((gv_dead_fixture || gv_simp_fixture || gv_tok_fixture) && (interactive || use_drc || board_test)){usage(argv[0]);return 2;}
   if(gq_fixture && (interactive || use_drc)){usage(argv[0]);return 2;}
   if (trace_path) {
     trace = fopen(trace_path, "w");
@@ -1712,7 +1735,13 @@ int main(int argc, char **argv)
       if (trace) fclose(trace);
       return 2;
     }
-    if(gv_tok_fixture){
+    if(gv_dead_fixture){
+#ifdef PCSX_SYSTEM_GV
+      board_load_result=systemgv_test_load_kdeadeye(board);
+#else
+      board_load_result=-1;
+#endif
+    }else if(gv_tok_fixture){
 #ifdef PCSX_SYSTEM_GV
       board_load_result=systemgv_test_load_tokimeki(board);
 #else
@@ -2014,7 +2043,8 @@ int main(int argc, char **argv)
 #endif
     if (selected_board->family==102) {
 #ifdef PCSX_SYSTEM_GV
-      if(systemgv_has_trackball())fprintf(stderr,"GV controls: 5/6 coin, 1/2 Start, A/S/D buttons, mouse P1 trackball (%s X), left/right click, %u gamepad trackball(s), Escape pause\n",
+      if(systemgv_has_guns())fprintf(stderr,"Dead Eye controls: 5/6 coin, 1/2 Start, mouse + left click P1 aim/fire, two gamepad sticks + south button aim/fire, T test, Escape pause\n");
+      else if(systemgv_has_trackball())fprintf(stderr,"GV controls: 5/6 coin, 1/2 Start, A/S/D buttons, mouse P1 trackball (%s X), left/right click, %u gamepad trackball(s), Escape pause\n",
         systemgv_trackball_reverse_x()?"reversed":"normal",systemgv_trackball_players());
       else
 #endif
