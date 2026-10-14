@@ -1,0 +1,14 @@
+.DEFAULT_GOAL := test
+CC ?= clang
+BUILD ?= build/kdeadeye-tests
+OPT ?= -O2 -g
+CFLAGS := -std=c99 $(OPT) -Wall -Wextra -Werror
+ARCADE := libpcsxcore/arcade
+.PHONY: test sanitize
+$(BUILD)/test-kdeadeye: tests/test_kdeadeye_io.c $(ARCADE)/kdeadeye_io.c $(ARCADE)/kdeadeye_io.h $(ARCADE)/nor_flash.c $(ARCADE)/nor_flash.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) tests/test_kdeadeye_io.c $(ARCADE)/kdeadeye_io.c $(ARCADE)/nor_flash.c -o $@
+test: $(BUILD)/test-kdeadeye
+	$(BUILD)/test-kdeadeye
+sanitize:
+	$(MAKE) -f tests/Makefile.kdeadeye BUILD=$(BUILD)/sanitize OPT='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' test
