@@ -1,5 +1,6 @@
 import sys
 import unittest
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +31,19 @@ class System573Profiles(unittest.TestCase):
         self.assertNotIn('mcu', romset.regions)
         self.assertFalse(any(f.status == 'no_dump' for f in romset.files))
         self.assertFalse(any(f.filename == 'hd6473644h.18e' for f in romset.files))
+
+    def test_native_media_checks_match_selected_source_chips(self):
+        romset, _, bios = board.source_profile(ROOT.parent / 'mamedev', 'hyperbbc')
+        expected = []
+        for tag, filename in board.FILES.items():
+            specs = [next(f for f in romset.files if f.index == op.file_index)
+                     for op in romset.regions[tag].operations]
+            spec = next(f for f in specs if f.bios_id is None or romset.bios[f.bios_id] == bios)
+            expected.append((filename, spec.expected_size, int(spec.crc32, 16)))
+        native = (ROOT / 'libpcsxcore/arcade/system573_media.inc').read_text()
+        actual = [(name, int(size, 16), int(crc, 16))
+                  for name, size, crc in re.findall(r'\{"([^"]+)", (0x[\da-f]+), (0x[\da-f]+)u\}', native)]
+        self.assertEqual(expected, actual)
 
     def test_unreviewed_variants_and_bios_rejected(self):
         for name, bios in [('hyperbbca', 'std'), ('ddr2m', 'std'), ('pcnfrk4mk', 'std'),

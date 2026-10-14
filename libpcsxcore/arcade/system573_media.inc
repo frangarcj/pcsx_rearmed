@@ -1,0 +1,12 @@
+/* Source verified hyperbbc/std dumps; MAME deb2f54fe7300e7a192690318beb860159bfd52a. */
+{"main.bin", 0x80000, 0x11812ef8u},
+{"h8_response.bin", 0x40, 0x131e0359u},
+{"flash0.bin", 0x200000, 0xa76043cbu},
+{"flash1.bin", 0x200000, 0x689ddd94u},
+{"flash2.bin", 0x200000, 0xd011c7a5u},
+{"flash3.bin", 0x200000, 0x950a5267u},
+{"flash4.bin", 0x200000, 0xae497ebcu},
+{"flash5.bin", 0x200000, 0x9c156b1bu},
+{"flash6.bin", 0x200000, 0x368372fbu},
+{"flash7.bin", 0x200000, 0x49175f99u},
+{"timekeeper.bin", 0x2000, 0x8e11d196u},

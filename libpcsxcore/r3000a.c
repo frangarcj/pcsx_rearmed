@@ -30,6 +30,9 @@
 #include "system11.h"
 #include "system10.h"
 #include "systemzn.h"
+#ifdef PCSX_SYSTEM573
+#include "system573.h"
+#endif
 #include "systemtaito.h"
 #ifdef PCSX_SYSTEM_GNET
 #include "systemgnet.h"
@@ -108,6 +111,9 @@ void psxReset() {
 
 	padReset();
 	psxHwReset();
+#ifdef PCSX_SYSTEM573
+	if(system573_active()){system573_reset();return;}
+#endif
 
 #ifdef PCSX_SYSTEM12
 	if (systemtaito_active()) {

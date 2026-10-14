@@ -29,6 +29,9 @@
 #include "psxmem_map.h"
 #include "r3000a.h"
 #include "psxhw.h"
+#ifdef PCSX_SYSTEM573
+#include "system573.h"
+#endif
 #ifdef PCSX_SYSTEM12
 #include "system12.h"
 #include "system11.h"
@@ -308,6 +311,9 @@ int psxMemInit(void)
 }
 
 void psxMemReset() {
+#ifdef PCSX_SYSTEM573
+	if (system573_active()) { system573_mem_reset(); if (!DISABLE_MEM_LUTS) mapRam(1); Config.HLE=FALSE; return; }
+#endif
 #ifdef PCSX_SYSTEM12
 	if (systemtaito_active()) {
 		systemtaito_mem_reset();
@@ -433,6 +439,9 @@ u8 psxMemRead8(psxRegisters *regs, u32 mem) {
 #ifdef PCSX_SYSTEM12
 	u32 board_value;
 	if (
+#ifdef PCSX_SYSTEM573
+	    system573_read(mem, 1, &board_value) ||
+#endif
 #ifdef PCSX_SYSTEM_GV
 	    systemgv_read(mem, 1, &board_value) ||
 #endif
@@ -465,6 +474,9 @@ u16 psxMemRead16(psxRegisters *regs, u32 mem) {
 #ifdef PCSX_SYSTEM12
 	u32 board_value;
 	if (
+#ifdef PCSX_SYSTEM573
+	    system573_read(mem, 2, &board_value) ||
+#endif
 #ifdef PCSX_SYSTEM_GV
 	    systemgv_read(mem, 2, &board_value) ||
 #endif
@@ -497,6 +509,9 @@ u32 psxMemRead32(psxRegisters *regs, u32 mem) {
 #ifdef PCSX_SYSTEM12
 	u32 board_value;
 	if (
+#ifdef PCSX_SYSTEM573
+	    system573_read(mem, 4, &board_value) ||
+#endif
 #ifdef PCSX_SYSTEM_GV
 	    systemgv_read(mem, 4, &board_value) ||
 #endif
@@ -530,6 +545,9 @@ u32 psxMemRead32(psxRegisters *regs, u32 mem) {
 void psxMemWrite8(psxRegisters *regs, u32 mem, u32 value) {
 #ifdef PCSX_SYSTEM12
 	if (
+#ifdef PCSX_SYSTEM573
+	    system573_write(mem, 1, value) ||
+#endif
 #ifdef PCSX_SYSTEM_GV
 	    systemgv_write(mem, 1, value, 0xff) ||
 #endif
@@ -567,6 +585,9 @@ void psxMemWrite8(psxRegisters *regs, u32 mem, u32 value) {
 void psxMemWrite16(psxRegisters *regs, u32 mem, u32 value) {
 #ifdef PCSX_SYSTEM12
 	if (
+#ifdef PCSX_SYSTEM573
+	    system573_write(mem, 2, value) ||
+#endif
 #ifdef PCSX_SYSTEM_GV
 	    systemgv_write(mem, 2, value, 0xffff) ||
 #endif
@@ -604,6 +625,9 @@ void psxMemWrite16(psxRegisters *regs, u32 mem, u32 value) {
 void psxMemWrite32(psxRegisters *regs, u32 mem, u32 value) {
 #ifdef PCSX_SYSTEM12
 	if (
+#ifdef PCSX_SYSTEM573
+	    system573_write(mem, 4, value) ||
+#endif
 #ifdef PCSX_SYSTEM_GV
 	    systemgv_write(mem, 4, value, 0xffffffffu) ||
 #endif

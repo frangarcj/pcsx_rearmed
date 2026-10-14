@@ -28,6 +28,9 @@
 #include "system12.h"
 #include "systemtaito.h"
 #include "systemzn.h"
+#ifdef PCSX_SYSTEM573
+#include "system573.h"
+#endif
 #ifdef PCSX_SYSTEM_GV
 #include "systemgv.h"
 #endif
@@ -88,6 +91,9 @@ void psxDma5(u32 madr, u32 bcr, u32 chcr)
 #endif
 int psxSourceSpuDmaActive(void)
 {
+#ifdef PCSX_SYSTEM573
+    if(system573_active())return 1;
+#endif
 #ifdef PCSX_SYSTEM_GNET
     if (systemgnet_active()) return 1;
 #endif

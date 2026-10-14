@@ -37,6 +37,9 @@ static int psx_source_saved_multiplier;
 #if defined(PCSX_SYSTEM12)
 extern int systemtaito_active(void);
 extern int systemzn_active(void);
+#ifdef PCSX_SYSTEM573
+extern int system573_active(void);
+#endif
 extern unsigned int systemzn_main_clock_hz(void);
 extern int system10_active(void);
 extern int system11_active(void);
@@ -60,6 +63,9 @@ static u32 arcade_source_input_clock(void)
 #if defined(PCSX_ARCADE_SOURCE_TIMING) && defined(PCSX_SYSTEM12)
 #ifdef PCSX_SYSTEM_GNET
     if (systemgnet_active()) clock = systemgnet_main_clock_hz();
+#endif
+#ifdef PCSX_SYSTEM573
+    if (!clock && system573_active()) clock = 67737600u;
 #endif
     if (!clock && systemtaito_active()) clock = 67737600u;
     if (!clock && systemzn_active()) clock = systemzn_main_clock_hz();

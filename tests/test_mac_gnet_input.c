@@ -50,8 +50,14 @@ int gnet_test_analog(const char *name,unsigned raw)
     return 0;
 }
 static int nba_coin[4],nba_start[4],nba_fourth[4];
+static int s573_buttons[3][3],s573_start[3];
 static int digital(const char *name,int down)
 {
+    if(selected_board && selected_board->family==115 && name[0]=='p' && name[1]>='1' && name[1]<='3'){
+        unsigned p=name[1]-'1';
+        if(!strcmp(name+2,"start"))s573_start[p]=down;
+        if(strlen(name)==9 && !strncmp(name+2,"button",6) && name[8]>='1' && name[8]<='3')s573_buttons[p][name[8]-'1']=down;
+    }
     if(selected_board && selected_board->family==114){
         if(!strcmp(name,"p3enter"))metro_enter=down;
         if(name[0]=='p' && (name[1]=='1' || name[1]=='2')){
@@ -288,6 +294,13 @@ int main(void)
     key(SDL_SCANCODE_1,0);assert(!metro_start[0] && metro_jammar[0]);
     release_interactive_input();assert(!metro_down[0] && !metro_jammar[0]);
     puts("Metro SDL dedicated pedal/operator input, Start/Jammar keyboard and gamepad alias merging, generic separate Start and focus release PASS");
+    board.family=115;interactive_focused=1;release_interactive_input();
+    key(SDL_SCANCODE_A,1);key(SDL_SCANCODE_X,1);key(SDL_SCANCODE_KP_7,1);key(SDL_SCANCODE_3,1);
+    assert(s573_buttons[0][0] && s573_buttons[1][1] && s573_buttons[2][2] && s573_start[2]);
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_WINDOW_FOCUS_LOST;
+    assert(SDL_PushEvent(&e));poll_interactive_input();
+    assert(!s573_buttons[0][0] && !s573_buttons[1][1] && !s573_buttons[2][2] && !s573_start[2]);
+    puts("System573 SDL three-player colors/Start and focus release PASS");
     board.family=112;interactive_focused=1;
     assert(SDL_SetJoystickVirtualAxis(joy,SDL_GAMEPAD_AXIS_LEFTX,0));assert(SDL_SetJoystickVirtualAxis(joy,SDL_GAMEPAD_AXIS_LEFTY,0));
     SDL_UpdateJoysticks();frame_counter++;poll_interactive_input();
