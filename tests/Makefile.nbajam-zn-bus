@@ -1,0 +1,15 @@
+CC ?= cc
+BUILD ?= build/nbajam-zn-bus-tests
+SOURCES := libpcsxcore/arcade/nbajam_zn_bus.c tests/test_nbajam_zn_bus.c
+FLAGS := -std=c99 -Wall -Wextra -Werror
+.PHONY: test sanitize
+$(BUILD)/test: $(SOURCES) libpcsxcore/arcade/nbajam_zn_bus.h
+	@mkdir -p $(BUILD)
+	$(CC) $(FLAGS) -O2 $(SOURCES) -o $@
+$(BUILD)/test-san: $(SOURCES) libpcsxcore/arcade/nbajam_zn_bus.h
+	@mkdir -p $(BUILD)
+	$(CC) $(FLAGS) -O1 -fsanitize=address,undefined -fno-omit-frame-pointer $(SOURCES) -o $@
+test: $(BUILD)/test
+	$<
+sanitize: $(BUILD)/test-san
+	ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $<

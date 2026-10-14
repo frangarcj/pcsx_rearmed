@@ -6,7 +6,7 @@
 #define ARCADE_MIX_RING 8192
 typedef struct ArcadeMixLane {
     uint64_t position, next_output, inputs, nonzero;
-    unsigned clock, divider, head, count;
+    unsigned clock, divider, head, count, timed;
     float previous[2];
     int16_t ring[ARCADE_MIX_RING][2];
 } ArcadeMixLane;
@@ -26,4 +26,7 @@ void arcade_mix_init_rates(ArcadeAudioMixer *, unsigned spu_clock,
     void (*output)(void *, const int16_t *, unsigned), void *opaque);
 void arcade_mix_reset(ArcadeAudioMixer *);
 void arcade_mix_push(ArcadeAudioMixer *, unsigned lane, float left, float right);
+/* Variable-rate DAC: absolute sample time at the lane's configured oscillator.
+ * Keeps one continuous output epoch across DAC rate changes. */
+void arcade_mix_push_timed(ArcadeAudioMixer *,unsigned lane,float left,float right,uint64_t sample_clock);
 #endif

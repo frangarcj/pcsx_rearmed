@@ -63,6 +63,25 @@ int main(void)
     }
     assert(frames==44032 && mix.lane[1].inputs==88200 && !mix.error);
     arcade_mix_reset(&mix); assert(mix.lane[1].divider==192);
+    /* A variable-rate DAC keeps one absolute epoch across clock-divider
+     * changes. Include the authentic RAX 48k -> 31571 Hz startup transition. */
+    frames=mode=0;
+    arcade_mix_init_rates(&mix,33868800,16670000,1,output,NULL);
+    unsigned spu=0,dac=1;uint64_t tick=(16670000u+47999)/48000;
+    while(spu<44100 || tick<16670000u){
+        if(spu<44100 && (tick>=16670000u || (uint64_t)spu*16670000u<=tick*44100u)){
+            arcade_mix_push(&mix,0,.25f,.25f);spu++;
+        }else{
+            arcade_mix_push_timed(&mix,1,-.125f,-.125f,tick);dac++;
+            if(tick<15058){tick=((uint64_t)dac*16670000u+47999)/48000;if(tick>=15058){dac=1;tick=15058+(16670000u+31570)/31571;}}
+            else tick=15058+((uint64_t)dac*16670000u+31570)/31571;
+        }
+    }
+    assert(!mix.error && frames==44032 && mix.lane[1].timed);
+    arcade_mix_push_timed(&mix,1,0,0,mix.lane[1].position/44100u);assert(mix.error);
+    arcade_mix_reset(&mix);arcade_mix_push_timed(&mix,1,0,0,1);
+    arcade_mix_push(&mix,1,0,0);assert(mix.error);
+    arcade_mix_init(&mix,33868800,output,NULL);
     arcade_mix_push(&mix,1,NAN,0); assert(mix.error);
     arcade_mix_reset(&mix);
     for (unsigned i = 0; i < 4 * ARCADE_MIX_RING; ++i) arcade_mix_push(&mix,1,0,0);

@@ -22,7 +22,7 @@ intermediate results. Physical Vita is outside this Mac pass.
 | Video System/Visco ZN-1 | Aero Fighters Special (`aerofgts`) | USA source-audited; native interpreter/GL 1P shooting, 112/112 inputs, portrait presentation, exact source-gain SPU/SDL capture and zero faults; `visco-zn-mac.md` |
 | Atlus ZN-1 | Heaven's Gate (`hvnsgate`) | Source-audited; native interpreter/GL Jin combat, 198/198 inputs, MC68000/YMZ280B IRQs, mixed SPU/YMZ audio and zero faults; `atlus-zn-mac.md` |
 | Time Warner/Atari ZN-1 | Primal Rage II (`primrag2`) | Source-audited ROM/EEPROM/CHD; native interpreter GL/NEON Arik player combat, 82/82 inputs, VIA HDD/DMA5 into 8 MiB RAM, watchdog, source-gain SPU/SDL sound and zero faults; `primal-zn-mac.md` |
-| Acclaim ZN-1 ROM/sound | NBA Jam Extreme (`nbajamex`) | All 22 source chips audited/prepared. ADSP2181/RAX passes original firmware and 127 MAME host commands with nonzero stereo audio, source BDMA/DAC and zero faults (O2 + ASan/UBSan). PSX SRAM/bank mapping, complete native runtime, frontend mixing and player evidence remain pending; `nbajam-zn-mac.md`, `rax-sound-port.md` |
+| Acclaim ZN-1 ROM/sound | NBA Jam Extreme (`nbajamex`) | Native GL/NEON P1 Dallas–Seattle match, 114/114 inputs, live clock 2:43 / score 0–2; passive control stays in help at 3:00. Original ADSP2181/RAX sound, source ROM/SRAM banking, warm NVRAM, four-player controls and timed SPU0.35/RAX1 mix; zero faults/overruns. `nbajam-zn-mac.md` |
 | Acclaim ZN-1 disk | Judge Dredd (`jdredd`) | Source adds ATA HDD/IRQ10 and a separate VBlank handler; media/adapter/runtime pending |
 | Metro ZN storage variants | Bust a Move 2 (`bam2`, `bam2a`) | Source has HDD/CD configurations and marks both nonworking with imperfect sound. Complete native integration and game evidence remain pending |
 | Eighting/Raizing ZN | Bloody Roar 2 (`bldyror2`), Brave Blade (`brvblade`) | Both World sets source-audited; native interpreter/GL player combat/shooter gameplay with source MC68000/YMF271, live SPU/YMF audio, portrait rotation and zero device faults; `raizing-zn-mac.md` |
@@ -64,7 +64,7 @@ from the arcade boards.
   source itself exposes no link devices/ports. Primal Rage II now passes actual
   Arik combat in GL/NEON with the original HDD, VIA/DMA5, 8 MiB RAM, six buttons
   and live SPU audio. Its intentional watchdog reset also preserves upper RAM.
-  Proceed to Acclaim NBA Jam Extreme/Judge Dredd and remaining families.
+  NBA Jam Extreme now passes native player validation. Proceed to Judge Dredd and remaining families.
 
 Local evidence is in `artifacts/boards-mac-20261014`; scratch/reference runs are
 under `/tmp/pcsx-boards-mac-20261014`. The user-linked Internet Archive collection

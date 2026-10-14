@@ -17,6 +17,8 @@
 #include "arcade/cbaj_sound.h"
 #include "arcade/tecmo_link.h"
 #include "arcade/primal_zn_bus.h"
+#include "arcade/nbajam_zn_bus.h"
+#include "arcade/rax_sound.h"
 #include "arcade/chd_hd.h"
 #include <math.h>
 #include "gpu_vram.h"
@@ -44,6 +46,7 @@ typedef struct ZnFillCheck { unsigned region; uint32_t offset, length; uint8_t v
 #include "arcade/atlus_zn_profiles.inc"
 #include "arcade/cbaj_tps_profiles.inc"
 #include "arcade/primal_zn_profiles.inc"
+#include "arcade/nbajam_zn_profiles.inc"
 
 static const ZnProfile profiles[] = {
 #include "arcade/capcom_zn_profiles.inc"
@@ -56,7 +59,11 @@ typedef struct SystemZn {
     int visco, atlus, cbaj;
     CbajSound *cbaj_sound;
     TecmoLink *tecmo_link;
-    int primal, memory_initialized;
+    int primal, nbajam, memory_initialized;
+    NbajamZnBus nba_bus;
+    RaxSound *rax;
+    void (*rax_callback)(void *,const float *,size_t,unsigned,const uint64_t *);
+    void *rax_opaque;
     PrimalZnBus *primal_bus;
     ata_storage_t *primal_ata;
     arcade_chd_hd_t *primal_disk;
@@ -111,8 +118,8 @@ static uint32_t canonical_address(uint32_t address)
 static const ZnProfile *find_profile(const char *set)
 {
     size_t i;
-    const ZnProfile *list = board.primal ? primal_profiles : board.cbaj ? cbaj_profiles : board.atlus ? atlus_profiles : board.visco ? visco_profiles : board.raizing ? raizing_profiles : board.tps ? tps_profiles : profiles;
-    size_t count = board.primal ? sizeof(primal_profiles) / sizeof(primal_profiles[0]) : board.cbaj ? sizeof(cbaj_profiles) / sizeof(cbaj_profiles[0]) : board.atlus ? sizeof(atlus_profiles) / sizeof(atlus_profiles[0]) : board.visco ? sizeof(visco_profiles) / sizeof(visco_profiles[0]) : board.raizing ? sizeof(raizing_profiles) / sizeof(raizing_profiles[0]) : board.tps ? sizeof(tps_profiles) / sizeof(tps_profiles[0]) : sizeof(profiles) / sizeof(profiles[0]);
+    const ZnProfile *list = board.nbajam ? nbajam_profiles : board.primal ? primal_profiles : board.cbaj ? cbaj_profiles : board.atlus ? atlus_profiles : board.visco ? visco_profiles : board.raizing ? raizing_profiles : board.tps ? tps_profiles : profiles;
+    size_t count = board.nbajam ? sizeof(nbajam_profiles)/sizeof(nbajam_profiles[0]) : board.primal ? sizeof(primal_profiles) / sizeof(primal_profiles[0]) : board.cbaj ? sizeof(cbaj_profiles) / sizeof(cbaj_profiles[0]) : board.atlus ? sizeof(atlus_profiles) / sizeof(atlus_profiles[0]) : board.visco ? sizeof(visco_profiles) / sizeof(visco_profiles[0]) : board.raizing ? sizeof(raizing_profiles) / sizeof(raizing_profiles[0]) : board.tps ? sizeof(tps_profiles) / sizeof(tps_profiles[0]) : sizeof(profiles) / sizeof(profiles[0]);
     for (i = 0; i < count; i++)
         if (!strcmp(list[i].set, set)) return &list[i];
     return NULL;
@@ -144,7 +151,7 @@ static int load_config(const char *directory, const ZnProfile **selected)
         if (i == 14 || (seen & (1u << i)) || !*equal || strlen(equal) >= sizeof(values[i])) goto bad;
         strcpy(values[i], equal); seen |= 1u << i;
     }
-    if (ferror(file) || seen != 0x3fff || strcmp(values[0], board.primal ? "pcsx-aow-primal-zn-v1" : board.cbaj ? "pcsx-aow-cbaj-tps-v1" : board.atlus ? "pcsx-aow-atlus-zn-v1" : board.visco ? "pcsx-aow-visco-zn-v1" : board.raizing ? "pcsx-aow-raizing-zn-v1" : board.tps ? "pcsx-aow-tecmo-tps-v1" : "pcsx-aow-capcom-zn-v1") ||
+    if (ferror(file) || seen != 0x3fff || strcmp(values[0], board.nbajam ? "pcsx-aow-nbajam-zn-v1" : board.primal ? "pcsx-aow-primal-zn-v1" : board.cbaj ? "pcsx-aow-cbaj-tps-v1" : board.atlus ? "pcsx-aow-atlus-zn-v1" : board.visco ? "pcsx-aow-visco-zn-v1" : board.raizing ? "pcsx-aow-raizing-zn-v1" : board.tps ? "pcsx-aow-tecmo-tps-v1" : "pcsx-aow-capcom-zn-v1") ||
         strcmp(values[13], "false")) goto bad;
     p = find_profile(values[1]);
     if (!p || strcmp(values[2], p->parent) || strcmp(values[3], p->bios_parent) ||
@@ -342,9 +349,9 @@ static uint32_t tps_crc_byte(uint32_t crc, uint8_t byte)
 
 static int validate_tps_media(void)
 {
-    size_t profile = (size_t)(board.profile - (board.primal ? primal_profiles : board.cbaj ? cbaj_profiles : board.atlus ? atlus_profiles : board.visco ? visco_profiles : board.raizing ? raizing_profiles : tps_profiles));
-    const TpsMediaCheck *checks = board.primal ? primal_media[profile] : board.cbaj ? cbaj_media[profile] : board.atlus ? atlus_media[profile] : board.visco ? visco_media[profile] : board.raizing ? raizing_media[profile] : tps_media[profile];
-    size_t count = board.primal ? primal_media_count[profile] : board.cbaj ? cbaj_media_count[profile] : board.atlus ? atlus_media_count[profile] : board.visco ? visco_media_count[profile] : board.raizing ? raizing_media_count[profile] : tps_media_count[profile];
+    size_t profile = (size_t)(board.profile - (board.nbajam ? nbajam_profiles : board.primal ? primal_profiles : board.cbaj ? cbaj_profiles : board.atlus ? atlus_profiles : board.visco ? visco_profiles : board.raizing ? raizing_profiles : tps_profiles));
+    const TpsMediaCheck *checks = board.nbajam ? nbajam_media[profile] : board.primal ? primal_media[profile] : board.cbaj ? cbaj_media[profile] : board.atlus ? atlus_media[profile] : board.visco ? visco_media[profile] : board.raizing ? raizing_media[profile] : tps_media[profile];
+    size_t count = board.nbajam ? nbajam_media_count[profile] : board.primal ? primal_media_count[profile] : board.cbaj ? cbaj_media_count[profile] : board.atlus ? atlus_media_count[profile] : board.visco ? visco_media_count[profile] : board.raizing ? raizing_media_count[profile] : tps_media_count[profile];
     static const unsigned regions[] = {0, 1, 5, 6, 2, 3, 4, 7};
     for (unsigned r = 0; r < 8; ++r) {
         unsigned region = regions[r];
@@ -441,6 +448,10 @@ static int open_primal_disk(const char *directory)
     return primal_zn_bus_create(&bus,&board.primal_bus);
 }
 #endif
+static int nba_command(void *opaque,uint16_t word) { (void)opaque;return rax_sound_host_write(board.rax,word); }
+static void nba_pcm(void *opaque,const float *v,size_t frames,unsigned rate,const uint64_t *ticks) {
+    (void)opaque;if(board.rax_callback)board.rax_callback(board.rax_opaque,v,frames,rate,ticks);
+}
 static int load_board(const char *directory, int family, int synthetic)
 {
     QSoundHLEConfig qcfg;
@@ -463,12 +474,17 @@ static int load_board(const char *directory, int family, int synthetic)
     board.atlus = family == 4;
     board.cbaj = family == 5;
     board.primal = family == 6;
+    board.nbajam = family == 7;
     board.synthetic = synthetic;
     if (load_config(directory, &board.profile)) { memset(&board, 0, sizeof(board)); return -1; }
     if (load_region(directory, files[0], 0, board.profile->bios_size) ||
         load_region(directory, board.primal ? "fixed.bin" : files[1], 1, board.profile->banked_size) ||
         load_region(directory, files[5], 5, 8) || load_region(directory, files[6], 6, 8)) goto bad;
-    if (board.primal) {
+    if (board.nbajam) {
+        if(load_region(directory,"rax.bin",3,board.profile->audio_size) || (!synthetic && validate_tps_media()))goto bad;
+        RaxSoundConfig cfg={board.regions[3],board.sizes[3],&board,nba_pcm};
+        if(rax_sound_create(&cfg,&board.rax) || nbajam_zn_bus_init(&board.nba_bus,board.regions[1],board.sizes[1],&board,nba_command))goto bad;
+    } else if (board.primal) {
         if (load_region(directory,"eeprom_default.bin",2,board.profile->country_size) ||
             (!synthetic && validate_tps_media())) goto bad;
 #ifdef HAVE_CHD
@@ -608,6 +624,9 @@ int systemzn_load_atlus(const char *directory) { return load_board(directory, 4,
 int systemzn_test_load_atlus(const char *directory) { return load_board(directory, 4, 1); }
 int systemzn_atlus_active(void) { return board.active && board.atlus; }
 int systemzn_load_cbaj(const char *directory) { return load_board(directory, 5, 0); }
+int systemzn_nbajam_active(void){return board.active && board.nbajam;}
+int systemzn_load_nbajam(const char *directory){return load_board(directory,7,0);}
+int systemzn_test_load_nbajam(const char *directory){return load_board(directory,7,1);}
 int systemzn_load_primal(const char *directory) { return load_board(directory, 6, 0); }
 int systemzn_test_load_primal(const char *directory) { return load_board(directory, 6, 1); }
 int systemzn_primal_active(void) { return board.active && board.primal; }
@@ -647,6 +666,7 @@ void systemzn_unload(void)
     arcade_chd_hd_close(board.primal_disk);
 #endif
     tecmo_link_destroy(board.tecmo_link);
+    rax_sound_destroy(board.rax);
     cbaj_sound_destroy(board.cbaj_sound);
     atlus_sound_destroy(board.atlus_sound);
     raizing_sound_destroy(board.raizing_sound);
@@ -688,6 +708,16 @@ static void map_bankedroms(void)
     capcom_zn_status_t status;
     unsigned a;
     if (!board.active || !psxRegs.ptrs.memRLUT || !psxRegs.ptrs.memWLUT) return;
+    if(board.nbajam){
+        for(a=0;a<3;a++)for(size_t off=0;off<0x800000;off+=SYSTEMZN_ROM_PAGE){
+            uint32_t addr=fixed_aliases[a]+off;unsigned idx=addr>>PSXM_SHIFT;
+            const uint8_t *rom=nbajam_zn_bus_rom_span(&board.nba_bus,0x1f000000+off,SYSTEMZN_ROM_PAGE);
+            psxRegs.ptrs.memRLUT[idx]=rom?(uintptr_t)rom-(uintptr_t)addr:INVALID_PTR_VAL;
+            psxRegs.ptrs.memWLUT[idx]=INVALID_PTR_VAL;
+        }
+        if(psxCpu && psxCpu->Clear)for(a=0;a<3;a++)psxCpu->Clear(fixed_aliases[a],0x800000/4);
+        return;
+    }
     if (board.primal) {
         for (a=0;a<3;a++) map_window(fixed_aliases[a],board.regions[1],board.sizes[1],0);
         return;
@@ -743,11 +773,11 @@ void systemzn_mem_reset(void)
 {
     if (!board.active || !psxRegs.ptrs.psxM) return;
     memcpy(psxRegs.ptrs.psxR, board.regions[0], board.sizes[0]);
-    if (!board.primal || !board.memory_initialized) memset(psxRegs.ptrs.psxM, 0, psxRamSize);
+    if ((!board.primal && !board.nbajam) || !board.memory_initialized) memset(psxRegs.ptrs.psxM, 0, psxRamSize);
     board.memory_initialized=1;
     memset(psxRegs.ptrs.psxP, 0xff, 0x10000);
     map_bankedroms();
-    if (board.raizing || board.visco || board.atlus || board.cbaj || board.primal) return;
+    if (board.raizing || board.visco || board.atlus || board.cbaj || board.primal || board.nbajam) return;
     map_window(0x1fb80000u, board.regions[2], board.sizes[2], 0);
     map_window(0x9fb80000u, board.regions[2], board.sizes[2], 0);
     map_window(0xbfb80000u, board.regions[2], board.sizes[2], 0);
@@ -759,8 +789,13 @@ void systemzn_reset(void)
     /* MAME has no device_reset override for the shared ZN MCU, CAT702, AT28C16
      * or PSX SIO devices; preserve their pin/timer/storage state on soft reset. */
     board.faults = 0;
-    if (board.tps || board.raizing || board.visco || board.atlus || board.cbaj || board.primal) board.tps_bank = 0;
+    if (board.tps || board.raizing || board.visco || board.atlus || board.cbaj || board.primal || board.nbajam) board.tps_bank = 0;
     else capcom_zn_reset(board.capcom);
+    if(board.nbajam){
+        nbajam_zn_bus_reset(&board.nba_bus);
+        if(rax_sound_reset(board.rax))board.faults|=8;
+        RaxSoundStatus status;rax_sound_status(board.rax,&status);board.sound_cycles=status.cpu.cycles;
+    }
     if (board.raizing) {
         if (raizing_sound_reset(board.raizing_sound)) board.faults |= 8;
         RaizingSoundStatus status; raizing_sound_status(board.raizing_sound, &status);
@@ -778,7 +813,7 @@ void systemzn_reset(void)
         if (tecmo_link_reset(board.tecmo_link)) board.faults |= 8;
         TecmoLinkStatus status; tecmo_link_status(board.tecmo_link, &status); board.sound_cycles = status.cycles;
     }
-    board.qsound_fraction = 0; if (!board.raizing && !board.atlus && !board.cbaj && !board.tecmo_link) board.sound_cycles = 0;
+    board.qsound_fraction = 0; if (!board.raizing && !board.atlus && !board.cbaj && !board.nbajam && !board.tecmo_link) board.sound_cycles = 0;
     board.frames = 0;
     board.last_psx_cycle = psxRegs.cycle;
     if (board.primal) primal_zn_bus_reset(board.primal_bus);
@@ -802,7 +837,7 @@ int systemzn_sync(u32 psx_cycle)
         }
         sound_cycles = 0;
         if ((!board.tps && !board.visco && !board.primal) || board.tecmo_link) {
-            numerator = (uint64_t)elapsed * (board.tecmo_link ? TECMO_LINK_CLOCK : board.cbaj ? CBAJ_SOUND_CLOCK : board.atlus ? ATLUS_SOUND_CLOCK : board.raizing ? RAIZING_SOUND_CLOCK : CAPCOM_ZN_SOUND_CLOCK_HZ) + board.qsound_fraction;
+            numerator = (uint64_t)elapsed * (board.nbajam ? RAX_SOUND_CLOCK : board.tecmo_link ? TECMO_LINK_CLOCK : board.cbaj ? CBAJ_SOUND_CLOCK : board.atlus ? ATLUS_SOUND_CLOCK : board.raizing ? RAIZING_SOUND_CLOCK : CAPCOM_ZN_SOUND_CLOCK_HZ) + board.qsound_fraction;
             sound_cycles = numerator / PSXCLK;
             board.qsound_fraction = numerator % PSXCLK;
         }
@@ -812,18 +847,19 @@ int systemzn_sync(u32 psx_cycle)
         board.sio_cycles += numerator / PSXCLK;
         board.sio_fraction = numerator % PSXCLK;
         board.sound_cycles += sound_cycles;
+        if(board.nbajam && rax_sound_run(board.rax,sound_cycles))board.faults|=8;
         if (board.tecmo_link && tecmo_link_sync(board.tecmo_link, board.sound_cycles)) board.faults |= 8;
         if (board.cbaj && cbaj_sound_sync(board.cbaj_sound, board.sound_cycles)) board.faults |= 8;
         if (board.atlus && atlus_sound_sync(board.atlus_sound, board.sound_cycles)) board.faults |= 8;
         if (board.raizing && raizing_sound_sync(board.raizing_sound, board.sound_cycles)) board.faults |= 8u;
-        if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && sound_cycles && capcom_zn_run_sound_cycles(board.capcom, sound_cycles) < 0)
+        if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && !board.nbajam && sound_cycles && capcom_zn_run_sound_cycles(board.capcom, sound_cycles) < 0)
             board.faults |= 8u;
     }
     sio_bus_advance(board.sio[0], board.sio_cycles);
     sio_bus_advance(board.sio[1], board.sio_cycles);
     if (sync_peripherals_to_cycle(board.sio_cycles)) board.faults |= 1u;
-    if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && qsound_hle_get_status(board.qsound, &status)) board.faults |= 2u;
-    if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal) {
+    if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && !board.nbajam && qsound_hle_get_status(board.qsound, &status)) board.faults |= 2u;
+    if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && !board.nbajam) {
         capcom_zn_status_t cap_status;
         capcom_zn_get_status(board.capcom, &cap_status);
         if (cap_status.faults) board.faults |= 8u;
@@ -889,6 +925,10 @@ int systemzn_read(u32 address, unsigned width, u32 *value)
     uint32_t physical = canonical_address(address);
     int result;
     if (!board.active || !value) return 0;
+    if(board.nbajam){
+        result=nbajam_zn_bus_read(&board.nba_bus,physical,width,value);
+        if(result){if(result<0){board.faults|=8;*value=UINT32_MAX;}return 1;}
+    }
     if (board.primal) {
         if (systemzn_sync(psxRegs.cycle)<0)board.faults|=8;
         result=primal_zn_bus_read(board.primal_bus,physical,width,value);
@@ -946,7 +986,7 @@ int systemzn_read(u32 address, unsigned width, u32 *value)
         }
         return 1;
     }
-    result = board.tps || board.raizing || board.visco || board.atlus || board.cbaj || board.primal ? 0 : capcom_zn_main_read(board.capcom, physical, width, value);
+    result = board.tps || board.raizing || board.visco || board.atlus || board.cbaj || board.primal || board.nbajam ? 0 : capcom_zn_main_read(board.capcom, physical, width, value);
     if (result == CAPCOM_ZN_HANDLED) return 1;
     if (result < 0) { board.faults |= 8u; *value = UINT32_MAX; return 1; }
     if ((physical >= 0x1fa00000 && physical < 0x1fa40000) ||
@@ -962,6 +1002,11 @@ int systemzn_write(u32 address, unsigned width, u32 value)
     uint32_t physical = canonical_address(address);
     int result;
     if (!board.active) return 0;
+    if(board.nbajam){
+        if(physical>=0x1fbfff80 && physical<0x1fbfff84 && systemzn_sync(psxRegs.cycle)<0)board.faults|=8;
+        result=nbajam_zn_bus_write(&board.nba_bus,physical,width,value);
+        if(result){if(result<0)board.faults|=8;if(physical>=0x1fbfff00 && physical<0x1fbfff04)map_bankedroms();return 1;}
+    }
     if (board.primal) {
         if(systemzn_sync(psxRegs.cycle)<0)board.faults|=8;
         result=primal_zn_bus_write(board.primal_bus,physical,width,value);
@@ -1020,7 +1065,7 @@ int systemzn_write(u32 address, unsigned width, u32 value)
         } else if (raizing_sound_irq(board.raizing_sound)) board.faults |= 8;
         return 1;
     }
-    result = board.tps || board.raizing || board.visco || board.atlus || board.cbaj || board.primal ? 0 : capcom_zn_main_write(board.capcom, physical, width, value);
+    result = board.tps || board.raizing || board.visco || board.atlus || board.cbaj || board.primal || board.nbajam ? 0 : capcom_zn_main_write(board.capcom, physical, width, value);
     if (result == CAPCOM_ZN_HANDLED) { if (physical == 0x1fb00000) map_bankedroms(); return 1; }
     if (result < 0) { board.faults |= 8u; return 1; }
     if ((physical >= 0x1fa00000 && physical < 0x1fa40000) ||
@@ -1031,7 +1076,7 @@ int systemzn_write(u32 address, unsigned width, u32 value)
     result = zn_board_write(&board.common, physical, width, value);
     if (board.primal && result==ZN_BOARD_HANDLED && physical==0x1fa20000 &&
         !(old_coin&1) && (board.common.coin&1)) board.coin_count[0]++;
-    if ((board.visco || board.atlus || board.cbaj || board.tps) && result == ZN_BOARD_HANDLED && physical == 0x1fa20000) {
+    if ((board.visco || board.atlus || board.cbaj || board.tps || board.nbajam) && result == ZN_BOARD_HANDLED && physical == 0x1fa20000) {
         /* Visco/Tecmo omit lockouts; Atlus connects four. Preserve each
          * source counter's rising-edge input and player ordering. */
         for (unsigned i = 0; i < (board.visco ? 2u : 4u); ++i) {
@@ -1072,6 +1117,17 @@ static int input_supported(const char *name, int pressed)
     const char *profile = board.profile->input;
     if (board.tps && (!strcmp(name, "coin2") || strstr(name, "button3"))) return -1;
     if (board.visco && strstr(name, "button3")) return -1;
+    if(board.nbajam){
+        if(name[0]=='p' && name[1]>='1' && name[1]<='4'){
+            unsigned player=name[1]-'1',port=player<2?player:player+2;const char *c=name+2;
+            if(!strcmp(c,"start"))return set_raw_bit(3,1u<<player,pressed);
+            const char *directions[]={"up","down","left","right"};
+            for(unsigned i=0;i<4;i++)if(!strcmp(c,directions[i]))return set_raw_bit(port,1u<<i,pressed);
+            if(strlen(c)==7 && !strncmp(c,"button",6) && c[6]>='1' && c[6]<='4')return set_raw_bit(port,0x10u<<(c[6]-'1'),pressed);
+            return -1;
+        }
+        if(strlen(name)==5 && !strncmp(name,"coin",4) && name[4]>='1' && name[4]<='4')return set_raw_bit(3,0x10u<<(name[4]-'1'),pressed);
+    }
     if (!strncmp(name, "p1", 2) || !strncmp(name, "p2", 2)) {
         unsigned player = name[1] == '1' ? 0 : 1;
         const char *control = name + 2;
@@ -1146,18 +1202,28 @@ int systemzn_set_input(const char *control, int pressed)
 }
 
 int systemzn_eeprom_import(const unsigned char *image, size_t size)
-{ return board.active ? zn_board_eeprom_import(&board.common, image, size) : -1; }
+{
+    if(!board.active || !image || size!=(board.nbajam?34848u:2080u))return -1;
+    if(zn_board_eeprom_import(&board.common,image,2080))return -1;
+    if(board.nbajam)memcpy(board.nba_bus.sram,image+2080,32768);return 0;
+}
 int systemzn_eeprom_export(unsigned char *image, size_t size)
-{ return board.active ? zn_board_eeprom_export(&board.common, image, size) : -1; }
+{
+    if(!board.active || !image || size!=(board.nbajam?34848u:2080u))return -1;
+    if(zn_board_eeprom_export(&board.common,image,2080))return -1;
+    if(board.nbajam)memcpy(image+2080,board.nba_bus.sram,32768);return 0;
+}
 void systemzn_set_audio_output(void (*callback)(void *, const int16_t *, unsigned), void *opaque)
 { board.audio_callback = callback; board.audio_opaque = opaque; board.audio_buffer_frames = 0; }
+void systemzn_set_rax_audio_output(void (*callback)(void *,const float *,size_t,unsigned,const uint64_t *),void *opaque)
+{ board.rax_callback=callback;board.rax_opaque=opaque; }
 void systemzn_set_ymf_audio_output(void (*callback)(void *, float, float, uint64_t), void *opaque)
 { board.ymf_callback = callback; board.ymf_opaque = opaque; }
 void systemzn_set_ymz_audio_output(void (*callback)(void *, float, float, uint64_t), void *opaque)
 { systemzn_set_ymf_audio_output(callback, opaque); }
 int systemzn_open_audio(const char *path)
 {
-    if (!board.active || board.tps || board.primal || board.wav.file) return -1;
+    if (!board.active || board.tps || board.primal || board.nbajam || board.wav.file) return -1;
     return pcm_wav_open(&board.wav, path, board.atlus || board.cbaj ? 88200 : board.raizing ? 44100 : SYSTEMZN_QSOUND_RATE);
 }
 int systemzn_close_audio(void) { return pcm_wav_close(&board.wav); }
@@ -1171,13 +1237,24 @@ int systemzn_selftest(void)
         value != (board.primal ? 0x6a : board.profile->vram_size == 0x200000 ? 0x69 : 0x61)) return -1;
     if (systemzn_read(0x1f000000, 4, &value) != 1 ||
         value != *(uint32_t *)board.regions[board.visco ? 2 : 1]) return -1;
-    if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && (systemzn_read(0x1fb80000, 4, &value) != 1 || value != *(uint32_t *)board.regions[2])) return -1;
+    if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && !board.nbajam && (systemzn_read(0x1fb80000, 4, &value) != 1 || value != *(uint32_t *)board.regions[2])) return -1;
     if (systemzn_read(0x1fa00300, 1, &value) != 1) return -1;
     before = value;
     if (systemzn_set_input("coin1", 1) || systemzn_read(0x1fa00300, 1, &value) != 1 ||
         value != (before & ~0x10u)) return -1;
     systemzn_set_input("coin1", 0);
     if (systemzn_set_input("unknown-control", 1) == 0) return -1;
+    if(board.nbajam){
+        const uint32_t ports[]={0x1fa00000,0x1fa00100,0x1fa10000,0x1fa10100};
+        for(unsigned player=0;player<4;player++)for(unsigned button=1;button<=4;button++){
+            char name[24];snprintf(name,sizeof(name),"p%ubutton%u",player+1,button);
+            if(systemzn_set_input(name,1) || systemzn_read(ports[player],1,&value)!=1 || value!=(0xffu&~(0x10u<<(button-1))))return -1;
+            systemzn_set_input(name,0);
+        }
+        unsigned char nv[34848],copy[34848];
+        if(systemzn_eeprom_export(nv,sizeof(nv)) || systemzn_eeprom_import(nv,sizeof(nv)) ||
+           systemzn_eeprom_export(copy,sizeof(copy)) || memcmp(nv,copy,sizeof(nv)))return -1;
+    }
     if (board.primal) {
         for(unsigned player=0;player<2;player++)for(unsigned button=4;button<=6;button++){
             char name[24];snprintf(name,sizeof(name),"p%ubutton%u",player+1,button);
@@ -1229,6 +1306,12 @@ void systemzn_report(FILE *out)
     uint16_t qreg78 = 0, qreg1 = 0, qreg2 = 0, qreg4 = 0, qreg5 = 0, qreg6 = 0;
     uint8_t sound_f010, sound_f020;
     if (!board.active || !out) return;
+    if(board.nbajam){
+        RaxSoundStatus r;rax_sound_status(board.rax,&r);NbajamZnBus *b=&board.nba_bus;
+        fprintf(out,"NBA Jam ZN: profile=nbajamex model=COH1000A RAM=4194304 VRAM=2097152 page=%u banks=%u/%u latches=%04x/%04x bank_writes=%" PRIu64 " SRAM_reads=%" PRIu64 " SRAM_writes=%" PRIu64 " faults=%u media=%s\n",b->page,b->bank[0],b->bank[1],b->latch[0],b->latch[1],b->bank_writes,b->sram_reads,b->sram_writes,board.faults|b->faults|r.faults,board.synthetic?"SYNTHETIC_FIXTURE":"SOURCE_VERIFIED");
+        fprintf(out,"NBA RAX: cycles=%" PRIu64 " PC=%04x IRQ=%" PRIu64 " commands=%" PRIu64 " reads=%" PRIu64 " replies=%" PRIu64 " output=%04x BDMA=%" PRIu64 " words=%" PRIu64 " buffers=%" PRIu64 " rate=%u nonzero=%" PRIu64 " overrun=%" PRIu64 " faults=%u\n",r.cpu.cycles,r.cpu.pc,r.cpu.interrupts,b->commands,r.host_reads,r.replies,r.output_latch,r.bdma_completions,r.bdma_words,r.autobuffers,r.sample_rate,r.dac_nonzero,r.dac_overruns,r.faults);
+        fprintf(out,"NBA coins: %" PRIu64 "/%" PRIu64 "/%" PRIu64 "/%" PRIu64 "\n",board.coin_count[0],board.coin_count[1],board.coin_count[2],board.coin_count[3]);return;
+    }
     if (board.primal) {
         PrimalZnBusStatus s;primal_zn_bus_status(board.primal_bus,&s);
         fprintf(out,"Primal ZN: profile=primrag2 model=COH1000W CPU=67737600 GPU=2 RAM=8388608 VRAM=2097152 faults=%u media=%s\n",board.faults|s.faults,board.synthetic?"SYNTHETIC_FIXTURE":"SOURCE_VERIFIED");

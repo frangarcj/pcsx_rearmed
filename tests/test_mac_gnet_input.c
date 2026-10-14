@@ -15,8 +15,16 @@ int gnet_test_analog(const char *name,unsigned raw)
     if (!strcmp(name,"p2_handle")) handle[1]=raw;
     return 0;
 }
+static int nba_coin[4],nba_start[4],nba_fourth[4];
 static int digital(const char *name,int down)
 {
+    if(selected_board && selected_board->family==111){
+        if(!strncmp(name,"coin",4) && name[4]>='1' && name[4]<='4')nba_coin[name[4]-'1']=down;
+        if(name[0]=='p' && name[1]>='1' && name[1]<='4'){
+            if(!strcmp(name+2,"start"))nba_start[name[1]-'1']=down;
+            if(!strcmp(name+2,"button4"))nba_fourth[name[1]-'1']=down;
+        }
+    }
     if (raizing_mode && name[0] == 'p') assert(!strchr(name,'_'));
     if (!strcmp(name,"p1button4")) beast=down;
     if (!strcmp(name,"p1button5")) fifth=down;
@@ -28,8 +36,13 @@ static int digital(const char *name,int down)
     if ((!strcmp(name,"p1_button1") || !strcmp(name,"p1button1"))) fire=down;
     return 0;
 }
+static unsigned nba_mix_frames;
 static unsigned atlus_mix_frames;
 static unsigned cbaj_mix_frames;
+static void nba_mix_output(void *opaque,const int16_t *pcm,unsigned n)
+{
+    (void)opaque;for(unsigned i=0;i<n;i++){assert(pcm[2*i]==13926);assert(pcm[2*i+1]==10650);}nba_mix_frames+=n;
+}
 static void cbaj_mix_output(void *opaque,const int16_t *pcm,unsigned frames)
 {
     (void)opaque;
@@ -165,6 +178,35 @@ int main(void)
     memset(&e,0,sizeof(e));e.type=SDL_EVENT_WINDOW_FOCUS_LOST;
     assert(SDL_PushEvent(&e));poll_interactive_input();assert(!fifth && !sixth && !fire && !start);
     puts("Primal SDL six-button keyboard/gamepad shoulder mapping and focus release PASS");
+    board.family=111;interactive_focused=1;
+    key(SDL_SCANCODE_7,1);key(SDL_SCANCODE_8,1);key(SDL_SCANCODE_3,1);key(SDL_SCANCODE_4,1);
+    key(SDL_SCANCODE_KP_9,1);key(SDL_SCANCODE_F8,1);
+    assert(nba_coin[2] && nba_coin[3] && nba_start[2] && nba_start[3] && nba_fourth[2] && nba_fourth[3]);
+    release_interactive_input();assert(!nba_coin[2] && !nba_coin[3] && !nba_start[2] && !nba_start[3] && !nba_fourth[2] && !nba_fourth[3]);
+    SDL_JoystickID extra_id[3];SDL_Joystick *extra[3];
+    for(unsigned i=0;i<3;i++){
+        extra_id[i]=SDL_AttachVirtualJoystick(&desc);assert(extra_id[i]);extra[i]=SDL_OpenJoystick(extra_id[i]);assert(extra[i]);
+        assert(SDL_SetJoystickVirtualButton(extra[i],SDL_GAMEPAD_BUTTON_START,true));
+        assert(SDL_SetJoystickVirtualButton(extra[i],SDL_GAMEPAD_BUTTON_BACK,true));
+        assert(SDL_SetJoystickVirtualButton(extra[i],SDL_GAMEPAD_BUTTON_NORTH,true));
+    }
+    SDL_UpdateJoysticks();refresh_interactive_gamepads();frame_counter++;poll_interactive_input();
+    for(unsigned i=1;i<4;i++)assert(interactive_pads[i] && nba_coin[i] && nba_start[i] && nba_fourth[i]);
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_WINDOW_FOCUS_LOST;assert(SDL_PushEvent(&e));poll_interactive_input();
+    for(unsigned i=0;i<4;i++)assert(!nba_coin[i] && !nba_start[i] && !nba_fourth[i]);
+    for(unsigned i=0;i<3;i++){
+        SDL_CloseGamepad(interactive_pads[i+1]);interactive_pads[i+1]=NULL;SDL_CloseJoystick(extra[i]);assert(SDL_DetachVirtualJoystick(extra_id[i]));
+    }
+    arcade_mix_init_rates(&interactive_mix,33868800,16670000,1,nba_mix_output,NULL);
+    unsigned ni=0,di=0;const float pair[2]={.25f,.5f};
+    while(ni<1024 || di<734){
+        uint64_t tick=((uint64_t)di*16670000u+31570)/31571;
+        if(ni<1024 && (di==734 || (uint64_t)ni*16670000u<=tick*44100u)){
+            interactive_spu_pcm((void *)source_spu,4);ni++;
+        }else {interactive_rax_pcm(NULL,pair,1,31571,&tick);di++;}
+    }
+    assert(nba_mix_frames==1024 && !interactive_mix.error && !interactive_mix.clipped);
+    puts("NBA SDL four-player coins/start/buttons, four mapped gamepads, focus release and production SPU0.35/RAX1 timed stereo routing PASS");
     SDL_CloseGamepad(interactive_pads[0]);interactive_pads[0]=NULL;
     SDL_CloseJoystick(joy);assert(SDL_DetachVirtualJoystick(id));
     SDL_DestroyWindow(w);SDL_Quit();

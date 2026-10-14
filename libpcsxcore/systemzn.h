@@ -22,6 +22,10 @@ int systemzn_atlus_active(void);
 int systemzn_load_cbaj(const char *directory);
 int systemzn_test_load_cbaj(const char *directory);
 int systemzn_cbaj_active(void);
+int systemzn_nbajam_active(void);
+int systemzn_load_nbajam(const char *directory);
+int systemzn_test_load_nbajam(const char *directory);
+void systemzn_set_rax_audio_output(void (*callback)(void *,const float *,size_t,unsigned,const uint64_t *),void *opaque);
 int systemzn_load_primal(const char *directory);
 int systemzn_test_load_primal(const char *directory);
 int systemzn_primal_active(void);
@@ -40,7 +44,7 @@ int systemzn_sync(u32 psx_cycle);
 int systemzn_read(u32 address, unsigned width, u32 *value);
 int systemzn_write(u32 address, unsigned width, u32 value);
 int systemzn_set_input(const char *control, int pressed);
-/* Exact 2080-byte common ZN AT28C16 data+ID image. */
+/* Common ZN: 2080-byte AT28C16 data+ID. NBA: append 32768-byte SRAM. */
 int systemzn_eeprom_import(const unsigned char *image, size_t size);
 int systemzn_eeprom_export(unsigned char *image, size_t size);
 /* QSound-only capture at the source HLE's integer 24038 Hz rate. */

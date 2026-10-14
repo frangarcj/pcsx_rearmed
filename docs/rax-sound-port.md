@@ -3,8 +3,8 @@
 The standalone RAX board executes NBA Jam Extreme's original ADSP2181 firmware
 with native Harvard buses, BDMA, host latches and stereo DMA-driven DACs. This
 establishes the sound-board component, **not native PSX gameplay validation**.
-Main-CPU SRAM/ROM banking, live inputs, NVRAM and SPU/RAX mixing still need their
-own integration and player evidence.
+Main-CPU SRAM/ROM banking, live inputs, NVRAM and SPU/RAX mixing now have
+separate [native NBA player evidence](nbajam-zn-mac.md).
 
 ## Source behavior
 
@@ -56,11 +56,12 @@ the board with an explicit fault.
 
 The output callback supplies raw stereo floats at the integer source DAC rate,
 including its default 48 kHz startup and firmware-selected rate changes.
+Each frame also supplies its absolute DSP clock for frontend interpolation.
 MAME's `set_sample_rate(u32)` truncates the RAX-derived frequency; NBA's divider
 32 gives 31,571 Hz. A rate change begins a new sample phase after flushing
 previous output. This component does **not** reproduce MAME's sound-stream
-history resampling or claim host output at 44.1 kHz. Native frontend resampling,
-mix alignment and whole-machine timing remain pending. Run/reset/host/debug
+history resampling or claim host output at 44.1 kHz. Native frontend interpolation now uses the absolute sample clocks; MAME
+resampler-history matching and whole-machine timing remain unverified. Run/reset/host/debug
 mutation and destruction are refused from output callbacks.
 
 ## Authentic firmware and independent reference
@@ -100,5 +101,5 @@ unmapped I/O, latch replacement and real level-IRQ acknowledgement/reply,
 four BDMA types, bank crossing, count/deadlines, edge IRQ/RTI and CPU-only reset,
 pending timers across soft reset, actual SPORT-driven stereo sample output and
 source unsupported-operation faults. All pass O2 and ASan/UBSan, and the Mac GL
-harness builds the component. The board is not yet selected by a native NBA
-game profile.
+harness builds the component. The native NBA game profile now selects the component, with complete-board
+player evidence recorded separately.

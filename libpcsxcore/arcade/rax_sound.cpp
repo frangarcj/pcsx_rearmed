@@ -24,7 +24,7 @@ struct RaxSound {
  unsigned overlay=0,data_bank=0,ireg=0;
  bool pf0=true,busy=false,in_dma=false,dma_pending=false,autobuf_pending=false;
  long double dma_due=0,autobuf_due=0,autobuf_period=0;
- std::array<float,256> audio{};size_t audio_count=0;
+ std::array<float,256> audio{};std::array<uint64_t,128> sample_clocks{};size_t audio_count=0;
  ~RaxSound(){adsp2181_destroy(cpu);}
  void fault(uint32_t f){stats.faults|=f;}
  uint16_t data_read(uint16_t a) const {
@@ -34,7 +34,7 @@ struct RaxSound {
   return a==0x3fe5?uint16_t(pf0):ctrl[a-0x3fe0];
  }
  void enable(unsigned ch,bool v){dac[ch].enabled=v;if(!v)dac[ch].in=dac[ch].out=0;}
- void emit(){if(audio_count && cfg.audio)cfg.audio(cfg.opaque,audio.data(),audio_count,rate);audio_count=0;}
+ void emit(){if(audio_count && cfg.audio)cfg.audio(cfg.opaque,audio.data(),audio_count,rate,sample_clocks.data());audio_count=0;}
  void audio_tick(){
   audio_phase+=rate;
   while(audio_phase>=RAX_SOUND_CLOCK){
@@ -45,7 +45,7 @@ struct RaxSound {
     else if(d.enabled)stats.dac_underruns++;
     audio[2*audio_count+ch]=float(s)*(1.0f/32767.0f);nonzero|=s!=0;
    }
-   stats.dac_frames++;stats.dac_nonzero+=nonzero;audio_count++;
+   sample_clocks[audio_count]=clocks;stats.dac_frames++;stats.dac_nonzero+=nonzero;audio_count++;
    if(audio_count==audio.size()/2)emit();
   }
  }

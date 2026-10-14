@@ -62,6 +62,7 @@ void arcade_mix_push(ArcadeAudioMixer *mix, unsigned source, float left, float r
 {
     if (source > 1 || mix->error) return;
     ArcadeMixLane *lane = &mix->lane[source];
+    if(lane->timed){mix->error=1;return;}
     const uint64_t output_ticks = (uint64_t)44100 * lane->divider;
     if (!isfinite(left) || !isfinite(right) || !lane->clock ||
         lane->position > UINT64_MAX - output_ticks) { mix->error = 1; return; }
@@ -85,4 +86,29 @@ void arcade_mix_push(ArcadeAudioMixer *mix, unsigned source, float left, float r
     }
     memcpy(lane->previous, current, sizeof(current));
     lane->position += output_ticks;
+}
+
+void arcade_mix_push_timed(ArcadeAudioMixer *mix,unsigned source,float left,float right,uint64_t tick)
+{
+    if(source>1 || mix->error)return;
+    ArcadeMixLane *lane=&mix->lane[source];
+    if(!isfinite(left) || !isfinite(right) || !lane->clock || tick>UINT64_MAX/44100u ||
+       (lane->inputs && !lane->timed)){mix->error=1;return;}
+    uint64_t position=tick*44100u;
+    if(lane->inputs && position<=lane->position){mix->error=1;return;}
+    float current[2]={left,right};
+    if(!lane->inputs)memcpy(lane->previous,current,sizeof(current));
+    lane->timed=1;lane->inputs++;lane->nonzero+=left!=0 || right!=0;
+    while(lane->next_output<=position){
+        if(lane->count==ARCADE_MIX_RING || lane->next_output>UINT64_MAX-lane->clock){mix->error=1;return;}
+        float t=position>lane->position?(float)(lane->next_output-lane->position)/(position-lane->position):1;
+        unsigned tail=(lane->head+lane->count)%ARCADE_MIX_RING;
+        for(unsigned ch=0;ch<2;ch++){
+            float v=lane->previous[ch]+t*(current[ch]-lane->previous[ch]);
+            if(v>1)v=1;if(v<-1)v=-1;
+            lane->ring[tail][ch]=(int16_t)lrintf(v*32767.0f);
+        }
+        lane->count++;lane->next_output+=lane->clock;deliver(mix);
+    }
+    memcpy(lane->previous,current,sizeof(current));lane->position=position;
 }

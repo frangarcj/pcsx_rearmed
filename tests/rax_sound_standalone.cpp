@@ -8,7 +8,8 @@
 struct Fixture {
  std::vector<uint8_t> rom=std::vector<uint8_t>(0x800000);
  std::vector<float> samples;RaxSound *s=nullptr;unsigned rate=0;
- static void audio(void *p,const float *v,size_t n,uint32_t rate){
+ static void audio(void *p,const float *v,size_t n,uint32_t rate,const uint64_t *ticks){
+  for(size_t i=1;i<n;i++)assert(ticks[i]>ticks[i-1]);
   auto &f=*(Fixture *)p;f.rate=rate;f.samples.insert(f.samples.end(),v,v+2*n);
   assert(rax_sound_run(f.s,1)==-1 && rax_sound_reset(f.s)==-1 && rax_sound_host_write(f.s,0)==-1);
   assert(rax_sound_program_write(f.s,0,0)==-1 && rax_sound_data_write(f.s,0,0)==-1 && rax_sound_io_write(f.s,0,0)==-1);

@@ -87,7 +87,7 @@ SOURCES += libpcsxcore/system12.c libpcsxcore/system11.c libpcsxcore/system10.c 
   libpcsxcore/arcade/mb89371.c libpcsxcore/arcade/i8251.c \
   libpcsxcore/arcade/eeprom93c46.c
 CFLAGS += -I$(BUILD)/gnet-generated -Ilibpcsxcore/arcade/tms57002 -I$(BUILD)/m68000-generated -Ilibpcsxcore/arcade/m68000
-SOURCES += libpcsxcore/arcade/zsg2.c libpcsxcore/arcade/fifo7200.c libpcsxcore/arcade/tecmo_link.c libpcsxcore/arcade/vt83c461.c libpcsxcore/arcade/primal_zn_bus.c
+SOURCES += libpcsxcore/arcade/zsg2.c libpcsxcore/arcade/fifo7200.c libpcsxcore/arcade/tecmo_link.c libpcsxcore/arcade/vt83c461.c libpcsxcore/arcade/primal_zn_bus.c libpcsxcore/arcade/nbajam_zn_bus.c
 CXXSOURCES := libpcsxcore/arcade/adsp2181.cpp libpcsxcore/arcade/rax_sound.cpp libpcsxcore/arcade/cbaj_sound.cpp libpcsxcore/arcade/ymz280b.cpp libpcsxcore/arcade/atlus_sound.cpp libpcsxcore/arcade/ymf271.cpp libpcsxcore/arcade/raizing_sound.cpp libpcsxcore/arcade/m68000.cpp \
  libpcsxcore/arcade/gnet_zoom.cpp libpcsxcore/arcade/rf5c296.cpp \
  libpcsxcore/arcade/gnet_pccard.cpp \
@@ -149,6 +149,10 @@ endif
 CXX_STANDARD = c++17
 
 .PHONY: all clean smoke board-test system11-test system10-test systemgv-test tecmo-tps-test raizing-zn-test visco-zn-test atlus-zn-test cbaj-tps-test taito-fx1z-test capcom-zn-test taito-fx1-test systemgnet-test gpu-type1-test devices-test FORCE
+.PHONY: nbajam-zn-test
+nbajam-zn-test: $(TARGET)
+	python3 scripts/generate_nbajam_zn_profiles.py --check
+	python3 tests/check_nbajam_zn_harness.py --harness $(TARGET)
 all: $(TARGET)
 $(TARGET): $(OBJECTS) $(SHELF_LIB)
 	$(CXX) -arch arm64 -Wl,-dead_strip -o $@ $(OBJECTS) -lz -lm $(GPU_LIBS)
@@ -316,6 +320,7 @@ devices-test: $(BUILD)/test-nor-flash $(BUILD)/test-c352 $(BUILD)/test-serial $(
 	$(MAKE) -f tests/Makefile.primal-zn-bus BUILD=$(BUILD)/primal-zn-bus-tests CXX='$(CXX)' CC='$(CC)' test
 	$(MAKE) -f tests/Makefile.adsp2181 BUILD=$(BUILD)/adsp2181-tests CXX='$(CXX)' test
 	$(MAKE) -f tests/Makefile.rax-sound BUILD=$(BUILD)/rax-sound-tests CXX='$(CXX)' test
+	$(MAKE) -f tests/Makefile.nbajam-zn-bus BUILD=$(BUILD)/nbajam-bus-tests CC='$(CC)' test
 	$(MAKE) -f tests/Makefile.atlus-sound BUILD=$(BUILD)/atlus-sound-tests CXX='$(CXX)' test
 	$(MAKE) -f tests/Makefile.ymz280b BUILD=$(BUILD)/ymz280b-tests CXX='$(CXX)' test
 	$(MAKE) -f tests/Makefile.raizing-sound BUILD=$(BUILD)/raizing-sound-tests CXX='$(CXX)' test

@@ -4,8 +4,8 @@ The native core now contains the complete pinned MAME ADSP2181 instruction
 dispatcher and arithmetic/addressing helpers, behind a C API. This is a component
 port for Acclaim RAX, not evidence that NBA Jam Extreme runs or produces sound.
 [RAX component wiring, BDMA and autobuffer timers/DACs](rax-sound-port.md) now
-execute the authentic sound firmware. Native PSX integration remains pending
-in the [Mac board matrix](arcade-mac-validation.md).
+execute the authentic sound firmware. Native PSX player integration is recorded
+separately in the [Mac board matrix](arcade-mac-validation.md).
 
 Source is MAME `deb2f54fe7300e7a192690318beb860159bfd52a`,
 `src/devices/cpu/adsp2100/adsp2100.cpp`, `adsp2100.h` and `2100ops.hxx`,
@@ -69,5 +69,5 @@ slices. This does not turn the source's batch-ending optimizations into a claim
 of universal instruction-count equivalence.
 
 The Mac harness builds the component with C++20. RAX's standalone authentic
-bootstrap/command/audio evidence is recorded separately; complete native NBA
-gameplay still requires main-board integration and player evidence.
+bootstrap/command/audio evidence is recorded separately; the resulting [native NBA gameplay](nbajam-zn-mac.md) has separate
+main-board and player evidence.

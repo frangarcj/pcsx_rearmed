@@ -18,7 +18,8 @@ typedef struct RaxSoundConfig {
  void *opaque;
  /* Source DAC-rate float stereo, gain 1, int16 / 32767. No host resampling.
   * Called synchronously; callbacks may not reenter or destroy the board. */
- void (*audio)(void *,const float *interleaved,size_t frames,uint32_t rate);
+ void (*audio)(void *,const float *interleaved,size_t frames,uint32_t rate,
+               const uint64_t *sample_clocks); /* Absolute DSP clock per frame. */
 } RaxSoundConfig;
 typedef struct RaxSoundStatus {
  Adsp2181Status cpu;
