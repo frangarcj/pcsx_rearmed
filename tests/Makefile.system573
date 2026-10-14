@@ -23,8 +23,12 @@ $(BUILD)/security.o: libpcsxcore/arcade/konami_security.cpp libpcsxcore/arcade/k
 	$(CXX) -std=c++17 $(OPT) -Wall -Wextra -Wno-unused-parameter -c $< -o $@
 $(BUILD)/flash: $(BUILD)/flash-c.o $(BUILD)/flash-test.o $(BUILD)/nor.o $(BUILD)/rtc.o $(BUILD)/adc.o $(BUILD)/security.o
 	$(CXX) $(OPT) $^ -o $@
-test: $(BUILD)/peripherals $(BUILD)/flash
+$(BUILD)/audio: tests/test_system573_audio.c libpcsxcore/arcade/system573_audio.c libpcsxcore/arcade/system573_audio.h
+	@mkdir -p $(BUILD)
+	$(CC) -std=c99 $(OPT) -Wall -Wextra -Werror tests/test_system573_audio.c libpcsxcore/arcade/system573_audio.c -o $@
+test: $(BUILD)/peripherals $(BUILD)/flash $(BUILD)/audio
 	$(BUILD)/peripherals
 	$(BUILD)/flash
+	$(BUILD)/audio
 sanitize:
 	$(MAKE) -f tests/Makefile.system573 BUILD=$(BUILD)/sanitize OPT='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' test
