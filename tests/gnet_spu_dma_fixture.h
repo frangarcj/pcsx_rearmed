@@ -1,4 +1,4 @@
-/* GPL-2.0-or-later. MAME-derived G-Net SPU DMA acceptance vectors. */
+/* GPL-2.0-or-later. MAME-derived source-board SPU DMA acceptance vectors. */
 #include "../libpcsxcore/psxevents.h"
 #include "../libpcsxcore/psxhw.h"
 
@@ -44,5 +44,9 @@ static int harness_source_spu_dma_fixture(const char *name, u32 clock, u32 sourc
   return failed;
 }
 
+
+#ifdef PCSX_SYSTEM_GNET
 static int harness_gnet_spu_dma_fixture(void)
 { return harness_source_spu_dma_fixture("SystemGNet", 50000000, 35431); }
+
+#endif

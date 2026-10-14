@@ -27,6 +27,7 @@
 #include "system10.h"
 #include "system12.h"
 #include "systemtaito.h"
+#include "systemzn.h"
 #ifdef PCSX_SYSTEM_GV
 #include "systemgv.h"
 #endif
@@ -74,7 +75,7 @@ int psxSourceSpuDmaActive(void)
     if (systemgnet_active()) return 1;
 #endif
 #ifdef PCSX_SYSTEM12
-    if (systemtaito_active()) return 1;
+    if (systemtaito_active() || systemzn_tps_active()) return 1;
 #ifdef PCSX_SYSTEM_GV
     if (systemgv_active()) return 1;
 #endif

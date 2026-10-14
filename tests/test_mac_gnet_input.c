@@ -18,8 +18,8 @@ int gnet_test_analog(const char *name,unsigned raw)
 static int digital(const char *name,int down)
 {
     if (!strcmp(name,"coin1")) coin=down;
-    if (!strcmp(name,"p1_start")) start=down;
-    if (!strcmp(name,"p1_button1")) fire=down;
+    if ((!strcmp(name,"p1_start") || !strcmp(name,"p1start"))) start=down;
+    if ((!strcmp(name,"p1_button1") || !strcmp(name,"p1button1"))) fire=down;
     return 0;
 }
 static void key(SDL_Scancode code,int down)
@@ -71,6 +71,14 @@ int main(void)
     key(SDL_SCANCODE_RIGHT,1);assert(wheel==71 && trigger==99);interactive_replay=0;
     memset(&e,0,sizeof(e));e.type=SDL_EVENT_WINDOW_FOCUS_LOST;
     assert(SDL_PushEvent(&e));poll_interactive_input();assert(wheel==128 && trigger==128 && !start);
+    board.family=104; interactive_focused=1;
+    key(SDL_SCANCODE_5,1);key(SDL_SCANCODE_1,1);key(SDL_SCANCODE_A,1);assert(coin && fire && start);
+    key(SDL_SCANCODE_5,0);key(SDL_SCANCODE_A,0);assert(!coin && !fire);
+    assert(SDL_SetJoystickVirtualButton(joy,SDL_GAMEPAD_BUTTON_SOUTH,true));
+    SDL_UpdateJoysticks();frame_counter++;poll_interactive_input();assert(fire);
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_WINDOW_FOCUS_LOST;
+    assert(SDL_PushEvent(&e));poll_interactive_input();assert(!coin && !fire && !start);
+    puts("Tecmo TPS SDL keyboard/gamepad controls and focus release PASS");
     SDL_CloseGamepad(interactive_pads[0]);interactive_pads[0]=NULL;
     SDL_CloseJoystick(joy);assert(SDL_DetachVirtualJoystick(id));
     SDL_DestroyWindow(w);SDL_Quit();

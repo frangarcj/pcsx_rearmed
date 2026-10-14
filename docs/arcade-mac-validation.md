@@ -16,7 +16,7 @@ intermediate results. Physical Vita is outside this Mac pass.
 | Taito G-Net COH1002T/COH3002T, all four card types | Psyvariar Japan, Go By RC, Mawasunda, G-Darius G | Four bounded interpreter/GL player runs; interactive SDL analog controls, rotation and mixed source-clock SPU/Zoom audio; `gnet-mac.md` and `gnet-mac-interactive.md` |
 | Taito FX1S | Psychic Force (`psyforce`) | Native interpreter/GL PLAYER1 selection and combat, 146/146 inputs, nonzero YM2610B and zero watchdog/device faults in the later replay; `taito-fx1-mac.md`. Earlier coin sequence still resets in native and MAME |
 | Taito FX1Z, 1/2 MiB VRAM | RayStorm (`raystorm`), G-Darius Ver.2 (`gdarius2`) | Audited wrapper/ROM archives available. Native board composition and runtime pending |
-| Tecmo TPS common SPU map | Gallop Racer 2 (`glpracr2`) | Audited wrapper/ROM/BIOS archives available. Native adapter/runtime pending |
+| Tecmo TPS common SPU map | Gallop Racer 2 (`glpracr2`) | Interpreter/GL interactive player race, 138/138 inputs, exact source-gain SDL/SPU capture and zero board faults; `tecmo-tps-mac.md` |
 | Tecmo TPS sound/link variants | Cool Boarders Arcade Jam (`cbaj`), Gallop Racer 2 Link (`glpracr2l`) | Z80/YMZ280B/FIFO and Z80 link configurations require separate native coverage; media/runtime pending |
 | Video System/Visco ZN-1 | Aero Fighters Special (`aerofgts`) | Source COH1002V configuration uses common ZN/SPU plus its own ROM map and portrait presentation; media/adapter/runtime pending |
 | Atlus ZN-1 | Heaven's Gate (`hvnsgate`) | Source COH1001L adds 68000/YMZ280B; media/adapter/runtime pending |
@@ -49,8 +49,10 @@ from the arcade boards.
   running event passes a bounded interpreter/GL run. A native MMIO regression
   requires MODE SELECT to change the target's block size. CDDA mixing is still
   pending; authentic ARM64 DRC still uses console serial MMIO handlers.
-- Compose the common Tecmo TPS map for Gallop Racer 2, then FX1Z with the real
-  Zoom daughterboard, followed by Raizing and the remaining source families.
+- Common Tecmo TPS now passes Gallop Racer 2 player racing and live native sound.
+  Compose FX1Z with the real Zoom daughterboard for RayStorm/G-Darius Ver.2,
+  followed by Raizing and the remaining source families. TPS sound/link variants
+  retain separate rows and remain pending.
 
 Local evidence is in `artifacts/boards-mac-20261014`; scratch/reference runs are
 under `/tmp/pcsx-boards-mac-20261014`. The user-linked Internet Archive collection

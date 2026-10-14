@@ -1,4 +1,4 @@
-/* GPL-2.0-or-later. Native host wiring for source-derived Capcom Sony ZN boards. */
+/* GPL-2.0-or-later. Native host wiring for source-derived Capcom/Tecmo Sony ZN boards. */
 #include "systemzn.h"
 #include "system10.h"
 #include "system11.h"
@@ -22,12 +22,17 @@
 #define SYSTEMZN_QSOUND_RATE 24038u
 #define SYSTEMZN_ROM_PAGE (1u << PSXM_SHIFT)
 
-typedef struct CapcomProfile {
+typedef struct ZnProfile {
     const char *set, *parent, *bios_parent, *bios, *model, *family, *input;
     uint32_t cpu_clock, gpu_clock, ram_size, vram_size;
     size_t bios_size, banked_size, country_size, audio_size, qsound_size;
-} CapcomProfile;
-static const CapcomProfile profiles[] = {
+} ZnProfile;
+typedef struct TpsMediaCheck {
+    unsigned region; uint32_t offset, length; unsigned group, stride, swap; uint32_t crc;
+} TpsMediaCheck;
+#include "arcade/tecmo_tps_profiles.inc"
+
+static const ZnProfile profiles[] = {
 #include "arcade/capcom_zn_profiles.inc"
 };
 
@@ -37,7 +42,7 @@ typedef struct SystemZn {
     ZNMCU *mcu;
     zn_board_t common;
     psx_sio_t *sio[2];
-    const CapcomProfile *profile;
+    const ZnProfile *profile;
     uint8_t *regions[8]; /* BIOS, banked, country, audio, samples, CAT0, CAT1, DSP */
     size_t sizes[8];
     uint16_t *qsound_words;
@@ -59,6 +64,10 @@ typedef struct SystemZn {
     void *audio_opaque;
     int16_t audio_buffer[512];
     unsigned audio_buffer_frames;
+    int synthetic;
+    int tps;
+    unsigned tps_bank;
+    uint64_t tps_bank_writes;
     int active;
 } SystemZn;
 static SystemZn board;
@@ -70,15 +79,17 @@ static uint32_t canonical_address(uint32_t address)
     return address;
 }
 
-static const CapcomProfile *find_profile(const char *set)
+static const ZnProfile *find_profile(const char *set)
 {
     size_t i;
-    for (i = 0; i < sizeof(profiles) / sizeof(profiles[0]); i++)
-        if (!strcmp(profiles[i].set, set)) return &profiles[i];
+    const ZnProfile *list = board.tps ? tps_profiles : profiles;
+    size_t count = board.tps ? sizeof(tps_profiles) / sizeof(tps_profiles[0]) : sizeof(profiles) / sizeof(profiles[0]);
+    for (i = 0; i < count; i++)
+        if (!strcmp(list[i].set, set)) return &list[i];
     return NULL;
 }
 
-static int load_config(const char *directory, const CapcomProfile **selected)
+static int load_config(const char *directory, const ZnProfile **selected)
 {
     static const char *keys[] = {
         "format", "mame_set", "mame_parent", "bios_parent", "bios", "board_model",
@@ -88,7 +99,7 @@ static int load_config(const char *directory, const CapcomProfile **selected)
     char path[4096], line[512], values[14][128] = {{0}};
     unsigned seen = 0, i;
     FILE *file;
-    const CapcomProfile *p;
+    const ZnProfile *p;
     if (snprintf(path, sizeof(path), "%s/board.ini", directory) >= (int)sizeof(path)) return -1;
     file = fopen(path, "r");
     if (!file) { perror(path); return -1; }
@@ -104,14 +115,14 @@ static int load_config(const char *directory, const CapcomProfile **selected)
         if (i == 14 || (seen & (1u << i)) || !*equal || strlen(equal) >= sizeof(values[i])) goto bad;
         strcpy(values[i], equal); seen |= 1u << i;
     }
-    if (ferror(file) || seen != 0x3fff || strcmp(values[0], "pcsx-aow-capcom-zn-v1") ||
+    if (ferror(file) || seen != 0x3fff || strcmp(values[0], board.tps ? "pcsx-aow-tecmo-tps-v1" : "pcsx-aow-capcom-zn-v1") ||
         strcmp(values[13], "false")) goto bad;
     p = find_profile(values[1]);
     if (!p || strcmp(values[2], p->parent) || strcmp(values[3], p->bios_parent) ||
         strcmp(values[5], p->model) || strcmp(values[6], p->family) ||
-        strcmp(values[7], !strcmp(p->family, "ZN-1") ? "CXD8530CQ" : "CXD8661R") ||
+        strcmp(values[7], p->cpu_clock == 67737600 ? "CXD8530CQ" : "CXD8661R") ||
         strcmp(values[8], p->cpu_clock == 100000000u ? "100000000" : "67737600") ||
-        strcmp(values[9], !strcmp(p->family, "ZN-1") ? "CXD8561Q" : "CXD8654Q") ||
+        strcmp(values[9], p->cpu_clock == 67737600 ? "CXD8561Q" : "CXD8654Q") ||
         strcmp(values[10], "53693175") || strcmp(values[11], "4194304") ||
         strcmp(values[12], !strcmp(p->model, "COH1000C") ? "1048576" : "2097152")) goto bad;
     if (!strcmp(p->bios, "fixed")) {
@@ -121,7 +132,7 @@ static int load_config(const char *directory, const CapcomProfile **selected)
     fclose(file);
     return 0;
 bad:
-    fprintf(stderr, "%s: invalid or unsupported Capcom ZN profile (exact 14-key board.ini required)\n", path);
+    fprintf(stderr, "%s: invalid or unsupported Sony ZN profile (exact 14-key board.ini required)\n", path);
     fclose(file);
     return -1;
 }
@@ -267,7 +278,49 @@ static void sio_bus_advance(psx_sio_t *sio, uint64_t cycle)
         board.faults |= 4u;
 }
 
-int systemzn_load(const char *directory)
+static uint32_t tps_crc_byte(uint32_t crc, uint8_t byte)
+{
+    crc ^= byte;
+    for (unsigned i = 0; i < 8; ++i) crc = (crc >> 1) ^ ((crc & 1) ? 0xedb88320u : 0);
+    return crc;
+}
+
+static int validate_tps_media(void)
+{
+    size_t profile = (size_t)(board.profile - tps_profiles);
+    static const unsigned regions[] = {0, 1, 5, 6};
+    for (unsigned r = 0; r < 4; ++r) {
+        unsigned region = regions[r];
+        uint8_t *marked = calloc(board.sizes[region], 1);
+        if (!marked) return -1;
+        for (size_t i = 0; i < tps_media_count[profile]; ++i) {
+            const TpsMediaCheck *c = &tps_media[profile][i];
+            uint32_t crc = UINT32_MAX;
+            if (c->region != region) continue;
+            for (size_t j = 0; j < c->length; ++j) {
+                size_t lane = j % c->group;
+                size_t dst = c->offset + j / c->group * c->stride +
+                    (c->swap ? c->group - 1 - lane : lane);
+                if (dst >= board.sizes[region] || marked[dst]) { free(marked); return -1; }
+                marked[dst] = 1;
+                crc = tps_crc_byte(crc, board.regions[region][dst]);
+            }
+            if ((crc ^ UINT32_MAX) != c->crc) {
+                fprintf(stderr, "Tecmo TPS: source ROM CRC mismatch region=%u offset=%x\n", region, c->offset);
+                free(marked); return -1;
+            }
+        }
+        for (size_t j = 0; j < board.sizes[region]; ++j)
+            if (!marked[j] && board.regions[region][j]) {
+                fprintf(stderr, "Tecmo TPS: source ROM padding mismatch at %zx\n", j);
+                free(marked); return -1;
+            }
+        free(marked);
+    }
+    return 0;
+}
+
+static int load_board(const char *directory, int tps, int synthetic)
 {
     QSoundHLEConfig qcfg;
     QSoundHLEStatus qstatus;
@@ -283,42 +336,49 @@ int systemzn_load(const char *directory)
         "qsound_samples.bin", "cat702_key0.bin", "cat702_key1.bin"};
     if (board.active || systemtaito_active() || system10_active() || system11_active() || system12_active() ||
         psxRegs.ptrs.psxM || !directory) return -1;
-    if (load_config(directory, &board.profile)) return -1;
+    board.tps = tps;
+    board.synthetic = synthetic;
+    if (load_config(directory, &board.profile)) { memset(&board, 0, sizeof(board)); return -1; }
     if (load_region(directory, files[0], 0, board.profile->bios_size) ||
         load_region(directory, files[1], 1, board.profile->banked_size) ||
-        load_region(directory, files[2], 2, board.profile->country_size) ||
-        load_region(directory, files[3], 3, board.profile->audio_size) ||
-        load_region(directory, files[4], 4, board.profile->qsound_size) ||
         load_region(directory, files[5], 5, 8) || load_region(directory, files[6], 6, 8)) goto bad;
-    if (load_region(directory, "qsound_dsp.bin", 7, 0x2000)) goto bad;
-    board.qsound_words = (uint16_t *)malloc(0x1000 * sizeof(uint16_t));
-    if (!board.qsound_words) goto bad;
-    for (i = 0; i < 0x1000; i++)
-        board.qsound_words[i] = (uint16_t)(board.regions[7][i * 2] |
-            ((uint16_t)board.regions[7][i * 2 + 1] << 8));
-    memset(&qcfg, 0, sizeof(qcfg));
-    qcfg.firmware = board.qsound_words;
-    qcfg.firmware_words = 0x1000;
-    qcfg.samples = board.regions[4];
-    qcfg.sample_bytes = (uint32_t)board.sizes[4];
-    qcfg.clock_hz = 60000000;
-    qcfg.pcm = qsound_pcm;
-    qcfg.opaque = &board;
-    board.qsound = qsound_hle_create(&qcfg);
-    if (!board.qsound || qsound_hle_get_status(board.qsound, &qstatus) ||
-        qstatus.sample_rate != SYSTEMZN_QSOUND_RATE) goto bad;
+    if (tps) {
+        if (!synthetic && validate_tps_media()) goto bad;
+    } else {
+        if (load_region(directory, files[2], 2, board.profile->country_size) ||
+            load_region(directory, files[3], 3, board.profile->audio_size) ||
+            load_region(directory, files[4], 4, board.profile->qsound_size)) goto bad;
+        if (load_region(directory, "qsound_dsp.bin", 7, 0x2000)) goto bad;
+        board.qsound_words = (uint16_t *)malloc(0x1000 * sizeof(uint16_t));
+        if (!board.qsound_words) goto bad;
+        for (i = 0; i < 0x1000; i++)
+            board.qsound_words[i] = (uint16_t)(board.regions[7][i * 2] |
+                ((uint16_t)board.regions[7][i * 2 + 1] << 8));
+        memset(&qcfg, 0, sizeof(qcfg));
+        qcfg.firmware = board.qsound_words;
+        qcfg.firmware_words = 0x1000;
+        qcfg.samples = board.regions[4];
+        qcfg.sample_bytes = (uint32_t)board.sizes[4];
+        qcfg.clock_hz = 60000000;
+        qcfg.pcm = qsound_pcm;
+        qcfg.opaque = &board;
+        board.qsound = qsound_hle_create(&qcfg);
+        if (!board.qsound || qsound_hle_get_status(board.qsound, &qstatus) ||
+            qstatus.sample_rate != SYSTEMZN_QSOUND_RATE) goto bad;
 
-    memset(&cap_callbacks, 0, sizeof(cap_callbacks));
-    cap_callbacks.opaque = &board;
-    cap_callbacks.read_kick = kick_read;
-    memset(&cap_config, 0, sizeof(cap_config));
-    cap_config.main_rom = board.regions[1]; cap_config.main_rom_size = board.sizes[1];
-    cap_config.country_rom = board.regions[2]; cap_config.country_rom_size = board.sizes[2];
-    cap_config.sound_rom = board.regions[3]; cap_config.sound_rom_size = board.sizes[3];
-    cap_config.qsound_hle = board.qsound;
-    board.capcom = capcom_zn_create(&cap_config, &cap_callbacks);
-    if (!board.capcom) goto bad;
-    capcom_zn_reset(board.capcom);
+        memset(&cap_callbacks, 0, sizeof(cap_callbacks));
+        cap_callbacks.opaque = &board;
+        cap_callbacks.read_kick = kick_read;
+        memset(&cap_config, 0, sizeof(cap_config));
+        cap_config.main_rom = board.regions[1]; cap_config.main_rom_size = board.sizes[1];
+        cap_config.country_rom = board.regions[2]; cap_config.country_rom_size = board.sizes[2];
+        cap_config.sound_rom = board.regions[3]; cap_config.sound_rom_size = board.sizes[3];
+        cap_config.qsound_hle = board.qsound;
+        board.capcom = capcom_zn_create(&cap_config, &cap_callbacks);
+        if (!board.capcom) goto bad;
+        capcom_zn_reset(board.capcom);
+
+    }
 
     memset(&sio_callbacks, 0, sizeof(sio_callbacks));
     sio_callbacks.opaque = &board;
@@ -341,7 +401,7 @@ int systemzn_load(const char *directory)
     if (zn_mcu_create(&mcu_config, &board.mcu) != ZN_MCU_OK) goto bad;
 
     memset(&common_config, 0, sizeof(common_config));
-    common_config.model = !strcmp(board.profile->family, "ZN-1") ? ZN_BOARD_ZN1 : ZN_BOARD_ZN2;
+    common_config.model = board.profile->cpu_clock == 67737600 ? ZN_BOARD_ZN1 : ZN_BOARD_ZN2;
     common_config.ram_bytes = board.profile->ram_size;
     common_config.vram_bytes = board.profile->vram_size;
     common_config.cat702_count = 2;
@@ -366,10 +426,15 @@ int systemzn_load(const char *directory)
     if (systemzn_sync(psxRegs.cycle)) goto bad;
     return 0;
 bad:
-    fprintf(stderr, "SystemZN: Capcom ZN media/profile initialization failed\n");
+    fprintf(stderr, "SystemZN: media/profile initialization failed\n");
     systemzn_unload();
     return -1;
 }
+
+int systemzn_load(const char *directory) { return load_board(directory, 0, 0); }
+int systemzn_load_tps(const char *directory) { return load_board(directory, 1, 0); }
+int systemzn_test_load_tps(const char *directory) { return load_board(directory, 1, 1); }
+int systemzn_tps_active(void) { return board.active && board.tps; }
 
 void systemzn_unload(void)
 {
@@ -431,6 +496,19 @@ static void map_bankedroms(void)
     capcom_zn_status_t status;
     unsigned a;
     if (!board.active || !psxRegs.ptrs.memRLUT || !psxRegs.ptrs.memWLUT) return;
+    if (board.tps) {
+        size_t offset = (size_t)board.tps_bank * 0x800000;
+        for (a = 0; a < 3; ++a) {
+            if (board.tps_bank < 9 && offset <= board.sizes[1] && 0x800000 <= board.sizes[1] - offset)
+                map_window(fixed_aliases[a], board.regions[1] + offset, 0x800000, 0);
+            else for (size_t i = 0; i < 0x800000; i += SYSTEMZN_ROM_PAGE) {
+                unsigned index = (fixed_aliases[a] + i) >> PSXM_SHIFT;
+                psxRegs.ptrs.memRLUT[index] = psxRegs.ptrs.memWLUT[index] = INVALID_PTR_VAL;
+            }
+            if (psxCpu && psxCpu->Clear) psxCpu->Clear(fixed_aliases[a], 0x800000 / 4);
+        }
+        return;
+    }
     capcom_zn_get_status(board.capcom, &status);
     for (a = 0; a < 3; a++)
         map_window(fixed_aliases[a], board.regions[1], CAPCOM_ZN_MAIN_FIXED_SIZE, 0);
@@ -467,7 +545,8 @@ void systemzn_reset(void)
     if (!board.active) return;
     /* MAME has no device_reset override for the shared ZN MCU, CAT702, AT28C16
      * or PSX SIO devices; preserve their pin/timer/storage state on soft reset. */
-    capcom_zn_reset(board.capcom);
+    if (board.tps) board.tps_bank = 0;
+    else capcom_zn_reset(board.capcom);
     board.qsound_fraction = 0; board.sound_cycles = 0;
     board.frames = 0; board.faults = 0;
     board.last_psx_cycle = psxRegs.cycle;
@@ -483,23 +562,27 @@ int systemzn_sync(u32 psx_cycle)
     elapsed = psx_cycle - board.last_psx_cycle;
     board.last_psx_cycle = psx_cycle;
     if (elapsed) {
-        uint64_t numerator = (uint64_t)elapsed * CAPCOM_ZN_SOUND_CLOCK_HZ + board.qsound_fraction;
-        sound_cycles = numerator / PSXCLK;
-        board.qsound_fraction = numerator % PSXCLK;
+        uint64_t numerator;
+        sound_cycles = 0;
+        if (!board.tps) {
+            numerator = (uint64_t)elapsed * CAPCOM_ZN_SOUND_CLOCK_HZ + board.qsound_fraction;
+            sound_cycles = numerator / PSXCLK;
+            board.qsound_fraction = numerator % PSXCLK;
+        }
         /* SIO bit timers use the source's fixed 33.8688 MHz clock even on
          * ZN-2. MCU/EEPROM callbacks share that absolute time domain. */
         numerator = (uint64_t)elapsed * SYSTEMZN_PSX_CLOCK + board.sio_fraction;
         board.sio_cycles += numerator / PSXCLK;
         board.sio_fraction = numerator % PSXCLK;
         board.sound_cycles += sound_cycles;
-        if (sound_cycles && capcom_zn_run_sound_cycles(board.capcom, sound_cycles) < 0)
+        if (!board.tps && sound_cycles && capcom_zn_run_sound_cycles(board.capcom, sound_cycles) < 0)
             board.faults |= 8u;
     }
     sio_bus_advance(board.sio[0], board.sio_cycles);
     sio_bus_advance(board.sio[1], board.sio_cycles);
     if (sync_peripherals_to_cycle(board.sio_cycles)) board.faults |= 1u;
-    if (qsound_hle_get_status(board.qsound, &status)) board.faults |= 2u;
-    {
+    if (!board.tps && qsound_hle_get_status(board.qsound, &status)) board.faults |= 2u;
+    if (!board.tps) {
         capcom_zn_status_t cap_status;
         capcom_zn_get_status(board.capcom, &cap_status);
         if (cap_status.faults) board.faults |= 8u;
@@ -551,7 +634,19 @@ int systemzn_read(u32 address, unsigned width, u32 *value)
     if (!board.active || !value) return 0;
     result = handle_sio_read(physical, width, value);
     if (result) { if (result < 0) { board.faults |= 4u; *value = UINT32_MAX; return 1; } return 1; }
-    result = capcom_zn_main_read(board.capcom, physical, width, value);
+    if (board.tps && physical >= 0x1f000000 && physical < 0x1f800000) {
+        size_t offset = (size_t)board.tps_bank * 0x800000 + physical - 0x1f000000;
+        *value = UINT32_MAX;
+        if ((width != 1 && width != 2 && width != 4) || (physical & (width - 1)) ||
+            physical + width > 0x1f800000 || offset > board.sizes[1] || width > board.sizes[1] - offset)
+            board.faults |= 8u;
+        else {
+            *value = 0;
+            for (unsigned i = 0; i < width; ++i) *value |= (uint32_t)board.regions[1][offset + i] << (i * 8);
+        }
+        return 1;
+    }
+    result = board.tps ? 0 : capcom_zn_main_read(board.capcom, physical, width, value);
     if (result == CAPCOM_ZN_HANDLED) return 1;
     if (result < 0) { board.faults |= 8u; *value = UINT32_MAX; return 1; }
     if ((physical >= 0x1fa00000 && physical < 0x1fa40000) ||
@@ -570,7 +665,15 @@ int systemzn_write(u32 address, unsigned width, u32 value)
     result = handle_sio_write(physical, width, value);
     if (result) { if (result < 0) board.faults |= 4u; return 1; }
     if (physical == 0x1fb60000 && systemzn_sync(psxRegs.cycle)) board.faults |= 8u;
-    result = capcom_zn_main_write(board.capcom, physical, width, value);
+    if (board.tps && physical <= 0x1fb00006 && (uint64_t)physical + width > 0x1fb00006) {
+        board.tps_bank = (value >> ((0x1fb00006 - physical) * 8)) & 0xff;
+        board.tps_bank_writes++;
+        if (board.tps_bank >= 9 || (size_t)(board.tps_bank + 1) * 0x800000 > board.sizes[1])
+            board.faults |= 8u;
+        map_bankedroms();
+        return 1;
+    }
+    result = board.tps ? 0 : capcom_zn_main_write(board.capcom, physical, width, value);
     if (result == CAPCOM_ZN_HANDLED) { if (physical == 0x1fb00000) map_bankedroms(); return 1; }
     if (result < 0) { board.faults |= 8u; return 1; }
     if ((physical >= 0x1fa00000 && physical < 0x1fa40000) ||
@@ -598,6 +701,7 @@ static int set_kick(unsigned player, unsigned bit, int pressed)
 static int input_supported(const char *name, int pressed)
 {
     const char *profile = board.profile->input;
+    if (board.tps && (!strcmp(name, "coin2") || strstr(name, "button3"))) return -1;
     if (!strncmp(name, "p1", 2) || !strncmp(name, "p2", 2)) {
         unsigned player = name[1] == '1' ? 0 : 1;
         const char *control = name + 2;
@@ -676,7 +780,7 @@ void systemzn_set_audio_output(void (*callback)(void *, const int16_t *, unsigne
 { board.audio_callback = callback; board.audio_opaque = opaque; board.audio_buffer_frames = 0; }
 int systemzn_open_audio(const char *path)
 {
-    if (!board.active || board.wav.file) return -1;
+    if (!board.active || board.tps || board.wav.file) return -1;
     return pcm_wav_open(&board.wav, path, SYSTEMZN_QSOUND_RATE);
 }
 int systemzn_close_audio(void) { return pcm_wav_close(&board.wav); }
@@ -690,7 +794,7 @@ int systemzn_selftest(void)
         value != (board.profile->vram_size == 0x200000 ? 0x69 : 0x61)) return -1;
     if (systemzn_read(0x1f000000, 4, &value) != 1 ||
         value != *(uint32_t *)board.regions[1]) return -1;
-    if (systemzn_read(0x1fb80000, 4, &value) != 1 || value != *(uint32_t *)board.regions[2]) return -1;
+    if (!board.tps && (systemzn_read(0x1fb80000, 4, &value) != 1 || value != *(uint32_t *)board.regions[2])) return -1;
     if (systemzn_read(0x1fa00300, 1, &value) != 1) return -1;
     before = value;
     if (systemzn_set_input("coin1", 1) || systemzn_read(0x1fa00300, 1, &value) != 1 ||
@@ -708,6 +812,15 @@ void systemzn_report(FILE *out)
     uint16_t qreg78 = 0, qreg1 = 0, qreg2 = 0, qreg4 = 0, qreg5 = 0, qreg6 = 0;
     uint8_t sound_f010, sound_f020;
     if (!board.active || !out) return;
+    if (board.tps) {
+        fprintf(out, "Tecmo TPS: profile=%s model=COH1002M CPU=%u GPU=2 RAM=%u VRAM=%u bank=%u bank_writes=%" PRIu64 " faults=%u media=%s\n",
+            board.profile->set, board.profile->cpu_clock, board.profile->ram_size,
+            board.profile->vram_size, board.tps_bank, board.tps_bank_writes, board.faults,
+            board.synthetic ? "SYNTHETIC_FIXTURE" : "SOURCE_VERIFIED");
+        fprintf(out, "Tecmo TPS: SPU=33868800Hz SIO0=%" PRIu64 " SIO1=%" PRIu64 " time_us=%" PRIu64 "\n",
+            psx_sio_elapsed_cycles(board.sio[0]), psx_sio_elapsed_cycles(board.sio[1]), cycles_to_us(board.peripheral_cycles));
+        return;
+    }
     capcom_zn_get_status(board.capcom, &status);
     qsound_hle_get_status(board.qsound, &qstatus);
     qsound_hle_read_register(board.qsound, 0x78, &qreg78);

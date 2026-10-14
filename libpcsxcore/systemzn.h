@@ -1,4 +1,4 @@
-/* GPL-2.0-or-later. Native host adapter for Sony ZN / Capcom ZN boards. */
+/* GPL-2.0-or-later. Native host adapter for Sony ZN / Capcom ZN / common Tecmo TPS boards. */
 #ifndef PCSX_SYSTEMZN_H
 #define PCSX_SYSTEMZN_H
 #include <stddef.h>
@@ -6,6 +6,10 @@
 #include "psxcommon.h"
 
 int systemzn_load(const char *directory);
+int systemzn_load_tps(const char *directory);
+/* Explicit synthetic host test path, never used by the normal TPS loader. */
+int systemzn_test_load_tps(const char *directory);
+int systemzn_tps_active(void);
 void systemzn_unload(void);
 int systemzn_active(void);
 /* Pinned MAME main CPU input clock; zero when the board is inactive. */

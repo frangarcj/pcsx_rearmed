@@ -78,7 +78,7 @@ ifeq ($(ARCADE_TIMING),1)
 CFLAGS += -DPCSX_ARCADE_SOURCE_TIMING
 endif
 SOURCES += libpcsxcore/arcade/mame_zip.c libpcsxcore/arcade/system12_romset.c
-SOURCES += libpcsxcore/system12.c libpcsxcore/system11.c libpcsxcore/system10.c libpcsxcore/systemzn.c libpcsxcore/systemtaito.c libpcsxcore/systemgnet.c libpcsxcore/arcade/c352.c libpcsxcore/arcade/psx_screen_clock.c libpcsxcore/arcade/serial_nvram.c \
+SOURCES += libpcsxcore/system12.c libpcsxcore/system11.c libpcsxcore/system10.c libpcsxcore/systemzn.c libpcsxcore/systemtaito.c libpcsxcore/arcade/c352.c libpcsxcore/arcade/psx_screen_clock.c libpcsxcore/arcade/serial_nvram.c \
   libpcsxcore/arcade/namcos11_board.c libpcsxcore/arcade/at28c16.c libpcsxcore/arcade/pcm_wav.c \
   libpcsxcore/arcade/namcos10_io.c libpcsxcore/arcade/nor_flash.c \
   libpcsxcore/arcade/zn_board.c libpcsxcore/arcade/zn_mcu.c libpcsxcore/arcade/cat702.c \
@@ -86,7 +86,7 @@ SOURCES += libpcsxcore/system12.c libpcsxcore/system11.c libpcsxcore/system10.c 
   libpcsxcore/arcade/taito_fx1.c libpcsxcore/arcade/taito_sound_comm.c libpcsxcore/arcade/mb3773.c \
   libpcsxcore/arcade/mb89371.c libpcsxcore/arcade/i8251.c \
   libpcsxcore/arcade/eeprom93c46.c
-CFLAGS += -DPCSX_SYSTEM_GNET -I$(BUILD)/gnet-generated -Ilibpcsxcore/arcade/tms57002
+CFLAGS += -I$(BUILD)/gnet-generated -Ilibpcsxcore/arcade/tms57002
 SOURCES += libpcsxcore/arcade/zsg2.c
 CXXSOURCES := libpcsxcore/arcade/gnet_zoom.cpp libpcsxcore/arcade/rf5c296.cpp \
  libpcsxcore/arcade/gnet_pccard.cpp \
@@ -105,8 +105,8 @@ CXXSOURCES := libpcsxcore/arcade/gnet_zoom.cpp libpcsxcore/arcade/rf5c296.cpp \
   libpcsxcore/arcade/ncr53cf96.cpp \
   libpcsxcore/arcade/nscsi_bus.cpp libpcsxcore/arcade/nscsi_target.cpp
 ifeq ($(HAVE_CHD),1)
-CFLAGS += -DPCSX_SYSTEM_GV
-SOURCES += libpcsxcore/systemgv.c
+CFLAGS += -DPCSX_SYSTEM_GV -DPCSX_SYSTEM_GNET
+SOURCES += libpcsxcore/systemgv.c libpcsxcore/systemgnet.c
 CFLAGS += -DPCSX_SYSTEM12_CDXA
 CXXSOURCES += libpcsxcore/arcade/sh2.cpp libpcsxcore/arcade/system12_cdxa.cpp
 CXXSOURCES += libpcsxcore/arcade/konamigv.cpp libpcsxcore/arcade/nscsi_cd.cpp
@@ -128,7 +128,7 @@ $(BUILD)/libpcsxcore/arcade/tms57002/tms57002_core.o \
 $(BUILD)/libpcsxcore/arcade/tms57002/tms57kdec.o \
 $(BUILD)/libpcsxcore/arcade/tms57002/tmsops.o: $(GNET_TMS_HEADER)
 
-.PHONY: all clean smoke board-test system11-test system10-test systemgv-test capcom-zn-test taito-fx1-test systemgnet-test gpu-type1-test devices-test FORCE
+.PHONY: all clean smoke board-test system11-test system10-test systemgv-test tecmo-tps-test capcom-zn-test taito-fx1-test systemgnet-test gpu-type1-test devices-test FORCE
 all: $(TARGET)
 $(TARGET): $(OBJECTS) $(SHELF_LIB)
 	$(CXX) -arch arm64 -Wl,-dead_strip -o $@ $(OBJECTS) -lz -lm $(GPU_LIBS)
@@ -173,6 +173,9 @@ systemgv-test: $(TARGET)
 ifeq ($(DRC),1)
 	python3 tests/check_systemgv_harness.py --harness $(TARGET) --drc
 endif
+tecmo-tps-test: $(TARGET)
+	python3 scripts/generate_tecmo_tps_profiles.py --check
+	python3 tests/check_tecmo_tps_harness.py --harness $(TARGET)
 capcom-zn-test: $(TARGET)
 	python3 tests/check_capcom_zn_harness.py --harness $(TARGET)
 taito-fx1-test: $(TARGET)

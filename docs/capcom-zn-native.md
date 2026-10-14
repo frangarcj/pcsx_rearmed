@@ -39,3 +39,10 @@ now pass [short Mac interpreter/GL gameplay checks](capcom-zn-mac.md) with
 nonzero QSound capture. The fixtures also independently verify main CPU to
 Z80/SIO clock ratios. Full timing equivalence and the mainboard SPU audio mix
 remain pending.
+
+
+The shared native `systemzn` motherboard now also has an explicit
+`--tecmo-tps` loader for the source-reviewed common TPS map. That path uses
+8 MiB ROM banks and PSX SPU rather than this Capcom daughterboard. Its profiles
+and source CRC/padding checks are separate; the existing Capcom fixture remains
+passing. See [Tecmo TPS Mac validation](tecmo-tps-mac.md).
