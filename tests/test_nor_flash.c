@@ -304,6 +304,8 @@ int main(void)
                             0x89, 0x4471);
     test_gnet_intel_profile(NOR_FLASH_INTEL_TE28F160_X16, 0x200000,
                             0xb0, 0x00d0);
+    test_gnet_intel_profile(NOR_FLASH_SHARP_LH28F400_X16, 0x80000,
+                            0xb0, 0x00ed);
     test_amd_profile(NOR_FLASH_FUJITSU_MBM29F016A, 0x200000,
                      0x04, 0xad, 0x10000, 1000000, 1);
     test_amd_profile(NOR_FLASH_AMD_29F040, 0x80000,

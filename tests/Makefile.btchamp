@@ -1,0 +1,14 @@
+.DEFAULT_GOAL := test
+CC ?= clang
+BUILD ?= build/btchamp-tests
+OPT ?= -O2 -g
+CFLAGS := -std=c99 $(OPT) -Wall -Wextra -Werror
+ARCADE := libpcsxcore/arcade
+.PHONY: test sanitize
+$(BUILD)/test-btchamp: tests/test_btchamp_io.c $(ARCADE)/btchamp_io.c $(ARCADE)/btchamp_io.h $(ARCADE)/upd4701.c $(ARCADE)/nor_flash.c
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) tests/test_btchamp_io.c $(ARCADE)/btchamp_io.c $(ARCADE)/upd4701.c $(ARCADE)/nor_flash.c -o $@
+test: $(BUILD)/test-btchamp
+	$(BUILD)/test-btchamp
+sanitize:
+	$(MAKE) -f tests/Makefile.btchamp BUILD=$(BUILD)/sanitize OPT='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' test

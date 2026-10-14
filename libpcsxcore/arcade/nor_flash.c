@@ -143,6 +143,16 @@ static int profile_spec(nor_flash_profile_t profile, flash_spec *spec)
         spec->fujitsu_busy_reads_all = 0;
         spec->intel_mame_program = 1; spec->intel_amd_commands = 1;
         return 1;
+    case NOR_FLASH_SHARP_LH28F400_X16:
+        /* Pinned intelfsh16_device: 512 KiB, uniform 64 KiB erase blocks,
+         * Sharp ID B0/ED and the shared source command machine. */
+        spec->size = 0x80000; spec->width = 16;
+        spec->maker = 0xb0; spec->device = 0x00ed;
+        spec->sector = 0x10000; spec->sector_erase_us = 1000000;
+        spec->chip_erase_us = 16000000; spec->intel = 1;
+        spec->fujitsu_busy_reads_all = 0;
+        spec->intel_mame_program = 1; spec->intel_amd_commands = 1;
+        return 1;
     default:
         return 0;
     }
@@ -157,6 +167,7 @@ const char *nor_flash_profile_name(nor_flash_profile_t profile)
     case NOR_FLASH_SST_39SF040: return "SST 39SF040";
     case NOR_FLASH_INTEL_E28F400B_X16: return "Intel E28F400B x16";
     case NOR_FLASH_INTEL_TE28F160_X16: return "Intel TE28F160 x16";
+    case NOR_FLASH_SHARP_LH28F400_X16: return "Sharp LH28F400 x16";
     default: return "unsupported NOR profile";
     }
 }

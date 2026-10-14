@@ -17,7 +17,8 @@ typedef enum nor_flash_profile {
     NOR_FLASH_AMD_29F040,
     NOR_FLASH_SST_39SF040,
     NOR_FLASH_INTEL_E28F400B_X16,
-    NOR_FLASH_INTEL_TE28F160_X16
+    NOR_FLASH_INTEL_TE28F160_X16,
+    NOR_FLASH_SHARP_LH28F400_X16
 } nor_flash_profile_t;
 
 typedef enum nor_flash_result {
