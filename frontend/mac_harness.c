@@ -218,10 +218,12 @@ static int load_system12(const char *path)
 static PcmWav spu_wav;
 static void (*spu_original_feed)(void *, int);
 static unsigned spu_audio_peak;
+static int source_spu_speaker_board(void)
+{ return selected_board && (selected_board->family == 104 || selected_board->family == 107); }
 static void capture_spu_pcm(void *data, int bytes)
 {
   const int16_t *samples = data;
-  if (selected_board && selected_board->family == 104 && spu_original_feed)
+  if (source_spu_speaker_board() && spu_original_feed)
     spu_original_feed(data, bytes);
   int16_t four[256 * 4] = {0};
   if (bytes < 0 || (bytes & 3)) { spu_wav.error = 1; return; }
@@ -256,7 +258,8 @@ static int close_spu_audio(void)
   spu_original_feed = NULL;
   fprintf(stderr, "%s SPU: rate=%u frames=%" PRIu64 " peak=%u WAV_bytes=%" PRIu64 "\n",
     selected_board && selected_board->family == 102 ? "KonamiGV" :
-    selected_board && selected_board->family == 104 ? "TecmoTPS" : "System10",
+    selected_board && selected_board->family == 104 ? "TecmoTPS" :
+    selected_board && selected_board->family == 107 ? "ViscoZN" : "System10",
     spu_wav.rate, spu_wav.bytes / 4, spu_audio_peak, spu_wav.bytes);
   return pcm_wav_close(&spu_wav);
 }
@@ -281,6 +284,9 @@ static const HarnessBoard boards[] = {
   {106, "RaizingZN", systemzn_load_raizing, systemzn_unload, systemzn_sync,
     systemzn_set_input, systemzn_selftest, systemzn_report,
     systemzn_open_audio, systemzn_close_audio, systemzn_eeprom_import, systemzn_eeprom_export},
+  {107, "ViscoZN", systemzn_load_visco, systemzn_unload, systemzn_sync,
+    systemzn_set_input, systemzn_selftest, systemzn_report,
+    open_spu_audio, close_spu_audio, systemzn_eeprom_import, systemzn_eeprom_export},
   {104, "TecmoTPS", systemzn_load_tps, systemzn_unload, systemzn_sync,
     systemzn_set_input, systemzn_selftest, systemzn_report,
     open_spu_audio, close_spu_audio, systemzn_eeprom_import, systemzn_eeprom_export},
@@ -370,7 +376,7 @@ void SysRunGui(void) { interrupted = 1; }
 
 static void usage(const char *name)
 {
-  fprintf(stderr, "usage: %s (--exe PS-X-EXE | --system12 REGION-DIR | --system11 REGION-DIR | --system10 REGION-DIR | --capcom-zn REGION-DIR | --tecmo-tps REGION-DIR | --raizing-zn REGION-DIR | --taito-fx1 REGION-DIR | --taito-fx1z REGION-DIR | --system-gv REGION-DIR | --system-gnet REGION-DIR | --system-gnet-fixture) "
+  fprintf(stderr, "usage: %s (--exe PS-X-EXE | --system12 REGION-DIR | --system11 REGION-DIR | --system10 REGION-DIR | --capcom-zn REGION-DIR | --tecmo-tps REGION-DIR | --raizing-zn REGION-DIR | --visco-zn REGION-DIR | --taito-fx1 REGION-DIR | --taito-fx1z REGION-DIR | --system-gv REGION-DIR | --system-gnet REGION-DIR | --system-gnet-fixture) "
     "[--frames N] [--output FRAME.ppm] [--capture-gl] [--dump-vram FILE] [--dump-ram FILE] [--board-test] [--verify-smoke] "
     "[--inputs FILE.csv] [--audio FILE.wav] [--mixed-audio FILE.wav] [--nvram FILE] [--gnet-jp1 on|off] "
     "[--audio-test-fixture] "
@@ -415,7 +421,7 @@ static void interactive_board_input(const char *control, int pressed)
     char name[32];
     snprintf(name, sizeof(name), "%.2s_%s", control, control + 2);
     selected_board->set_input(name, pressed);
-  } else if ((selected_board->family == 104 || selected_board->family == 106) && !strcmp(control, "service"))
+  } else if ((selected_board->family == 104 || selected_board->family == 106 || selected_board->family == 107) && !strcmp(control, "service"))
     selected_board->set_input("service1", pressed);
   else selected_board->set_input(control, pressed);
 }
@@ -507,7 +513,7 @@ static void release_interactive_input(void)
 
 static int interactive_pad_button(const char *control)
 {
-  if (!selected_board || (selected_board->family != 103 && selected_board->family != 104 && selected_board->family != 105 && selected_board->family != 106) || !interactive_focused) return 0;
+  if (!selected_board || (selected_board->family != 103 && selected_board->family != 104 && selected_board->family != 105 && selected_board->family != 106 && selected_board->family != 107) || !interactive_focused) return 0;
   unsigned port = control[0] == 'p' && control[1] == '2' ? 1 : 0;
   const char *name = control[0] == 'p' ? control + 2 : control;
   SDL_Gamepad *pad = interactive_pads[port];
@@ -634,7 +640,7 @@ static void poll_interactive_input(void)
         set_interactive_control(interactive_keys[i].control, 0);
       }
   }
-  if (update_pads && !interactive_replay && interactive_focused && selected_board && (selected_board->family == 103 || selected_board->family == 104 || selected_board->family == 105 || selected_board->family == 106))
+  if (update_pads && !interactive_replay && interactive_focused && selected_board && (selected_board->family == 103 || selected_board->family == 104 || selected_board->family == 105 || selected_board->family == 106 || selected_board->family == 107))
     for (unsigned i = 0; i < sizeof(interactive_keys) / sizeof(interactive_keys[0]); ++i)
       set_interactive_control(interactive_keys[i].control, 0);
   poll_interactive_analog();
@@ -660,8 +666,8 @@ static const char *interactive_mix_path;
 static int interactive_audio_error, interactive_mixing;
 static void (*interactive_spu_feed)(void *, int);
 static u32 interactive_spu_cycle;
-static uint64_t interactive_tps_frames, interactive_tps_nonzero;
-static unsigned interactive_tps_peak;
+static uint64_t interactive_zn_spu_frames, interactive_zn_spu_nonzero;
+static unsigned interactive_zn_spu_peak;
 unsigned mac_interactive_get_volume(void) { return interactive_volume; }
 
 static void interactive_audio_cb(void *opaque, const int16_t *stereo,
@@ -699,13 +705,13 @@ static void interactive_spu_pcm(void *data, int bytes)
       samples[i * 2 + 1] * ((selected_board->family == 106 ? 0.35f : 0.3f) / 32768.0f));
 }
 
-static void interactive_tps_pcm(void *data, int bytes)
+static void interactive_zn_spu_pcm(void *data, int bytes)
 {
   const int16_t *samples = data;
   int16_t stereo[256 * 2];
   if (bytes < 0 || (bytes & 3)) { interactive_audio_error = 1; return; }
   unsigned frames = (unsigned)bytes / 4;
-  interactive_tps_frames += frames;
+  interactive_zn_spu_frames += frames;
   while (frames) {
     unsigned n = frames > 256 ? 256 : frames;
     for (unsigned i = 0; i < n * 2; ++i) {
@@ -714,9 +720,9 @@ static void interactive_tps_pcm(void *data, int bytes)
       if (value > 32767) value = 32767;
       if (value < -32768) value = -32768;
       stereo[i] = value;
-      if (value) interactive_tps_nonzero++;
+      if (value) interactive_zn_spu_nonzero++;
       unsigned peak = value < 0 ? -value : value;
-      if (peak > interactive_tps_peak) interactive_tps_peak = peak;
+      if (peak > interactive_zn_spu_peak) interactive_zn_spu_peak = peak;
     }
     interactive_audio_cb(NULL, stereo, n);
     samples += n * 2; frames -= n;
@@ -725,7 +731,7 @@ static void interactive_tps_pcm(void *data, int bytes)
 
 static int open_interactive_audio(void)
 {
-  const SDL_AudioSpec spec = { SDL_AUDIO_S16, 2, selected_board->family == 103 || selected_board->family == 104 || selected_board->family == 105 || selected_board->family == 106 ? 44100 : 88200 };
+  const SDL_AudioSpec spec = { SDL_AUDIO_S16, 2, selected_board->family == 103 || selected_board->family == 104 || selected_board->family == 105 || selected_board->family == 106 || selected_board->family == 107 ? 44100 : 88200 };
   if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) return -1;
   interactive_audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
       &spec, NULL, NULL);
@@ -751,11 +757,11 @@ static int open_interactive_audio(void)
 #endif
     if (selected_board->family == 106) fprintf(stderr, "Interactive Raizing audio: SPU=33868800/768 Hz gain=0.35 YMF271=16934400/384 Hz gain=1 output=44100 Hz\n");
     else fprintf(stderr, "Interactive %s audio: SPU=%u/768 Hz gain=0.3 Zoom=25000000/768 Hz gain=1 output=44100 Hz\n", selected_board->family == 105 ? "FX1Z" : "G-Net", PSXCLK);
-  } else if (selected_board->family == 104) {
+  } else if (source_spu_speaker_board()) {
     interactive_spu_feed = out_current->feed;
     interactive_spu_cycle = psxRegs.cycle;
-    out_current->feed = interactive_tps_pcm;
-    fprintf(stderr, "Interactive Tecmo TPS audio: SPU=44100 Hz gain=0.35 output=44100 Hz\n");
+    out_current->feed = interactive_zn_spu_pcm;
+    fprintf(stderr, "Interactive %s audio: SPU=44100 Hz gain=0.35 output=44100 Hz\n", selected_board->family == 107 ? "Visco ZN" : "Tecmo TPS");
   } else {
     system12_set_audio_output(interactive_audio_cb, NULL);
     mac_interactive_set_volume(400);
@@ -766,7 +772,7 @@ static int open_interactive_audio(void)
 /* Keep about three frames queued: enough to avoid gaps, little latency. */
 static void wait_interactive_audio(void)
 {
-  const int rate = interactive_mixing || selected_board->family == 104 ? 44100 : 88200;
+  const int rate = interactive_mixing || source_spu_speaker_board() ? 44100 : 88200;
   const int limit = rate * 4 / 60 * 3;
   while (!interrupted && !interactive_audio_error) {
     int queued = SDL_GetAudioStreamQueued(interactive_audio);
@@ -799,13 +805,13 @@ static void close_interactive_audio(void)
       interactive_mix.lane[0].count, interactive_mix.lane[1].count,
       interactive_mix.error || interactive_audio_error);
     if (interactive_mix.error) interactive_audio_error = 1;
-  } else if (selected_board->family == 104) {
+  } else if (source_spu_speaker_board()) {
     if (SPU_async) SPU_async(psxRegs.cycle, 1);
-    if (spu_original_feed == interactive_tps_pcm) spu_original_feed = interactive_spu_feed;
-    if (out_current->feed == interactive_tps_pcm) out_current->feed = interactive_spu_feed;
+    if (spu_original_feed == interactive_zn_spu_pcm) spu_original_feed = interactive_spu_feed;
+    if (out_current->feed == interactive_zn_spu_pcm) out_current->feed = interactive_spu_feed;
     interactive_spu_feed = NULL;
-    fprintf(stderr, "Interactive Tecmo TPS audio: frames=%" PRIu64 " nonzero=%" PRIu64 " peak=%u error=%d\n",
-      interactive_tps_frames, interactive_tps_nonzero, interactive_tps_peak, interactive_audio_error);
+    fprintf(stderr, "Interactive %s audio: frames=%" PRIu64 " nonzero=%" PRIu64 " peak=%u error=%d\n",
+      selected_board->family == 107 ? "Visco ZN" : "Tecmo TPS", interactive_zn_spu_frames, interactive_zn_spu_nonzero, interactive_zn_spu_peak, interactive_audio_error);
   } else system12_set_audio_output(NULL, NULL);
   if (pcm_wav_close(&interactive_mix_wav)) interactive_audio_error = 1;
   SDL_DestroyAudioStream(interactive_audio);
@@ -989,7 +995,7 @@ int main(int argc, char **argv)
   size_t input_event_count = 0, next_input_event = 0;
 #endif
   const char *ram_path = NULL;
-  int tps_fixture = 0, fx1z_fixture = 0, raizing_fixture = 0;
+  int tps_fixture = 0, fx1z_fixture = 0, raizing_fixture = 0, visco_fixture = 0;
   const char *trace_path = NULL;
   FILE *trace = NULL;
   const char *snapshot_path = NULL;
@@ -1079,20 +1085,24 @@ int main(int argc, char **argv)
       if (board) { usage(argv[0]); return 2; }
       board = argv[++i]; board_family = 106; board_test = raizing_fixture = 1;
     }
+    else if (!strcmp(argv[i], "--visco-zn-fixture") && i + 1 < argc) {
+      if (board) { usage(argv[0]); return 2; }
+      board = argv[++i]; board_family = 107; board_test = visco_fixture = 1;
+    }
     else if (!strcmp(argv[i], "--tecmo-tps-fixture") && i + 1 < argc) {
       if (board) { usage(argv[0]); return 2; }
       board = argv[++i]; board_family = 104; board_test = tps_fixture = 1;
     }
     else if ((!strcmp(argv[i], "--system12") || !strcmp(argv[i], "--system11") ||
         !strcmp(argv[i], "--system10") || !strcmp(argv[i], "--capcom-zn") ||
-        !strcmp(argv[i], "--tecmo-tps") || !strcmp(argv[i], "--raizing-zn") ||
+        !strcmp(argv[i], "--tecmo-tps") || !strcmp(argv[i], "--raizing-zn") || !strcmp(argv[i], "--visco-zn") ||
         !strcmp(argv[i], "--taito-fx1") || !strcmp(argv[i], "--taito-fx1z") || !strcmp(argv[i], "--system-gv") ||
         !strcmp(argv[i], "--system-gnet")) && i + 1 < argc) {
       if (board) { usage(argv[0]); return 2; }
       board_family = !strcmp(argv[i], "--system11") ? 11 :
         !strcmp(argv[i], "--system10") ? 10 : !strcmp(argv[i], "--capcom-zn") ? 100 :
         !strcmp(argv[i], "--taito-fx1") ? 101 : !strcmp(argv[i], "--system-gv") ? 102 :
-        !strcmp(argv[i], "--system-gnet") ? 103 : !strcmp(argv[i], "--tecmo-tps") ? 104 : !strcmp(argv[i], "--taito-fx1z") ? 105 : !strcmp(argv[i], "--raizing-zn") ? 106 : 12;
+        !strcmp(argv[i], "--system-gnet") ? 103 : !strcmp(argv[i], "--tecmo-tps") ? 104 : !strcmp(argv[i], "--taito-fx1z") ? 105 : !strcmp(argv[i], "--raizing-zn") ? 106 : !strcmp(argv[i], "--visco-zn") ? 107 : 12;
       board = argv[++i];
     }
     else if (!strcmp(argv[i], "--output") && i + 1 < argc) output = argv[++i];
@@ -1225,8 +1235,8 @@ int main(int argc, char **argv)
   }
   if (interactive) {
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
-    if (!board || (board_family != 12 && board_family != 103 && board_family != 104 && board_family != 105 && board_family != 106) || board_test) {
-      fprintf(stderr, "interactive mode requires System12, G-Net, Tecmo TPS, FX1Z or Raizing ZN without board-test options\n");
+    if (!board || (board_family != 12 && board_family != 103 && board_family != 104 && board_family != 105 && board_family != 106 && board_family != 107) || board_test) {
+      fprintf(stderr, "interactive mode requires System12, G-Net, Tecmo TPS, FX1Z, Raizing ZN or Visco ZN without board-test options\n");
       return 2;
     }
     if (!frames_requested) frames = UINT32_MAX / 4;
@@ -1240,12 +1250,12 @@ int main(int argc, char **argv)
     fprintf(stderr,"--gnet-jp1 requires an authentic G-Net profile\n"); return 2;
   }
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
-  if (interactive_mix_path && (!interactive || (board_family != 103 && board_family != 104 && board_family != 105 && board_family != 106) ||
+  if (interactive_mix_path && (!interactive || (board_family != 103 && board_family != 104 && board_family != 105 && board_family != 106 && board_family != 107) ||
       !strcmp(interactive_mix_path, output) ||
       (audio_path && !strcmp(interactive_mix_path, audio_path)) ||
       (nvram_path && !strcmp(interactive_mix_path, nvram_path)) ||
       (inputs_path && !strcmp(interactive_mix_path, inputs_path)))) {
-    fprintf(stderr, "--mixed-audio requires interactive G-Net, Tecmo TPS, FX1Z or Raizing ZN and a separate output path\n"); return 2;
+    fprintf(stderr, "--mixed-audio requires interactive G-Net, Tecmo TPS, FX1Z, Raizing ZN or Visco ZN and a separate output path\n"); return 2;
   }
 #endif
   if (ram_path) {
@@ -1316,6 +1326,7 @@ int main(int argc, char **argv)
   }
 #endif
   if (fx1z_fixture && (exe || inputs_path || audio_path || interactive || use_drc)) { usage(argv[0]); return 2; }
+  if (visco_fixture && (exe || inputs_path || audio_path || nvram_path || interactive || use_drc)) { usage(argv[0]); return 2; }
   if (raizing_fixture && (exe || inputs_path || audio_path || nvram_path || interactive || use_drc)) { usage(argv[0]); return 2; }
   if (tps_fixture && (exe || inputs_path || audio_path || nvram_path || interactive || use_drc)) {
     usage(argv[0]); return 2;
@@ -1434,6 +1445,7 @@ int main(int argc, char **argv)
       board_load_result = -1;
 #endif
     } else if (tps_fixture) board_load_result = systemzn_test_load_tps(board);
+    else if (visco_fixture) board_load_result = systemzn_test_load_visco(board);
     else if (raizing_fixture) board_load_result = systemzn_test_load_raizing(board);
     else if (fx1z_fixture) board_load_result = systemtaito_test_load_fx1z(board);
     else board_load_result = selected_board->load(board);
@@ -1484,10 +1496,10 @@ int main(int argc, char **argv)
   }
 #endif
 #if defined(GPU_VITA_CTR) && defined(PCSX_SYSTEM12)
-  if (selected_board && selected_board->family == 106) {
+  if (selected_board && (selected_board->family == 106 || selected_board->family == 107)) {
     extern void VitaCtrNativeRenderer_SetPresentationRotation(unsigned degrees);
     VitaCtrNativeRenderer_SetPresentationRotation(systemzn_rotation());
-    fprintf(stderr, "Raizing presentation rotation=%u\n", systemzn_rotation());
+    fprintf(stderr, "%s presentation rotation=%u\n", selected_board->name, systemzn_rotation());
   }
 #endif
   psxReset();
@@ -1503,7 +1515,7 @@ int main(int argc, char **argv)
     extern int harness_gpu_type1_selftest(void);
     if (selected_board->selftest() || (gpu_get_model() == 1 ? harness_gpu_type1_selftest() :
         harness_gpu_vram_selftest())) result = 1;
-    if ((board_family == 101 || board_family == 102 || board_family == 104 || board_family == 105 || board_family == 106) &&
+    if ((board_family == 101 || board_family == 102 || board_family == 104 || board_family == 105 || board_family == 106 || board_family == 107) &&
         harness_source_spu_dma_fixture(selected_board->name, 33868800, 24000)) result = 1;
   }
 #ifdef PCSX_SYSTEM_GV
@@ -1714,7 +1726,7 @@ int main(int argc, char **argv)
       /* At 50 MHz a whole video frame exceeds dfsound's 914-sample work
        * buffer. Service silent SPU intervals as well as its IRQ/MMIO paths,
        * so Zoom and SPU retain the same source-clock epoch. */
-      if ((interactive_mixing || selected_board->family == 104) && (u32)(psxRegs.cycle - interactive_spu_cycle) >= 256u * 768u) {
+      if ((interactive_mixing || source_spu_speaker_board()) && (u32)(psxRegs.cycle - interactive_spu_cycle) >= 256u * 768u) {
         if (SPU_async) SPU_async(psxRegs.cycle, 0);
         interactive_spu_cycle = psxRegs.cycle;
       }

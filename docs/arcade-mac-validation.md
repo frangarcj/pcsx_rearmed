@@ -18,7 +18,7 @@ intermediate results. Physical Vita is outside this Mac pass.
 | Taito FX1Z, 1/2 MiB VRAM | RayStorm (`raystorm`), G-Darius Ver.2 (`gdarius2`) | Both interpreter/GL interactive player runs pass with exercised controls, live SPU/Zoom mix, persisted FRAM/EEPROM and zero device faults; `taito-fx1z-mac.md` |
 | Tecmo TPS common SPU map | Gallop Racer 2 (`glpracr2`) | Interpreter/GL interactive player race, 138/138 inputs, exact source-gain SDL/SPU capture and zero board faults; `tecmo-tps-mac.md` |
 | Tecmo TPS sound/link variants | Cool Boarders Arcade Jam (`cbaj`), Gallop Racer 2 Link (`glpracr2l`) | Z80/YMZ280B/FIFO and Z80 link configurations require separate native coverage; media/runtime pending |
-| Video System/Visco ZN-1 | Aero Fighters Special (`aerofgts`) | Source COH1002V configuration uses common ZN/SPU plus its own ROM map and portrait presentation; media/adapter/runtime pending |
+| Video System/Visco ZN-1 | Aero Fighters Special (`aerofgts`) | USA source-audited; native interpreter/GL 1P shooting, 112/112 inputs, portrait presentation, exact source-gain SPU/SDL capture and zero faults; `visco-zn-mac.md` |
 | Atlus ZN-1 | Heaven's Gate (`hvnsgate`) | Source COH1001L adds 68000/YMZ280B; media/adapter/runtime pending |
 | Time Warner/Atari ZN-1 | Primal Rage II (`primrag2`) | Source COH1000W uses 8 MiB RAM, VT83C461 HDD and DMA5, with a 600 ms watchdog; media/adapter/runtime pending |
 | Acclaim ZN-1 ROM/sound | NBA Jam Extreme (`nbajamex`) | Source adds SRAM/bank mapping and Acclaim RAX sound; media/adapter/runtime pending |
@@ -51,10 +51,12 @@ from the arcade boards.
   pending; authentic ARM64 DRC still uses console serial MMIO handlers.
 - Common Tecmo TPS now passes Gallop Racer 2 player racing and live native sound.
   FX1Z now passes RayStorm/G-Darius Ver.2 with its ROM-backed Zoom daughterboard
-  and both VRAM configurations. Raizing now passes Bloody Roar 2 combat and Brave Blade 1P shooting with its
-  MC68000/YMF271 and portrait presentation. Proceed to Video System/Visco
-  Aero Fighters Special and the remaining source families; TPS sound/link
-  variants retain separate pending rows.
+  and both VRAM configurations. Raizing now passes Bloody Roar 2 combat and
+  Brave Blade 1P shooting with its MC68000/YMF271 and portrait presentation.
+  Video System/Visco now passes Aero Fighters Special USA player shooting with
+  its 24-bank ROM map and live SPU audio. Proceed to Atlus Heaven's Gate and
+  the remaining source families; TPS sound/link variants retain separate
+  pending rows.
 
 Local evidence is in `artifacts/boards-mac-20261014`; scratch/reference runs are
 under `/tmp/pcsx-boards-mac-20261014`. The user-linked Internet Archive collection

@@ -148,7 +148,7 @@ $(M68000_OBJECTS): $(BUILD)/m68000-generated/%.o: $(BUILD)/m68000-generated/%.cp
 endif
 CXX_STANDARD = c++17
 
-.PHONY: all clean smoke board-test system11-test system10-test systemgv-test tecmo-tps-test raizing-zn-test taito-fx1z-test capcom-zn-test taito-fx1-test systemgnet-test gpu-type1-test devices-test FORCE
+.PHONY: all clean smoke board-test system11-test system10-test systemgv-test tecmo-tps-test raizing-zn-test visco-zn-test taito-fx1z-test capcom-zn-test taito-fx1-test systemgnet-test gpu-type1-test devices-test FORCE
 all: $(TARGET)
 $(TARGET): $(OBJECTS) $(SHELF_LIB)
 	$(CXX) -arch arm64 -Wl,-dead_strip -o $@ $(OBJECTS) -lz -lm $(GPU_LIBS)
@@ -193,6 +193,9 @@ systemgv-test: $(TARGET)
 ifeq ($(DRC),1)
 	python3 tests/check_systemgv_harness.py --harness $(TARGET) --drc
 endif
+visco-zn-test: $(TARGET)
+	python3 scripts/generate_visco_zn_profiles.py --check
+	python3 tests/check_visco_zn_harness.py --harness $(TARGET)
 raizing-zn-test: $(TARGET)
 	python3 scripts/generate_raizing_zn_profiles.py --check
 	python3 tests/check_raizing_zn_harness.py --harness $(TARGET)

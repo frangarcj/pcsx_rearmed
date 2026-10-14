@@ -1,4 +1,4 @@
-/* GPL-2.0-or-later. Native host adapter for Sony ZN / Capcom ZN / common Tecmo TPS boards. */
+/* GPL-2.0-or-later. Native host adapter for source-derived Sony ZN daughterboards. */
 #ifndef PCSX_SYSTEMZN_H
 #define PCSX_SYSTEMZN_H
 #include <stddef.h>
@@ -13,6 +13,9 @@ int systemzn_tps_active(void);
 int systemzn_load_raizing(const char *directory);
 int systemzn_test_load_raizing(const char *directory);
 int systemzn_raizing_active(void);
+int systemzn_load_visco(const char *directory);
+int systemzn_test_load_visco(const char *directory);
+int systemzn_visco_active(void);
 unsigned systemzn_rotation(void);
 void systemzn_set_ymf_audio_output(void (*callback)(void *, float, float, uint64_t), void *opaque);
 void systemzn_unload(void);

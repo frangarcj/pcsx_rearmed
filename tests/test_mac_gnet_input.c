@@ -99,6 +99,17 @@ int main(void)
     memset(&e,0,sizeof(e));e.type=SDL_EVENT_WINDOW_FOCUS_LOST;
     assert(SDL_PushEvent(&e));poll_interactive_input();assert(!beast && !beast2);
     puts("Raizing SDL exact input names, fourth buttons, service, gamepad, focus and replay PASS");
+    board.family=107; interactive_focused=1;
+    key(SDL_SCANCODE_5,1);key(SDL_SCANCODE_1,1);key(SDL_SCANCODE_A,1);key(SDL_SCANCODE_9,1);
+    assert(coin && start && fire && service);
+    release_interactive_input();assert(!coin && !start && !fire && !service);
+    assert(SDL_SetJoystickVirtualButton(joy,SDL_GAMEPAD_BUTTON_SOUTH,true));
+    assert(SDL_SetJoystickVirtualButton(joy,SDL_GAMEPAD_BUTTON_BACK,true));
+    SDL_UpdateJoysticks();frame_counter++;poll_interactive_input();assert(coin && fire);
+    interactive_replay=1;coin=fire=0;key(SDL_SCANCODE_A,1);assert(!coin && !fire);interactive_replay=0;
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_WINDOW_FOCUS_LOST;
+    assert(SDL_PushEvent(&e));poll_interactive_input();assert(!coin && !start && !fire && !service);
+    puts("Visco SDL exact input names, coin/start/fire/service, gamepad, focus and replay PASS");
     SDL_CloseGamepad(interactive_pads[0]);interactive_pads[0]=NULL;
     SDL_CloseJoystick(joy);assert(SDL_DetachVirtualJoystick(id));
     SDL_DestroyWindow(w);SDL_Quit();
