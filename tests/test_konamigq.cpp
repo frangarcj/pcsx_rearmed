@@ -143,8 +143,23 @@ int disk_write(void *opaque, uint32_t lba, const uint8_t *data, size_t bytes) {
   return arcade_chd_hd_write(ctx->disk, lba, data, bytes) == 0;
 }
 
-konamigq_t *make_board(Context &ctx) {
+konamigq_t *make_board(Context &ctx, bool irq_guest = false) {
   make_guest_sound_rom(ctx);
+  if (irq_guest) {
+    std::fill(ctx.sound_rom.begin(), ctx.sound_rom.end(), 0);
+    put32(ctx.sound_rom, 0, 0x0010fff0);
+    put32(ctx.sound_rom, 4, 0x100);
+    put32(ctx.sound_rom, (24 + 1) * 4, 0x200); // IRQ1 autovector
+    size_t pc = 0x100;
+    put16(ctx.sound_rom, pc, 0x46fc); pc += 2;
+    put16(ctx.sound_rom, pc, 0x2000); pc += 2;
+    emit_move_byte(ctx.sound_rom, pc, 1, 0x400009); // enable MIRAC IRQ
+    put16(ctx.sound_rom, pc, 0x60fe);
+    pc = 0x200;
+    emit_move_byte(ctx.sound_rom, pc, 0x5a, 0x400001);
+    emit_move_byte(ctx.sound_rom, pc, 0, 0x400009); // acknowledge at source
+    put16(ctx.sound_rom, pc, 0x4e73); // RTE
+  }
   arcade_chd_hd_info_t info{};
   arcade_chd_hd_get_info(ctx.disk, &info);
   konamigq_config_t config{};
@@ -275,6 +290,25 @@ void test_dma_wait_reset(Context &ctx) {
   assert(konamigq_reset(b));
   konamigq_get_status(b, &status);
   assert(!status.dma_active && status.dma_bytes_remaining == 0);
+  konamigq_destroy(b);
+}
+
+void test_mirac_interrupt_executes_sound_guest(Context &ctx) {
+  auto *b = make_board(ctx, true);
+  uint64_t now = 0;
+  assert(konamigq_write(b, kEeprom, 2, 0x40, 0xffff));
+  advance(b, now, 1000000);
+  assert(read8(b, kMirac + 16) == 0);
+  write8(b, kMirac, 0xf7);
+  write8(b, kMirac + 14, 0);
+  advance(b, now, 2000000);
+  // This reply is written by the actual IRQ1 handler, never by a test callback.
+  assert(read8(b, kMirac + 16) == 0x5a);
+  assert(ctx.sound_irqs.back() == std::make_pair(1u, 0));
+  konamigq_status_t status{};
+  konamigq_get_status(b, &status);
+  assert(status.faults == 0 && status.sound_a7 == 0x0010fff0);
+  assert(status.sound_sr == 0x2000 && !status.sound_bus_error);
   konamigq_destroy(b);
 }
 
@@ -434,6 +468,9 @@ int main(int argc, char **argv) {
   Context static_ctx;
   static_ctx.disk = disk;
   test_ports_masks_eeprom_irq_guest_sound(static_ctx);
+  Context irq_ctx;
+  irq_ctx.disk = disk;
+  test_mirac_interrupt_executes_sound_guest(irq_ctx);
   Context reset_ctx;
   reset_ctx.disk = disk;
   test_dma_wait_reset(reset_ctx);

@@ -38,6 +38,12 @@ and is gated by sound-control bit 5. The board offers an explicit DASP sample
 input/output call; it does not invent inputs or a route for the unmodeled
 058141 analog module.
 
+K056800 assertion and acknowledgement update the MC68000 IRQ1 input directly;
+the optional sound-IRQ observer is only a notification. A generated sound guest
+enables MIRAC interrupts, executes its real IRQ1 autovector handler, writes a
+reply through the sound port, acknowledges the device, and returns with RTE.
+This regression runs both normally and under ASan/UBSan.
+
 The EEPROM image is caller-persisted. Without an image, its 64 words use the
 exact GQ default table. EEPROM output bits 0..2 drive DI/CS/CLK and bit 6
 releases the sound CPU from its active-low reset. Reset cancels channel-5 DMA,

@@ -197,7 +197,11 @@ void irq_sound(konamigq *b, unsigned level, int asserted) {
   }
 }
 void mirac_irq(void *opaque, int asserted) {
-  irq_sound(static_cast<konamigq *>(opaque), 1, asserted);
+  auto *b = static_cast<konamigq *>(opaque);
+  // konamigq.cpp connects K056800 INT directly to the sound CPU's IRQ1.
+  // The observer is optional and must not replace the actual CPU input line.
+  b->sound_cpu->set_irq(1, asserted != 0);
+  irq_sound(b, 1, asserted);
 }
 void pcm_timer(void *opaque, uint64_t cycle, int state) {
   auto *b = static_cast<konamigq *>(opaque);
