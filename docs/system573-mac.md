@@ -149,9 +149,9 @@ independent face-button/Start routes. Directions and fourth buttons are rejected
 by source API/CSV. P2/P3 native game rounds and operator lamp tests are still
 pending even though their bus/SDL routing is checked.
 
-The analog and digital configurations remain separate open work; this base
-flash representative cannot replace their CD transport, security or sound
-validation. Physical Vita is also outside the present Mac evidence.
+This base flash representative cannot replace analog/digital CD transport,
+security or sound validation. The analog/CD representative is validated below;
+the digital configuration remains open. Physical Vita is also outside the present Mac evidence.
 Authentic DRC, full-tournament progression and operator checks remain unverified.
 
 
