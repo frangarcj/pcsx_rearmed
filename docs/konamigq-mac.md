@@ -4,8 +4,9 @@ Crypt Killer (`cryptklr`, GQ420 UAA) now boots its original BIOS and HDD in
 the native Mac interpreter. A 4800-frame NEON run reaches the animated attract
 scene with all three INSERT COIN labels, 15802 sector reads, 314 SCSI commands,
 312 DMA5 requests, nonzero source PCM audio and zero board/media faults.
-Player shooting, warm EEPROM, GL presentation and live SDL audio validation
-remain separate pending checks.
+A separate 6500-frame GL/NEON replay reaches P1 gameplay, and its live SDL
+audio matches the raw native output exactly. Explicit reload and warm EEPROM
+checks are still in progress.
 
 ## Original media and source
 
@@ -56,8 +57,8 @@ ROM/RAM checks marked OK and the SOUND check at 30 emulated seconds. That is
 an intermediate reference result. A separate 120-second reference run reaches
 the animated three-player attract scene (all three INSERT COIN labels),
 confirming that this original media boots in MAME. Neither reference run has
-player input. Native NEON boot and nonzero PCM output now pass. Shooting, calibration,
-warm persistence, GL player presentation, live SDL audio and DRC remain pending.
+player input. Native NEON boot and nonzero PCM output now pass. GL/NEON player entry and live SDL audio now pass. Explicit reload,
+calibration, warm persistence and DRC retain separate checks.
 
 Source/media manifests, CHD information, download/audit logs, component logs
 and MAME snapshots are in `artifacts/boards-mac-20261014`. The overall board
@@ -111,3 +112,32 @@ stereo frames at 48000 Hz, 32469 nonzero stereo frames, peak 1622, no clipping
 and no unmatched chip samples. The final capture is `cryptklr-irq1.png` in the
 validation evidence directory. DASP/058141 analog routing, authentic DRC,
 whole-machine save states and physical Vita execution remain unvalidated.
+
+## Player replay and exact SDL audio
+
+The first replay used two-frame coin/start pulses and consumed all inputs but
+stayed in attract with CREDIT 0; it is not a player pass. Sixteen-frame pulses
+and four inserted coins enter P1 gameplay. An independent MAME input check
+shows CREDIT 1/2 after a single coin with the factory settings.
+
+The 6500-frame replay consumes 382/382 events. Both GL and NEON show P1 with two
+hearts, a skeleton in a corridor and the RELOAD prompt after emptying the gun.
+Both runs read 26892 HDD sectors across 414 SCSI commands and 412 DMA5 requests,
+with zero faults/errors, and finish at the same PC and source time. Their entire
+4 MiB RAM dumps match (SHA256
+`dad4453a0408bdd148c54736d8b1b2a1392b163e65886301e8c06199d3153e0a`).
+
+Both source WAVs and the real interactive SDL capture are byte-identical:
+5215107 stereo frames at 48000 Hz, 1403510 nonzero frames, peak 11982,
+zero clipping and no unmatched chip samples. WAV SHA256 is
+`c0022cb596145d4bd2f2e87f944d5cfadc874ce8f0bf9e7382d960e1117d5161`.
+Live capture finishes with `Interactive GQ audio: error=0`. GL capture uses the
+actual OpenGL back buffer. The source EEPROM remains the original 128-byte image
+in these runs; a separate restart/reload run is required before claiming warm
+player coverage or verified reload behavior.
+
+Logs, input CSV, GL/NEON PNGs and `cryptklr-player-validation.json` are stored in
+`artifacts/boards-mac-20261014`. WAVs and complete RAM dumps remain under
+`/tmp/pcsx-boards-mac-20261014`. This is bounded P1 coverage; a scored hit,
+three simultaneous players, full-game completion and physical Vita are not
+established by these captures.
