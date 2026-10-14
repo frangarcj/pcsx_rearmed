@@ -51,8 +51,14 @@ int main(void){
     system573_flash_read(&b,0x1f000000,2,&v);assert(v==0x1104);
     system573_flash_read(&b,0x1f000002,2,&v);assert(v==0x11ad);
     system573_flash_write(&b,0x1f000000,1,0xf0);
+    system573_flash_write(&b,0x1f000aaa,1,0xaa);
+    system573_flash_write(&b,0x1f000554,1,0x55);
+    system573_flash_write(&b,0x1f000aaa,1,0xa0);
+    system573_flash_write(&b,0x1f000100,1,0);
+    assert(chips[0][0x80]==0 && chips[1][0x80]==0x11);
     system573_flash_advance_us(&b,1000000);assert(b.rtc.ticks==1);
     system573_flash_reset(&b);assert(b.control==0 && b.security==0 && b.h8_index==0 && rtc[0]==0xdd && b.rtc.ticks==1);
+    assert(chips[0][0x80]==0); // soft reset does not recreate the original seed
     assert(!b.faults);
     assert(system573_flash_read(&b,0x1f000001,4,&v)==-1);
     assert(system573_flash_read(&b,0x1f700000,4,&v)==0);

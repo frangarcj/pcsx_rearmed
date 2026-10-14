@@ -20,7 +20,10 @@ void adc0834_clk(Adc0834 *a,int s){
     }
     if(!a->cs && a->clk && !s){
         if(a->state==SETTLE){
-            unsigned p=a->odd+a->sel*2;int value=a->channel[p]-(a->sgl?0:a->channel[p^1]);
+            unsigned p=a->odd+a->sel*2;
+            double positive=(5*a->channel[p])/255.0;
+            double negative=a->sgl?0:(5*a->channel[p^1])/255.0;
+            int value=(int)(((positive-negative)*255)/5);
             a->output=value<0?0:value;a->state=MSB;a->bit=7;a->sars=1;a->dout=0;
         }else if(a->state==MSB){a->dout=(a->output>>a->bit)&1;if(--a->bit<0)a->state=SE;}
         else if(a->state==LSB){a->dout=(a->output>>a->bit)&1;if(++a->bit==8)a->state=FINISHED;}

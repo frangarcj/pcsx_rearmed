@@ -37,6 +37,8 @@ int main(void){
     Adc0834 a;adc0834_init(&a);a.channel[0]=0x81;a.channel[1]=0x10;a.channel[2]=0xa5;a.channel[3]=0xff;
     for(unsigned i=0;i<4;i++)assert(convert(&a,i,1)==a.channel[i]);
     assert(convert(&a,0,0)==0x71 && convert(&a,1,0)==0 && convert(&a,2,0)==0 && convert(&a,3,0)==0x5a);
+    /* Preserve the pinned driver's voltage callback and truncation order. */
+    a.channel[0]=8;a.channel[1]=7;assert(convert(&a,0,0)==0);
     adc0834_cs(&a,0);pulse(&a,0);pulse(&a,0);assert(a.dout && a.sars);
     adc0834_cs(&a,1);pulse(&a,1);assert(a.dout && a.sars);
     puts("System 573 M48T58 elapsed clock, leap/century rollover, R/W/ST latches, original SRAM and ADC0834 channels/differential/serial edges PASS");
