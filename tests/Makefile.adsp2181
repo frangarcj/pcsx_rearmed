@@ -1,0 +1,19 @@
+CXX ?= c++
+BUILD ?= build/adsp2181-tests
+ARCADE := libpcsxcore/arcade
+SOURCES := $(ARCADE)/adsp2181.cpp tests/adsp2181_standalone.cpp
+HEADERS := $(ARCADE)/adsp2181.h $(ARCADE)/adsp2181_internal.h $(wildcard $(ARCADE)/adsp2181*.inc)
+FLAGS := -std=c++20 -Wall -Wextra -Wno-sign-compare -Wno-unused-but-set-variable -I$(ARCADE)
+.PHONY: test sanitize check-generated
+$(BUILD)/test-adsp2181: $(SOURCES) $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CXX) $(FLAGS) -O2 $(SOURCES) -o $@
+$(BUILD)/test-adsp2181-sanitize: $(SOURCES) $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CXX) $(FLAGS) -O1 -fsanitize=address,undefined -fno-omit-frame-pointer $(SOURCES) -o $@
+test: $(BUILD)/test-adsp2181
+	$<
+sanitize: $(BUILD)/test-adsp2181-sanitize
+	ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $<
+check-generated:
+	python3 tools/port_mame_adsp2181.py --check

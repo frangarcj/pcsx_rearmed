@@ -88,7 +88,7 @@ SOURCES += libpcsxcore/system12.c libpcsxcore/system11.c libpcsxcore/system10.c 
   libpcsxcore/arcade/eeprom93c46.c
 CFLAGS += -I$(BUILD)/gnet-generated -Ilibpcsxcore/arcade/tms57002 -I$(BUILD)/m68000-generated -Ilibpcsxcore/arcade/m68000
 SOURCES += libpcsxcore/arcade/zsg2.c libpcsxcore/arcade/fifo7200.c libpcsxcore/arcade/tecmo_link.c libpcsxcore/arcade/vt83c461.c libpcsxcore/arcade/primal_zn_bus.c
-CXXSOURCES := libpcsxcore/arcade/cbaj_sound.cpp libpcsxcore/arcade/ymz280b.cpp libpcsxcore/arcade/atlus_sound.cpp libpcsxcore/arcade/ymf271.cpp libpcsxcore/arcade/raizing_sound.cpp libpcsxcore/arcade/m68000.cpp \
+CXXSOURCES := libpcsxcore/arcade/adsp2181.cpp libpcsxcore/arcade/cbaj_sound.cpp libpcsxcore/arcade/ymz280b.cpp libpcsxcore/arcade/atlus_sound.cpp libpcsxcore/arcade/ymf271.cpp libpcsxcore/arcade/raizing_sound.cpp libpcsxcore/arcade/m68000.cpp \
  libpcsxcore/arcade/gnet_zoom.cpp libpcsxcore/arcade/rf5c296.cpp \
  libpcsxcore/arcade/gnet_pccard.cpp \
  libpcsxcore/arcade/ata_storage.cpp \
@@ -141,7 +141,7 @@ $(M68000_GENERATED): $(BUILD)/m68000-generated/m68000-%.cpp: libpcsxcore/arcade/
 	@mkdir -p $(dir $@)
 	python3 libpcsxcore/arcade/m68000/m68000gen.py $* $< $@
 $(BUILD)/libpcsxcore/arcade/m68000.o $(M68000_OBJECTS): $(BUILD)/m68000-generated/m68000-head.h
-$(BUILD)/libpcsxcore/arcade/ymf271.o $(BUILD)/libpcsxcore/arcade/m68000.o $(M68000_OBJECTS): CXX_STANDARD = c++20
+$(BUILD)/libpcsxcore/arcade/adsp2181.o $(BUILD)/libpcsxcore/arcade/ymf271.o $(BUILD)/libpcsxcore/arcade/m68000.o $(M68000_OBJECTS): CXX_STANDARD = c++20
 $(M68000_OBJECTS): $(BUILD)/m68000-generated/%.o: $(BUILD)/m68000-generated/%.cpp $(BUILD)/compile-flags.txt
 	$(CXX) $(filter-out -std=gnu99,$(CFLAGS)) -std=c++20 -MMD -MP -c $< -o $@
 .SECONDARY: $(M68000_GENERATED)
@@ -314,6 +314,7 @@ devices-test: $(BUILD)/test-nor-flash $(BUILD)/test-c352 $(BUILD)/test-serial $(
 	$(MAKE) -f tests/Makefile.tecmo-link BUILD=$(BUILD)/tecmo-link-tests CXX='$(CXX)' CC='$(CC)' test
 	$(MAKE) -f tests/Makefile.vt83c461 BUILD=$(BUILD)/vt83c461-tests CXX='$(CXX)' CC='$(CC)' test
 	$(MAKE) -f tests/Makefile.primal-zn-bus BUILD=$(BUILD)/primal-zn-bus-tests CXX='$(CXX)' CC='$(CC)' test
+	$(MAKE) -f tests/Makefile.adsp2181 BUILD=$(BUILD)/adsp2181-tests CXX='$(CXX)' test
 	$(MAKE) -f tests/Makefile.atlus-sound BUILD=$(BUILD)/atlus-sound-tests CXX='$(CXX)' test
 	$(MAKE) -f tests/Makefile.ymz280b BUILD=$(BUILD)/ymz280b-tests CXX='$(CXX)' test
 	$(MAKE) -f tests/Makefile.raizing-sound BUILD=$(BUILD)/raizing-sound-tests CXX='$(CXX)' test
