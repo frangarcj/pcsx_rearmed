@@ -204,11 +204,22 @@ static void test_coin_eeprom_and_mapped_unknowns(void)
 		assert(zn_board_advance_to_us(&b, 199) == -1);
 	}
 	assert(zn_board_read8(&b, 0x1fb20007, &v) == ZN_BOARD_HANDLED && v == 0xff);
-	assert(zn_board_read8(&b, 0x1fa30003, &v) == ZN_BOARD_HANDLED && v == 0xff);
-	assert(zn_board_read8(&b, 0x1fa40003, &v) == ZN_BOARD_HANDLED && v == 0xff);
-	assert(zn_board_write8(&b, 0x1fa30000, 0) == ZN_BOARD_HANDLED);
+	assert(zn_board_read8(&b, 0x1fa30003, &v) == ZN_BOARD_HANDLED && v == 0);
+	assert(zn_board_read8(&b, 0x1fa40003, &v) == ZN_BOARD_HANDLED && v == 0);
+	/* Pinned default-zero nopr values are observed by the original Judge IRQ
+	 * dispatcher. Verify all lanes/widths; writes must not create a latch. */
+	for (unsigned region = 0; region < 3; ++region) {
+		uint32_t base = region == 0 ? 0x1fa30000 : region == 1 ? 0x1fa40000 : 0x1fa51c00;
+		for (unsigned width = 1; width <= 4; width *= 2) {
+			uint32_t value;
+			for (unsigned lane = 0; lane < 4; lane += width)
+				assert(zn_board_read(&b, base + lane, width, &value) == ZN_BOARD_HANDLED && value == 0);
+		}
+	}
+	assert(zn_board_write8(&b, 0x1fa30000, 0xff) == ZN_BOARD_HANDLED);
+	assert(zn_board_read8(&b, 0x1fa30000, &v) == ZN_BOARD_HANDLED && v == 0);
 	assert(zn_board_write8(&b, 0x1fa40000, 0) == ZN_BOARD_UNMAPPED);
-	assert(zn_board_read8(&b, 0x1fa51c00, &v) == ZN_BOARD_HANDLED && v == 0xff);
+	assert(zn_board_read8(&b, 0x1fa51c00, &v) == ZN_BOARD_HANDLED && v == 0);
 	assert(zn_board_read8(&b, 0x1fa60000, &v) == ZN_BOARD_HANDLED && v == 8);
 	assert(zn_board_read8(&b, 0x1fa60001, &v) == ZN_BOARD_HANDLED && v == 0);
 	{

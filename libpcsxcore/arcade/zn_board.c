@@ -194,15 +194,15 @@ zn_board_result_t zn_board_read8(zn_board_t *board, uint32_t address, uint8_t *v
 		return ZN_BOARD_HANDLED;
 	}
 	if (address >= 0x1fa30000 && address <= 0x1fa30003) {
-		*value = 0xff; /* MAME noprw: quiet unmapped-bus read. */
+		*value = 0; /* MAME noprw uses the program map default unmapped value. */
 		return ZN_BOARD_HANDLED;
 	}
 	if (address >= 0x1fa40000 && address <= 0x1fa40003) {
-		*value = 0xff; /* MAME nopr: quiet unmapped-bus read. */
+		*value = 0; /* MAME nopr uses the program map default unmapped value. */
 		return ZN_BOARD_HANDLED;
 	}
 	if (board->model == ZN_BOARD_ZN2 && address >= 0x1fa51c00 && address <= 0x1fa51dff) {
-		*value = 0xff; /* ZN-2 timing workaround range, MAME nopr. */
+		*value = 0; /* ZN-2 timing range is also MAME nopr, with default zero. */
 		return ZN_BOARD_HANDLED;
 	}
 	if (board->model == ZN_BOARD_ZN2 && address == 0x1fa60000) {
