@@ -22,6 +22,10 @@
 #include "externals.h"
 #include "registers.h"
 
+#ifdef PCSX_SYSTEM573
+extern int system573_active(void);
+#endif
+
 static void set_dma_end(int iSize, unsigned int cycles)
 {
  // this must be > psxdma.c dma irq
@@ -68,7 +72,14 @@ void CALLBACK SPUwriteDMAMem(unsigned short *pusPSXMem, int iSize,
  unsigned int addr = spu.spuAddr, irq_addr = regAreaGet(H_SPUirqAddr) << 3;
  int i, irq_after;
  
- do_samples_if_needed(cycles + iSize*2 * 4, 1, 2);
+ unsigned int render_cycle = cycles + iSize*2 * 4;
+#ifdef PCSX_SYSTEM573
+ // The source System573 DMA payload has already arrived at its timer edge.
+ // MAME spu_device::start_dma copies now; the console size-based speculative
+ // advance can otherwise reset the sample clock into the future on a large DMA.
+ if (system573_active()) render_cycle = cycles;
+#endif
+ do_samples_if_needed(render_cycle, 1, 2);
  irq_after = (irq_addr - addr) & 0x7ffff;
  spu.bMemDirty = 1;
 

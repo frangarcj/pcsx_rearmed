@@ -17,6 +17,7 @@
 #endif
 #include "arcade/system573_flash.h"
 #include "arcade/psx_sio.h"
+#include "arcade/system573_audio.h"
 #ifdef HAVE_CHD
 #include "arcade/atapi_cr589.h"
 #include "arcade/chd_cd.h"
@@ -38,6 +39,7 @@ static struct {
     uint64_t cdda_frames,cdda_nonzero;unsigned cdda_peak;
 #endif
     int cd_profile;
+    System573Audio audio;
     psx_sio_t *sio[2];
     u32 old_ram,old_rom,last_cycle;
     uint64_t cycles,us,fraction,reads,writes;
@@ -101,6 +103,9 @@ static void disc_pcm(void *opaque,int16_t left,int16_t right){
     unsigned l=left<0?-left:left,r=right<0?-right:right;
     if(l>board.cdda_peak)board.cdda_peak=l;if(r>board.cdda_peak)board.cdda_peak=r;
 }
+static void disc_clocked_pcm(void *opaque,int16_t left,int16_t right,uint64_t index,int playing){
+    (void)opaque;(void)playing;if(system573_audio_cd(&board.audio,index,left,right))board.fault=1;
+}
 static void ata_irq(void *opaque,int level){
     (void)opaque;if(level && psxRegs.ptrs.psxH)psxHu32ref(0x1070)|=SWAPu32(1u<<10);
 }
@@ -131,6 +136,7 @@ static int load_board(const char *dir,int synthetic){
 #endif
     int profile=config(dir);if(profile<0 || (profile && synthetic)){fprintf(stderr,"System573: invalid or unsupported original profile\n");return -1;}
     board.cd_profile=profile;
+    system573_audio_init(&board.audio);
 #ifndef HAVE_CHD
     if(profile){fprintf(stderr,"System573: original DDR disc requires HAVE_CHD\n");return -1;}
 #endif
@@ -147,6 +153,7 @@ static int load_board(const char *dir,int synthetic){
         char path[4096],error[256];if(snprintf(path,sizeof(path),"%s/895jaa02.chd",dir)>=(int)sizeof(path))goto bad;
         chd_cd_config_t cc={disc_pcm,NULL};board.cd=chd_cd_open(path,&cc,error,sizeof(error));
         if(!board.cd){fprintf(stderr,"System573 CD: %s\n",error);goto bad;}
+        if(!chd_cd_set_clocked_pcm_sink(board.cd,disc_clocked_pcm,NULL))goto bad;
         if(!chd_cd_verify_sha1(board.cd,"cfe3a6f3ed62ba388b07045e29e22472d17dcfe4"))goto bad;
         AtapiCr589Config ac={0};if(!chd_cd_get_media_ops(board.cd,&ac.media))goto bad;
         ac.track_info=disc_info;ac.read_raw=disc_raw;ac.irq=ata_irq;
@@ -172,6 +179,24 @@ bad:system573_unload();return -1;
 int system573_load(const char *dir){return load_board(dir,0);}
 int system573_test_load(const char *dir){return load_board(dir,1);}
 int system573_active(void){return board.active;}
+int system573_has_cd(void){return board.active && board.cd_profile;}
+void system573_set_audio_output(void (*sink)(void *,const int16_t *,unsigned),void *opaque){
+    system573_audio_set_sink(&board.audio,sink,opaque);
+}
+int system573_audio_spu_output(const int16_t *stereo,unsigned frames,u32 end_cycle){
+    if(!system573_has_cd() || !board.audio.sink || !frames)return 0;
+    if(system573_sync(psxRegs.cycle))return -1;
+    int64_t end=(int64_t)board.cycles+(int32_t)(end_cycle-board.last_cycle);
+    if(end<0 || (uint64_t)end<(uint64_t)frames*768){board.fault=1;return -1;}
+    uint64_t first=((uint64_t)end-(uint64_t)frames*768)/768;
+    if(board.audio.started && first!=board.audio.spu_next)
+        fprintf(stderr,"System573 SPU clock discontinuity: expected=%"PRIu64" first=%"PRIu64" frames=%u end_cycle=%u cpu_cycle=%u\n",board.audio.spu_next,first,frames,end_cycle,psxRegs.cycle);
+    if(system573_audio_spu(&board.audio,first,stereo,frames)){board.fault=1;return -1;}return 0;
+}
+int system573_audio_flush_output(void){
+    if(!system573_has_cd())return 0;
+    if(system573_sync(psxRegs.cycle) || system573_audio_flush(&board.audio)){board.fault=1;return -1;}return 0;
+}
 void system573_unload(void){
     system573_flash_destroy(&board.bus);
 #ifdef HAVE_CHD
@@ -366,7 +391,8 @@ void system573_report(FILE *out){
 #ifdef HAVE_CHD
     if(board.drive){AtapiCr589Status st;atapi_cr589_get_status(board.drive,&st);
         fprintf(out,"System573 CD: packets=%"PRIu64" sectors=%"PRIu64" status=%02x command=%02x faults=%u DMA_transfers=%"PRIu64" DMA_words=%"PRIu64" stage_edges=%"PRIu64"\n",st.packets,st.sectors,st.status,st.packet_command,st.faults,board.dma_transfers,board.dma_words,board.bus.stage_edges);
-        fprintf(out,"System573 CDDA: decoded_frames=%"PRIu64" nonzero_frames=%"PRIu64" peak=%u speaker_mix=PENDING\n",board.cdda_frames,board.cdda_nonzero,board.cdda_peak);
+        fprintf(out,"System573 CDDA: decoded_frames=%"PRIu64" nonzero_frames=%"PRIu64" peak=%u\n",board.cdda_frames,board.cdda_nonzero,board.cdda_peak);
+        fprintf(out,"System573 speaker: rate=44100 SPU_gain=1 CDDA_gain=1 frames=%"PRIu64" SPU_inputs=%"PRIu64" SPU_nonzero=%"PRIu64" CDDA_clock=%"PRIu64" CDDA_nonzero=%"PRIu64" clipped=%"PRIu64" peak=%u pending_SPU=%"PRIu64" faults=%u\n",board.audio.frames,board.audio.spu_inputs,board.audio.spu_nonzero,board.audio.cd_inputs,board.audio.cd_nonzero,board.audio.clipped,board.audio.peak,board.audio.started?board.audio.spu_next-board.audio.next:0,board.audio.faults);
     }
 #endif
     fprintf(out,"System573 devices: flash_reads=%"PRIu64" flash_writes=%"PRIu64" H8_edges=%"PRIu64" rtc_reads=%"PRIu64" rtc_writes=%"PRIu64" rtc_ticks=%"PRIu64" JVS_empty_packets=%"PRIu64" empty_ATA_reads=%"PRIu64" MMIO=%"PRIu64"/%"PRIu64"\n",board.bus.flash_reads,board.bus.flash_writes,board.bus.h8_edges,board.bus.rtc_reads,board.bus.rtc_writes,board.bus.rtc.ticks,board.bus.jvs_packets,board.bus.empty_ata_reads,board.reads,board.writes);

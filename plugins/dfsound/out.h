@@ -12,5 +12,7 @@ struct out_driver {
 extern struct out_driver *out_current;
 
 void SetupSound(void);
+/* Read-only PCM end timestamp during feed(), in the SPU/core cycle domain. */
+unsigned int dfsound_output_end_cycle(void);
 
 #endif /* __P_OUT_H__ */

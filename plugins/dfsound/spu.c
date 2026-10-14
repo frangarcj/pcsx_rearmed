@@ -1199,6 +1199,11 @@ void CALLBACK SPUasync(unsigned int cycle, unsigned int flags)
  }
 }
 
+unsigned int dfsound_output_end_cycle(void)
+{
+ return spu.cycles_played;
+}
+
 // SPU UPDATE... new epsxe func
 //  1 time every 32 hsync lines
 //  (312/32)x50 in pal

@@ -222,6 +222,47 @@ static int load_system12(const char *path)
 }
 /* System 10 uses the PSX SPU. Capture its native PCM without replacing the
  * emulated chip or resampling its 768-main-cycle sample cadence. */
+static const char *mixed_audio_path;
+#ifdef PCSX_SYSTEM573
+static PcmWav system573_speaker_wav;
+static void (*system573_headless_feed)(void *,int);
+static int system573_speaker_error;
+static void harness_system573_spu_pcm(void *data,int bytes){
+  if(bytes<0 || (bytes&3) || system573_audio_spu_output(data,(unsigned)bytes/4,dfsound_output_end_cycle()))
+    system573_speaker_error=1;
+}
+static void harness_system573_speaker_pcm(void *opaque,const int16_t *samples,unsigned frames){
+  (void)opaque;int16_t four[256*4]={0};
+  while(frames){unsigned n=frames>256?256:frames;
+    for(unsigned i=0;i<n;i++){four[4*i]=samples[2*i];four[4*i+1]=samples[2*i+1];}
+    if(pcm_wav_append4(&system573_speaker_wav,four,n))system573_speaker_error=1;
+    samples+=2*n;frames-=n;
+  }
+}
+static int open_system573_speaker_audio(const char *path){
+  if(!system573_has_cd() || !out_current || pcm_wav_open(&system573_speaker_wav,path,44100))return -1;
+  system573_headless_feed=out_current->feed;out_current->feed=harness_system573_spu_pcm;
+  system573_set_audio_output(harness_system573_speaker_pcm,NULL);return 0;
+}
+static int harness_system573_large_spu_dma_fixture(void){
+  const u32 cycle=psxRegs.cycle;
+  /* A complete 512 KiB transfer used by the original BIOS exceeded the
+   * console renderer's desync threshold with its speculative size delay. */
+  SPU_writeRegister(0x1f801da6,0,cycle);
+  SPU_writeDMAMem((unsigned short *)(psxRegs.ptrs.psxM+0x20000),0x40000,cycle);
+  u32 end=dfsound_output_end_cycle();int ok=(int32_t)(end-cycle)<=768;
+  fprintf(stderr,"System573 large SPU DMA clock: %s bytes=524288 CPU_cycle=%u PCM_end=%u future=%d\n",ok?"PASS":"FAIL",cycle,end,(int32_t)(end-cycle));
+  return ok?0:-1;
+}
+static int close_system573_speaker_audio(void){
+  if(!system573_headless_feed)return system573_speaker_error;
+  if(SPU_async)SPU_async(psxRegs.cycle,1);
+  if(system573_audio_flush_output())system573_speaker_error=1;
+  system573_set_audio_output(NULL,NULL);out_current->feed=system573_headless_feed;system573_headless_feed=NULL;
+  fprintf(stderr,"System573 speaker WAV: rate=44100 frames=%"PRIu64" error=%d\n",system573_speaker_wav.bytes/4,system573_speaker_error);
+  if(pcm_wav_close(&system573_speaker_wav))system573_speaker_error=1;return system573_speaker_error;
+}
+#endif
 static PcmWav spu_wav;
 static void (*spu_original_feed)(void *, int);
 static unsigned spu_audio_peak;
@@ -501,7 +542,7 @@ static int raw_axis(int value)
 }
 static void refresh_interactive_gamepads(void)
 {
-  const unsigned ports=selected_board && (selected_board->family==111 || selected_board->family==102)?4:selected_board && selected_board->family==115?3:selected_board && selected_board->family==113?3:2;
+  const unsigned ports=selected_board && (selected_board->family==111 || selected_board->family==102)?4:selected_board && selected_board->family==115?(system573_has_cd()?2:3):selected_board && selected_board->family==113?3:2;
   for (unsigned i = 0; i < 4; ++i)
     if (interactive_pads[i] && !SDL_GamepadConnected(interactive_pads[i])) {
       SDL_CloseGamepad(interactive_pads[i]); interactive_pads[i] = NULL;
@@ -825,7 +866,6 @@ static void interactive_title(const char *board, char *out, size_t size)
 static SDL_AudioStream *interactive_audio;
 static ArcadeAudioMixer interactive_mix;
 static PcmWav interactive_mix_wav;
-static const char *interactive_mix_path;
 static int interactive_audio_error, interactive_mixing;
 static void (*interactive_spu_feed)(void *, int);
 static u32 interactive_spu_cycle;
@@ -888,6 +928,21 @@ static void interactive_spu_pcm(void *data, int bytes)
       samples[i * 2 + 1] * ((selected_board->family == 108 ? 0.175f : selected_board->family == 106 || selected_board->family == 109 || selected_board->family == 111 ? 0.35f : 0.3f) / 32768.0f));
 }
 
+#ifdef PCSX_SYSTEM573
+static void interactive_system573_speaker(void *opaque,const int16_t *pcm,unsigned frames){
+  (void)opaque;int16_t samples[512];interactive_zn_spu_frames+=frames;
+  while(frames){unsigned n=frames>256?256:frames;
+    for(unsigned i=0;i<2*n;i++){
+      int value=(int)pcm[i]*(int)interactive_volume/100;
+      if(value>32767)value=32767;if(value<-32768)value=-32768;samples[i]=value;
+      interactive_zn_spu_nonzero+=value!=0;unsigned peak=value<0?-value:value;
+      if(peak>interactive_zn_spu_peak)interactive_zn_spu_peak=peak;
+    }
+    interactive_audio_cb(NULL,samples,n);pcm+=2*n;frames-=n;
+  }
+}
+#endif
+
 static void interactive_zn_spu_pcm(void *data, int bytes)
 {
   const int16_t *samples = data;
@@ -923,7 +978,7 @@ static int open_interactive_audio(void)
   if (!SDL_ResumeAudioStreamDevice(interactive_audio)) {
     SDL_DestroyAudioStream(interactive_audio); interactive_audio = NULL; return -1;
   }
-  if (interactive_mix_path && pcm_wav_open(&interactive_mix_wav, interactive_mix_path, spec.freq)) {
+  if (mixed_audio_path && pcm_wav_open(&interactive_mix_wav, mixed_audio_path, spec.freq)) {
     SDL_DestroyAudioStream(interactive_audio); interactive_audio = NULL; return -1;
   }
 #ifdef PCSX_SYSTEM_GQ
@@ -956,7 +1011,15 @@ static int open_interactive_audio(void)
     else if (selected_board->family == 108) fprintf(stderr, "Interactive Atlus audio: SPU=33868800/768 Hz gain=0.175 YMZ280B=16934400/192 Hz gain=0.35 output=44100 Hz\n");
     else if (selected_board->family == 106) fprintf(stderr, "Interactive Raizing audio: SPU=33868800/768 Hz gain=0.35 YMF271=16934400/384 Hz gain=1 output=44100 Hz\n");
     else fprintf(stderr, "Interactive %s audio: SPU=%u/768 Hz gain=0.3 Zoom=25000000/768 Hz gain=1 output=44100 Hz\n", selected_board->family == 105 ? "FX1Z" : "G-Net", PSXCLK);
-  } else if (source_spu_speaker_board()) {
+  }
+#ifdef PCSX_SYSTEM573
+  else if(selected_board->family==115 && system573_has_cd()){
+    interactive_spu_feed=out_current->feed;out_current->feed=harness_system573_spu_pcm;
+    system573_set_audio_output(interactive_system573_speaker,NULL);
+    fprintf(stderr,"Interactive System573 CD audio: SPU=44100 Hz gain=1 CDDA=44100 Hz gain=1 timestamped speaker output=44100 Hz\n");
+  }
+#endif
+  else if (source_spu_speaker_board()) {
     interactive_spu_feed = out_current->feed;
     interactive_spu_cycle = psxRegs.cycle;
     out_current->feed = interactive_zn_spu_pcm;
@@ -1014,7 +1077,20 @@ static void close_interactive_audio(void)
       interactive_mix.lane[0].count, interactive_mix.lane[1].count,
       interactive_mix.error || interactive_audio_error);
     if (interactive_mix.error) interactive_audio_error = 1;
-  } else if (source_spu_speaker_board()) {
+  }
+#ifdef PCSX_SYSTEM573
+  else if(selected_board->family==115 && system573_has_cd()){
+    if(SPU_async)SPU_async(psxRegs.cycle,1);
+    if(system573_audio_flush_output())interactive_audio_error=1;
+    system573_set_audio_output(NULL,NULL);
+    if(spu_original_feed==harness_system573_spu_pcm)spu_original_feed=interactive_spu_feed;
+    if(out_current->feed==harness_system573_spu_pcm)out_current->feed=interactive_spu_feed;
+    interactive_spu_feed=NULL;
+    if(system573_speaker_error)interactive_audio_error=1;
+    fprintf(stderr,"Interactive System573 speaker: frames=%"PRIu64" nonzero=%"PRIu64" peak=%u error=%d\n",interactive_zn_spu_frames,interactive_zn_spu_nonzero,interactive_zn_spu_peak,interactive_audio_error);
+  }
+#endif
+  else if (source_spu_speaker_board()) {
     if (SPU_async) SPU_async(psxRegs.cycle, 1);
     if (spu_original_feed == interactive_zn_spu_pcm) spu_original_feed = interactive_spu_feed;
     if (out_current->feed == interactive_zn_spu_pcm) out_current->feed = interactive_spu_feed;
@@ -1408,8 +1484,8 @@ int main(int argc, char **argv)
     else if (!strcmp(argv[i], "--dump-vram") && i + 1 < argc) vram_path = argv[++i];
     else if (!strcmp(argv[i], "--inputs") && i + 1 < argc) inputs_path = argv[++i];
     else if (!strcmp(argv[i], "--audio") && i + 1 < argc) audio_path = argv[++i];
-#if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
-    else if (!strcmp(argv[i], "--mixed-audio") && i + 1 < argc) interactive_mix_path = argv[++i];
+#ifdef PCSX_SYSTEM12
+    else if (!strcmp(argv[i], "--mixed-audio") && i + 1 < argc) mixed_audio_path = argv[++i];
 #endif
     else if (!strcmp(argv[i], "--nvram") && i + 1 < argc) nvram_path = argv[++i];
     else if (!strcmp(argv[i], "--audio-test-fixture")) audio_test_fixture = 1;
@@ -1546,13 +1622,21 @@ int main(int argc, char **argv)
   if (gnet_jp1 >= 0 && (!board || board_family != 103 || board_test)) {
     fprintf(stderr,"--gnet-jp1 requires an authentic G-Net profile\n"); return 2;
   }
-#if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
-  if (interactive_mix_path && (!interactive || (board_family != 102 && board_family != 103 && board_family != 104 && board_family != 105 && board_family != 106 && board_family != 107 && board_family != 108 && board_family != 109 && board_family != 110 && board_family != 111 && board_family != 112 && board_family != 113 && board_family != 114 && board_family != 115) ||
-      !strcmp(interactive_mix_path, output) ||
-      (audio_path && !strcmp(interactive_mix_path, audio_path)) ||
-      (nvram_path && !strcmp(interactive_mix_path, nvram_path)) ||
-      (inputs_path && !strcmp(interactive_mix_path, inputs_path)))) {
-    fprintf(stderr, "--mixed-audio requires a supported interactive arcade board and a separate output path\n"); return 2;
+#ifdef PCSX_SYSTEM12
+  if (mixed_audio_path && ((!interactive && board_family!=115) || (board_family != 102 && board_family != 103 && board_family != 104 && board_family != 105 && board_family != 106 && board_family != 107 && board_family != 108 && board_family != 109 && board_family != 110 && board_family != 111 && board_family != 112 && board_family != 113 && board_family != 114 && board_family != 115) ||
+      !strcmp(mixed_audio_path, output) ||
+      (audio_path && !strcmp(mixed_audio_path, audio_path)) ||
+      (nvram_path && !strcmp(mixed_audio_path, nvram_path)) ||
+      (inputs_path && !strcmp(mixed_audio_path, inputs_path)))) {
+    fprintf(stderr, "--mixed-audio requires a supported interactive arcade board or System573 CD, and a separate output path\n"); return 2;
+  }
+#endif
+#ifdef PCSX_SYSTEM12
+  if(mixed_audio_path){
+    const char *paths[]={ram_path,vram_path,trace_path,snapshot_path,bus_trace_path,edge_trace_path};
+    for(unsigned pi=0;pi<sizeof(paths)/sizeof(paths[0]);pi++)if(paths[pi] && !strcmp(paths[pi],mixed_audio_path)){
+      fprintf(stderr,"--mixed-audio requires a separate output path\n");return 2;
+    }
   }
 #endif
   if (ram_path) {
@@ -1928,6 +2012,9 @@ int main(int argc, char **argv)
         harness_gpu_vram_selftest())) result = 1;
     if ((board_family == 101 || board_family == 102 || board_family == 104 || board_family == 105 || board_family == 106 || board_family == 107 || board_family == 108 || board_family == 109 || board_family == 110 || board_family == 111 || board_family == 112 || board_family == 114 || board_family == 115) &&
         harness_source_spu_dma_fixture(selected_board->name, 33868800, 24000)) result = 1;
+#ifdef PCSX_SYSTEM573
+    if(board_family==115 && harness_system573_large_spu_dma_fixture())result=1;
+#endif
   }
 #ifdef PCSX_SYSTEM_GV
   if (gv_fixture) {
@@ -2075,7 +2162,7 @@ int main(int argc, char **argv)
     interactive_frame = frame_counter;
     if (open_interactive_audio())
       fprintf(stderr, "Interactive: no audio (%s), pacing at 60 Hz\n", SDL_GetError());
-    if (interactive_mix_path && !interactive_audio) result = 1;
+    if (mixed_audio_path && !interactive_audio) result = 1;
     interactive_title(board, interactive_game, sizeof(interactive_game));
     if (art_dir) {
       const system12_romset_info *set = system12_romset_is_zip(board) ? system12_romset_identify(board) : NULL;
@@ -2101,11 +2188,18 @@ int main(int argc, char **argv)
       fprintf(stderr,"GQ controls: 5/6/7 coin, 1/2/3 Start, mouse aim, left click/A trigger, right click/S reload, three gamepad sticks, Escape pause\n");
     else if (selected_board->family==112)
       fprintf(stderr,"Judge controls: 5/6 coin, 1/2 Start, mouse aim, left click/A trigger, right click/S second button, shoot outside the viewport to reload, gamepad stick aim, Escape pause\n");
+    else if (selected_board->family==115 && system573_has_cd())
+      fprintf(stderr,"DDR controls: 5/6 Coin, 1/2 Start, P1 arrows + A/S/D/Space/F/H panel, P2 I/K/J/L + Z/X/C/V/B/N panel, T Test, 9 Service, Escape pause\n");
     else if (selected_board->family==115)
       fprintf(stderr,"System 573: 5/6 Coin, 1/2/3 Start, P1 A/S/D, P2 Z/X/C, P3 keypad 1/3/7, T Test, 9 Service, Escape pause\n");
     else if (selected_board->family==114)
       fprintf(stderr,"Metro %s controls: 5/6 coin, 1/2 Start, P1 arrows + A Rhythm/S Jammar, P2 I/K/J/L + Z Rhythm/X Jammar; dedicated Down/K=Pedal, keypad 8/2 + Return=P3 select/enter, T test, 9 service, Escape pause\n",systemzn_metro_generic()?"generic":"dedicated");
     else fprintf(stderr, "Interactive: 5/6 coin, 1/2 start, arrows/JL move or steer, A/S/D buttons, G-Net mouse/gamepad analog, Escape pause\n");
+  }
+#endif
+#ifdef PCSX_SYSTEM573
+  if(!interactive && mixed_audio_path && open_system573_speaker_audio(mixed_audio_path)){
+    fprintf(stderr,"--mixed-audio requires an original System573 CD profile and writable output\n");result=1;
   }
 #endif
   if (!result && load_state_path) {
@@ -2367,6 +2461,9 @@ int main(int argc, char **argv)
     fprintf(stderr, "failed to finalize WAV output: %s\n", audio_path);
     result = 1;
   }
+#ifdef PCSX_SYSTEM573
+  if(!interactive && mixed_audio_path && close_system573_speaker_audio())result=1;
+#endif
   free(input_events);
 #endif
   if (trace && fclose(trace)) result = 1;

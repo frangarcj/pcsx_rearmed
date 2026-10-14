@@ -63,7 +63,7 @@ def main():
         assert cold.returncode == 0, output
         expected = (0x22112211, 0x88778877, 3, 0xadad0404, 0x00bb00dd, 0x1f091017, 0xf7ff, 0xffffffff, 0x53353733)
         assert struct.unpack_from('<9I', (root / 'ram.bin').read_bytes(), 0x100) == expected, output
-        for token in ['System573 native selftest PASS', 'System573 SPU DMA fixture: PASS',
+        for token in ['System573 native selftest PASS', 'System573 SPU DMA fixture: PASS', 'System573 large SPU DMA clock: PASS',
                       'media=SYNTHETIC_FIXTURE H8_response=GENERATED', 'faults=0', 'consumed=2/2']:
             assert token in output, (token, output)
         snapshot = nv.read_bytes()

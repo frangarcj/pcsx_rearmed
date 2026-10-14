@@ -18,6 +18,10 @@ int system573_set_input(const char *control,int pressed);
 int system573_selftest(void);
 int system573_dma5(u32 madr,u32 bcr,u32 chcr);
 size_t system573_nvram_size(void);
+int system573_has_cd(void);
+void system573_set_audio_output(void (*sink)(void *,const int16_t *,unsigned),void *opaque);
+int system573_audio_spu_output(const int16_t *stereo,unsigned frames,u32 end_cycle);
+int system573_audio_flush_output(void);
 void system573_report(FILE *out);
 /* Versioned checksummed snapshot of eight flash chips, timekeeper, cassette,
  * and (CD profile) writable CR589 buffer. Query the active profile's size.
