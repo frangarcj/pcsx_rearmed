@@ -1,0 +1,16 @@
+CXX ?= clang++
+BUILD ?= build/ymf271-tests
+SOURCES := libpcsxcore/arcade/ymf271.cpp tests/ymf271_standalone.cpp
+HEADERS := libpcsxcore/arcade/ymf271.h libpcsxcore/arcade/ymf271_internal.h
+FLAGS := -std=c++20 -Wall -Wextra -Ilibpcsxcore/arcade
+.PHONY: test sanitize
+$(BUILD)/test-ymf271: $(SOURCES) $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CXX) $(FLAGS) -O2 $(SOURCES) -o $@
+$(BUILD)/test-ymf271-sanitize: $(SOURCES) $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CXX) $(FLAGS) -O1 -fsanitize=address,undefined -fno-omit-frame-pointer $(SOURCES) -o $@
+test: $(BUILD)/test-ymf271
+	$(BUILD)/test-ymf271
+sanitize: $(BUILD)/test-ymf271-sanitize
+	ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $(BUILD)/test-ymf271-sanitize
