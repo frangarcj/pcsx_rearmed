@@ -365,6 +365,13 @@ int harness_write_ppm(const char *path, int w, int h)
 {
 #ifdef GPU_VITA_CTR
   if (capture_gl_requested) {
+    /* Some original games keep a scene on screen for longer than the final
+     * eight vsyncs. Explicit diagnostic capture can read that last presented
+     * front buffer once at exit, without changing emulation or gun inputs. */
+    if (!capture_gl_done && PCSXMacVitaGL_CapturePresentedFrame()) {
+      capture_gl_done = 1;
+      fprintf(stderr, "OpenGL capture: last presented front buffer (no recent scene)\n");
+    }
     int result = PCSXMacVitaGL_WriteCapturePpm(path);
     if (result <= 0) {
       fprintf(stderr, "OpenGL capture requested but no frame was captured\n");

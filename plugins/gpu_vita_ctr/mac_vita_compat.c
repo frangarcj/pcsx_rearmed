@@ -16,6 +16,7 @@ static ScratchAllocation s_scratch[4];
 static unsigned char *s_capture_rgba;
 static int s_capture_width;
 static int s_capture_height;
+static GLenum s_capture_read_buffer = GL_BACK;
 
 void *vglMemalign(size_t alignment, size_t size)
 {
@@ -203,7 +204,7 @@ int PCSXMacVitaGL_IsCurrent(void)
     return SDL_GL_GetCurrentContext() != NULL;
 }
 
-int PCSXMacVitaGL_CaptureCurrentFrame(void)
+static int capture_framebuffer(GLenum read_buffer)
 {
     GLint previous_read_framebuffer = 0;
     GLint previous_read_buffer = GL_BACK;
@@ -227,7 +228,7 @@ int PCSXMacVitaGL_CaptureCurrentFrame(void)
     glGetIntegerv(GL_READ_BUFFER, &previous_read_buffer);
     glGetIntegerv(GL_PACK_ALIGNMENT, &previous_pack_alignment);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    glReadBuffer(GL_BACK);
+    glReadBuffer(read_buffer);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glFinish();
     while (glGetError() != GL_NO_ERROR) {
@@ -244,7 +245,18 @@ int PCSXMacVitaGL_CaptureCurrentFrame(void)
     glPixelStorei(GL_PACK_ALIGNMENT, previous_pack_alignment);
     s_capture_width = width;
     s_capture_height = height;
+    s_capture_read_buffer = read_buffer;
     return 1;
+}
+
+int PCSXMacVitaGL_CaptureCurrentFrame(void)
+{
+    return capture_framebuffer(GL_BACK);
+}
+
+int PCSXMacVitaGL_CapturePresentedFrame(void)
+{
+    return capture_framebuffer(GL_FRONT);
 }
 
 int PCSXMacVitaGL_WriteCapturePpm(const char *path)
@@ -284,7 +296,8 @@ int PCSXMacVitaGL_WriteCapturePpm(const char *path)
     free(row);
     if (fclose(file))
         return -1;
-    fprintf(stderr, "capture=%dx%d source=OpenGL-back-buffer-before-swap\n", s_capture_width, s_capture_height);
+    fprintf(stderr, "capture=%dx%d source=%s\n", s_capture_width, s_capture_height,
+        s_capture_read_buffer == GL_FRONT ? "OpenGL-front-buffer-last-presentation" : "OpenGL-back-buffer-before-swap");
     return 1;
 }
 
