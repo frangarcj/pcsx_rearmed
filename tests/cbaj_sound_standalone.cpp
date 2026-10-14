@@ -15,6 +15,8 @@ int main(){
     auto reg=[&](unsigned address,unsigned value){emit({0x3e,(uint8_t)address,0xd3,0x84,0x3e,(uint8_t)value,0xd3,0x85});};
     emit({0xf3,0x31,0xfe,0xff}); // DI, SP in source RAM
     reg(0xff,0x80);reg(0,0xff);reg(2,255);reg(3,8);reg(0x63,255);reg(1,0xc1);
+    // Source Z80 address_map defaults to unmap_value_low, including port 80.
+    auto stuck=pc+5;emit({0xdb,0x80,0xb7,0x28,3,0xc3,(uint8_t)stuck,(uint8_t)(stuck>>8)});
     auto loop=pc;emit({0xdb,0x91,0xe6,2,0x28,0xfa,0xdb,0x90,0x32,0x00,0x80,0x3a,0x00,0x80,0xee,0x5a,0xd3,0x90,0xc3,(uint8_t)loop,(uint8_t)(loop>>8)});
     auto original=program;Sink a,b;CbajSound *sa=nullptr,*sb=nullptr;
     CbajSoundConfig cfg{program.data(),rom.data(),program.size(),rom.size(),&a,sample};

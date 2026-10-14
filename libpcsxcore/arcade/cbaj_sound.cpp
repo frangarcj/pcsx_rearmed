@@ -40,7 +40,7 @@ struct CbajSound {
         auto &s=*static_cast<CbajSound *>(opaque);if(address>=0x8000)s.ram[address-0x8000]=value;
     }
     static uint8_t io_read(void *opaque,uint16_t port){
-        auto &s=*static_cast<CbajSound *>(opaque);uint8_t value=0xff;
+        auto &s=*static_cast<CbajSound *>(opaque);uint8_t value=0; // source default unmapped I/O is low
         switch(port&0xff){
         case 0x84:case 0x85:
             if(ymz280b_read(s.ymz,port&1,s.io_cycle(),&value))s.faults|=2;

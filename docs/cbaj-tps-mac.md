@@ -62,6 +62,8 @@ remain separate from source ROMs and from each other.
   `8000..ffff`. Only the first 32 KiB of the full audited program region is
   mapped, as in source. I/O masks the port to eight bits: `84/85` YMZ, `90`
   FIFO0 read/FIFO1 write, `91` FIFO0 EF shifted into bit 1. IRQ/NMI are unwired.
+  Unmapped ports return 00, the source address-map default; an executed Z80
+  regression checks this independently of the mapped FIFO/YMZ ports.
 - Sound execution chunks stay within the source 1/6000-second quantum. Actual
   Z80 bus timestamps preserve instruction overshoot; later budgets repay cycle
   debt. Soft reset preserves RAM and the absolute audio timeline while resetting
