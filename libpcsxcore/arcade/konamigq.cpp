@@ -448,7 +448,7 @@ uint8_t sound_byte_read(konamigq *b, uint32_t address, M68kSpace space) {
   if (address == kDspStatusAddress + 1)
     return static_cast<uint8_t>(status_word(b));
   (void)space;
-  return 0xff;
+  return 0;
 }
 void sound_byte_write(konamigq *b, uint32_t address, uint8_t value) {
   address &= kSoundAddrMask;
@@ -526,7 +526,8 @@ uint32_t read_input(konamigq *b, unsigned port) {
   }
   return UINT32_MAX;
 }
-uint8_t open_bus() { return 0xff; }
+/* Both pinned CPU program maps retain MAME default-zero unmapped reads. */
+uint8_t open_bus() { return 0; }
 bool selected(uint32_t mask, unsigned lane) {
   return (mask & (0xffu << (lane * 8))) != 0;
 }
@@ -554,7 +555,7 @@ uint32_t mapped_input(konamigq *b, uint32_t address) {
     return (switches & ~0x00010000u) | eeprom_do;
   }
   default:
-    return UINT32_MAX;
+    return 0;
   }
 }
 
@@ -898,8 +899,9 @@ extern "C" int konamigq_read(konamigq_t *b, uint32_t address, unsigned width,
         input_base = base;
         input_data = mapped_input(b, base);
       }
-      if (inlane == 0 || inlane == 2)
-        byte = static_cast<uint8_t>(input_data >> (inlane * 8));
+      /* Inputs are full 32-bit ports, unlike the byte device delegates.
+       * In particular lightgun X needs bit 8 in its second byte. */
+      byte = static_cast<uint8_t>(input_data >> (inlane * 8));
     } else if (a >= kPcmMapStart && a < kPcmMapStart + kPcmMapBytes &&
                (a & 1) == 0) {
       byte = b->pcm_ram[(a - kPcmMapStart) >> 1];
@@ -1110,6 +1112,10 @@ extern "C" void konamigq_get_status(const konamigq_t *b, konamigq_status_t *s) {
   s->dma_bytes_remaining = b->dma_remaining;
   s->drq = b->drq;
   s->sound_cpu_cycles = b->sound_cpu->total_cycles();
+  s->sound_pc = b->sound_cpu->pc(); s->sound_a7 = b->sound_cpu->address_register(7);
+  s->sound_d0 = b->sound_cpu->data_register(0); s->sound_sr = b->sound_cpu->sr();
+  s->sound_stopped = b->sound_cpu->stopped(); s->sound_bus_error = b->sound_cpu->bus_error();
+  s->dsp_pc = tms57002_pc(b->dsp);
   s->dsp_cycles = tms57002_total_cycles(b->dsp);
   s->k054539_cycles = k054539_cycles(b->pcm[0]);
   ncr53cf96_get_status(b->ncr, &s->ncr);

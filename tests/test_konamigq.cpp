@@ -203,7 +203,18 @@ void test_ports_masks_eeprom_irq_guest_sound(Context &ctx) {
   assert(read8(b, kGunX1) == 0xa3);
   uint32_t input = 0;
   assert(konamigq_read(b, kGunX1, 4, &input));
-  assert(input == 0xff00ffa3);
+  // Independent MAME CPU-space reads preserve all nine gun X bits and
+  // default zero on inactive byte lanes of device delegates.
+  assert(input == 0x000001a3);
+  assert(read8(b, kGunX1 + 1) == 1);
+  assert(read8(b, kGunX1 + 2) == 0 && read8(b, kGunX1 + 3) == 0);
+  assert(konamigq_write(b, 0x1f300000, 4, 0x12345678, UINT32_MAX));
+  assert(konamigq_read(b, 0x1f300000, 4, &input) && input == 0x00340078);
+  assert(read8(b, 0x1f300001) == 0);
+  uint16_t source_word;
+  assert(konamigq_sound_read16(b, 0x500000, 0xffff, &source_word) && source_word == 5);
+  assert(konamigq_sound_read16(b, 0x400000, 0xffff, &source_word) && source_word == 0);
+  assert(konamigq_sound_read16(b, 0x580000, 0xffff, &source_word) && source_word == 0);
   assert(read8(b, kDsw + 2) == 1);
 
   std::array<uint8_t, KONAMIGQ_EEPROM_BYTES> image{};

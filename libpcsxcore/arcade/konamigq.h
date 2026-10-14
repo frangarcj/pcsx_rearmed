@@ -90,6 +90,9 @@ enum {
 typedef struct konamigq_status {
   uint64_t now_ns;
   uint64_t sound_cpu_cycles;
+  uint32_t sound_pc, sound_a7, sound_d0;
+  uint16_t sound_sr;
+  uint8_t sound_stopped, sound_bus_error, dsp_pc;
   uint64_t dsp_cycles;
   uint64_t k054539_cycles;
   uint64_t dma_bytes_remaining;
