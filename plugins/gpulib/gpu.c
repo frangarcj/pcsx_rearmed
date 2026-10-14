@@ -58,6 +58,11 @@ int gpu_set_model(int model)
   return 0;
 }
 
+void gpu_set_lightgun_position(uint16_t x,uint16_t y)
+{
+  gpu.lightgun_x=x;gpu.lightgun_y=y;
+}
+
 
 int gpu_set_vram_height(unsigned rows)
 {
@@ -375,6 +380,9 @@ static noinline void get_gpu_info(struct psx_gpu *gpu, uint32_t data)
     case 0x07:
       gpu->gp0 = gpu_get_model();
       break;
+    case 0x08:
+      gpu->gp0=(data&0xff)==8?gpu->lightgun_x|((uint32_t)gpu->lightgun_y<<16):0;
+      break;
     default:
       // gpu->gp0 unchanged
       break;
@@ -550,6 +558,7 @@ long GPUinit(void)
   gpu.state.frame_count = &gpu.zero;
   gpu.state.hcnt = &gpu.zero;
   gpu.cmd_len = 0;
+  gpu_set_lightgun_position(0,0);
   do_reset(&gpu);
 
   return ret;
@@ -583,12 +592,16 @@ void GPUwriteStatus(uint32_t data)
   int src_x, src_y, changed;
 
   if (cmd < ARRAY_SIZE(gpu.regs)) {
-    if (cmd > 1 && cmd != 5 && gpu.regs[cmd] == data)
+    if (cmd > 1 && cmd != 5 && cmd != 0x0d && gpu.regs[cmd] == data)
       return;
     gpu.regs[cmd] = data;
   }
 
   switch (cmd) {
+    case 0x0d:
+      gpu_set_lightgun_position(0,0);
+      fb_dirty=0;
+      break;
     case 0x00:
       do_reset(&gpu);
       break;

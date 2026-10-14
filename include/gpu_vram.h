@@ -13,6 +13,9 @@ extern unsigned gpu_vram_height;
  * VRAM has already been allocated. Console builds accept 512; PCSX_SYSTEM12 builds also accept 1024. */
 int gpu_set_vram_height(unsigned rows);
 unsigned gpu_get_vram_height(void);
+/* Source GPU lightgun latch, raw pixel-clock/scanline values. GP1(10h,08h)
+ * returns it; GP1(0dh) clears it. A normal GPU reset preserves the latch. */
+void gpu_set_lightgun_position(uint16_t x,uint16_t y);
 
 /* Select GPU command/TPAGE semantics before GPU initialization. Model 2 is
  * the default. Model 1 is available only in PCSX_SYSTEM12 builds and selects

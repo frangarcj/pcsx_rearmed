@@ -2,9 +2,12 @@
 /* Test the production SDL handler, including a virtual mapped gamepad. */
 #define main harness_original_main
 #define systemgnet_set_analog gnet_test_analog
+#define systemzn_set_gun_position judge_test_gun
 #include "../frontend/mac_harness.c"
 #undef main
 #include <assert.h>
+static unsigned judge_x[2],judge_y[2];
+int judge_test_gun(unsigned p,unsigned x,unsigned y){assert(p<2);judge_x[p]=x;judge_y[p]=y;return 0;}
 static unsigned wheel=128, trigger=128, handle[2]={128,128};
 static int coin, start, fire, beast, beast2, service, raizing_mode, fifth, sixth;
 int gnet_test_analog(const char *name,unsigned raw)
@@ -207,6 +210,18 @@ int main(void)
     }
     assert(nba_mix_frames==1024 && !interactive_mix.error && !interactive_mix.clipped);
     puts("NBA SDL four-player coins/start/buttons, four mapped gamepads, focus release and production SPU0.35/RAX1 timed stereo routing PASS");
+    board.family=112;interactive_focused=1;
+    assert(SDL_SetJoystickVirtualAxis(joy,SDL_GAMEPAD_AXIS_LEFTX,0));assert(SDL_SetJoystickVirtualAxis(joy,SDL_GAMEPAD_AXIS_LEFTY,0));
+    SDL_UpdateJoysticks();frame_counter++;poll_interactive_input();
+    assert(judge_x[0]==0x822 && judge_y[0]==0x122);
+    SDL_CloseGamepad(interactive_pads[0]);interactive_pads[0]=NULL;
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_MOUSE_MOTION;e.motion.windowID=SDL_GetWindowID(w);e.motion.x=400;e.motion.y=300;
+    assert(SDL_PushEvent(&e));poll_interactive_input();assert(judge_x[0]>=0x820 && judge_x[0]<=0x825 && judge_y[0]>=0x121 && judge_y[0]<=0x123);
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_MOUSE_BUTTON_DOWN;e.button.windowID=SDL_GetWindowID(w);e.button.x=-10;e.button.y=300;e.button.button=SDL_BUTTON_LEFT;
+    assert(SDL_PushEvent(&e));poll_interactive_input();assert(fire && judge_x[0]==0x392 && judge_y[0]==0x02c);
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_WINDOW_FOCUS_LOST;assert(SDL_PushEvent(&e));poll_interactive_input();assert(!fire && !interactive_mouse_trigger);
+    puts("Judge SDL mouse/gamepad raw aim, offscreen trigger, viewport scaling and focus release PASS");
+    refresh_interactive_gamepads();
     SDL_CloseGamepad(interactive_pads[0]);interactive_pads[0]=NULL;
     SDL_CloseJoystick(joy);assert(SDL_DetachVirtualJoystick(id));
     SDL_DestroyWindow(w);SDL_Quit();

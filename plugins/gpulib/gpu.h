@@ -84,6 +84,7 @@ struct psx_gpu {
   uint32_t status;
   uint32_t type1_status; /* CXD8538Q GP0 status fields before type-2 mapping */
   uint32_t gp0;
+  uint16_t lightgun_x,lightgun_y;
   uint32_t ex_regs[8];  // in native endian
   struct psx_gpu_screen screen;
   struct {

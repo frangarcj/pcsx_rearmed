@@ -27,6 +27,7 @@
 #include "arcade/psx_screen_clock.h"
 #ifdef PCSX_SYSTEM12
 #include "system12.h"
+#include "systemzn.h"
 #endif
 //#include "debug.h"
 #define DebugVSync()
@@ -440,6 +441,7 @@ static void deliverVblankStart(const psx_screen_time *when)
     HW_GPU_STATUS &= SWAP32(~PSXGPU_LCF);
     GPU_vBlank(1, 0);
 #ifdef PCSX_SYSTEM12
+    systemzn_vblank(1);
     if (when) system12_vblank_at(1, when);
     else system12_vblank(1);
 #endif
@@ -463,6 +465,7 @@ static void deliverVblankEnd(const psx_screen_time *when)
     HW_GPU_STATUS = SWAP32(status);
     GPU_vBlank(0, field);
 #ifdef PCSX_SYSTEM12
+    systemzn_vblank(0);
     if (when) system12_vblank_at(0, when);
     else system12_vblank(0);
 #endif
