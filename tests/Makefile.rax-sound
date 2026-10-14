@@ -1,0 +1,19 @@
+CXX ?= c++
+BUILD ?= build/rax-sound-tests
+ARCADE := libpcsxcore/arcade
+SOURCES := $(ARCADE)/adsp2181.cpp $(ARCADE)/rax_sound.cpp tests/rax_sound_standalone.cpp
+HEADERS := $(ARCADE)/rax_sound.h $(ARCADE)/adsp2181.h $(ARCADE)/adsp2181_internal.h $(wildcard $(ARCADE)/adsp2181*.inc)
+FLAGS := -std=c++20 -Wall -Wextra -Wno-sign-compare -Wno-unused-but-set-variable -I$(ARCADE)
+.PHONY: test sanitize firmware
+$(BUILD)/test-rax-sound: $(SOURCES) $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CXX) $(FLAGS) -O2 $(SOURCES) -o $@
+$(BUILD)/test-rax-sound-sanitize: $(SOURCES) $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CXX) $(FLAGS) -O1 -fsanitize=address,undefined -fno-omit-frame-pointer $(SOURCES) -o $@
+test: $(BUILD)/test-rax-sound
+	$<
+sanitize: $(BUILD)/test-rax-sound-sanitize
+	ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $<
+firmware: $(BUILD)/test-rax-sound
+	$< --firmware $(ROM)
