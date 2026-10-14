@@ -5,8 +5,9 @@ adapter with the source four-flash daughterboard and UPD4701A trackball. A
 8900-frame GL/NEON replay reaches Homer in the bowling lane, Frame 1, SET CURVE,
 with the direction arrow and pin map. It consumes 450/450 events, reads the
 installed flash, has nonzero sound and reports no board or peripheral faults.
-This establishes player setup and trackball input; a completed scored bowl is
-still being checked separately.
+A further 10260-frame replay completes the approach/roll input sequence and
+shows fallen pins in both GL and NEON. This is bounded player bowling coverage;
+a numerical score table and complete rounds are not claimed.
 
 ## Source and media
 
@@ -125,6 +126,32 @@ bus-lane correction. No-board/no-CHD builds explicitly reject this configuration
 
 Evidence is in `artifacts/boards-mac-20261014`, including
 `simpbowl-validation.json`, snapshots, input CSVs, audit and source probe logs.
-Complete RAM/WAVs remain under `/tmp/pcsx-boards-mac-20261014`. Completed scored
-bowling, further cabinet calibration, multi-player rounds, CDDA mixing, authentic
+Complete RAM/WAVs remain under `/tmp/pcsx-boards-mac-20261014`. Numerical score-table coverage, full rounds, further cabinet calibration,
+multi-player rounds, CDDA mixing, authentic
 DRC, save states and physical Vita remain separate validation.
+
+## Actual bowl in GL and NEON
+
+The 10260-frame replay consumes 598/598 events. It locks position and curve,
+starts the approach, rolls the trackball, and ends with multiple pins down in
+the actual lane. Both renderers show the same pin-fall camera view, not an
+attract-only result. Source time is 171.496811283 seconds; PC is `800635f4`.
+Both runs have 67 DMA requests, no pending DMA payload and zero board/peripheral
+faults. Their exact 2 MiB RAM dumps match, SHA256
+`948e98026fe315e72fd85d78d0ee4e7ba08015561d3506ba8981abc87d66d2a8`.
+
+The two headless raw SPU WAVs also match exactly: 7560268 stereo frames,
+44100 Hz, peak 3822, SHA256
+`e1f2ed9c8dac177a1e50da2753144508e428371de346c5b67c69f6e4981660a9`.
+The separate interactive 8900-frame route check above remains the evidence for
+source gain/channel order at SDL. Its raw WAV differs from headless NEON in
+46306 of 13115528 samples (maximum absolute difference 355), while its exact
+2 MiB game RAM still matches. That SPU batching difference is recorded rather
+than treated as full timing/audio fidelity.
+
+The installed flash payload retains the same MAME-matching SHA1 after play,
+with zero flash command writes in both player runs. Evidence includes
+`simpbowl-bowl-gl.png`, `simpbowl-bowl-neon.png`, their logs and
+`simpbowl-player-bowl.csv` in the validation directory. The visible lane number
+is not reported as a player score. Full game completion, score-table auditing,
+physical trackball calibration and physical Vita remain outside this result.

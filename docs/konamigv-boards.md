@@ -30,7 +30,7 @@ The common `konamigv_state` class supplies the shared SCSI/DMA and common memory
 | `btchamp` | `konamigv_state` / `btchamp` | Two UPD4701A trackballs, serial reads/reset, LH28F400 flash | Trackball and flash command interfaces remain unsupported |
 | `kdeadeye` | `konamigv_state` / `kdeadeye` | Two lightguns, buttons, LH28F400 flash | Lightgun and flash command interfaces remain unsupported; MAME marks the game not working |
 | `tmosh`, `tmoshs`, `tmoshsp`, `tmoshspa` | `tokimeki_state` / `tmosh` | Sensor serial protocol, heartbeat/GSR inputs, printer state, printer timing/video | Tokimeki sensor and printer path remain unsupported; `tmoshspa` is marked not working |
-| `simpbowl` | `simpbowl_state` / `simpbowl` | Four Fujitsu flash devices and trackball | Native Mac flash/trackball integration, original installation verified against MAME; player check in progress |
+| `simpbowl` | `simpbowl_state` / `simpbowl` | Four Fujitsu flash devices and trackball | Native Mac flash/trackball integration, original installation matches MAME; bounded GL/NEON player bowling with pins down verified (`simpbowl-mac.md`) |
 
 The GAME macros also mark all sets `MACHINE_IMPERFECT_SOUND`; graphics are imperfect for the listed exceptions, and `btchamp`, `kdeadeye`, and `tmoshspa` are marked not working. These MAME flags are recorded per set in the registry.
 
