@@ -259,6 +259,9 @@ int PCSXMacVitaGL_CapturePresentedFrame(void)
     return capture_framebuffer(GL_FRONT);
 }
 
+const unsigned char *PCSXMacVitaGL_CapturedPixels(int *width,int *height)
+{if(width)*width=s_capture_width;if(height)*height=s_capture_height;return s_capture_rgba;}
+
 int PCSXMacVitaGL_WriteCapturePpm(const char *path)
 {
     FILE *file;

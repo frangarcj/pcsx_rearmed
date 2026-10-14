@@ -6,10 +6,19 @@
 #define systemgq_set_gun_position gq_test_gun
 #define systemgv_has_trackball gv_test_has_trackball
 #define systemgv_trackball_delta gv_test_track_delta
+#define systemgv_has_sensors gv_test_has_sensors
+#define systemgv_sensor_values gv_test_sensor_values
+#define systemgv_set_analog gv_test_sensor_set
+#define systemgv_set_input gv_test_sensor_input
 #include "../frontend/mac_harness.c"
 #undef main
 #include <assert.h>
-static int gv_dx,gv_dy;
+static int gv_dx,gv_dy,gv_sensor_mode;static unsigned gv_heart=31,gv_gsr,gv_pulses;
+int gv_test_has_sensors(void){return gv_sensor_mode && selected_board && selected_board->family==102;}
+int gv_test_sensor_values(unsigned *h,unsigned *g){if(!gv_test_has_sensors())return -1;*h=gv_heart;*g=gv_gsr;return 0;}
+int gv_test_sensor_set(const char *name,unsigned value){if(!strcmp(name,"heartbeat")){assert(value<=101);gv_heart=value;}else{assert(!strcmp(name,"gsr") && value<=128);gv_gsr=value;}return 0;}
+int gv_test_sensor_input(const char *name,int down){assert(!strcmp(name,"heartbeat_pulse"));if(down)gv_pulses++;return 0;}
+
 int gv_test_has_trackball(void){return selected_board && selected_board->family==102;}
 int gv_test_track_delta(int x,int y){gv_dx+=x;gv_dy+=y;return 0;}
 static unsigned gq_x[3],gq_y[3];
@@ -256,6 +265,13 @@ int main(void)
     for(unsigned n=0;n<300;n++)assert(gv_output[2*n]==-9000 && gv_output[2*n+1]==3000);
     assert(!interactive_audio_error);SDL_DestroyAudioStream(interactive_audio);interactive_audio=NULL;
     puts("GV SDL fractional reversed-X trackball, frame-sampled gamepad, held mouse/focus release and source swapped SPU0.75 stereo PASS");
+    gv_sensor_mode=1;interactive_focused=1;
+    key(SDL_SCANCODE_EQUALS,1);key(SDL_SCANCODE_EQUALS,0);assert(gv_heart==41);
+    key(SDL_SCANCODE_MINUS,1);key(SDL_SCANCODE_MINUS,0);assert(gv_heart==31);
+    key(SDL_SCANCODE_PAGEUP,1);key(SDL_SCANCODE_PAGEUP,0);assert(gv_gsr==2);
+    key(SDL_SCANCODE_PAGEDOWN,1);key(SDL_SCANCODE_PAGEDOWN,0);assert(gv_gsr==0);
+    key(SDL_SCANCODE_H,1);key(SDL_SCANCODE_H,0);assert(gv_heart==0 && gv_pulses==1);
+    gv_sensor_mode=0;puts("Tokimeki production SDL simulated/direct pulse and GSR controls PASS");
     refresh_interactive_gamepads();
     SDL_CloseGamepad(interactive_pads[0]);interactive_pads[0]=NULL;
     SDL_CloseJoystick(joy);assert(SDL_DetachVirtualJoystick(id));

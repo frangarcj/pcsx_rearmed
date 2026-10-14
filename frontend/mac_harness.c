@@ -343,6 +343,7 @@ void GPUrearmedCallbacks(const struct rearmed_cbs *cbs);
 int harness_write_ppm(const char *path, int w, int h);
 int harness_write_vram(const char *path);
 int harness_configure_gl_capture(int enabled, unsigned int target_frame);
+int harness_printer_rgb(void *,const unsigned char **,unsigned *,unsigned *,unsigned *);
 unsigned short harness_vram_pixel(int x, int y);
 void harness_capture_mode(int w, int h);
 void harness_capture_flip(const void *vram, int offset, int rgb24,
@@ -401,7 +402,7 @@ static void usage(const char *name)
 {
   fprintf(stderr, "usage: %s (--exe PS-X-EXE | --system12 REGION-DIR | --system11 REGION-DIR | --system10 REGION-DIR | --capcom-zn REGION-DIR | --tecmo-tps REGION-DIR | --raizing-zn REGION-DIR | --visco-zn REGION-DIR | --atlus-zn REGION-DIR | --jdredd-zn REGION-DIR | --nbajam-zn REGION-DIR | --primal-zn REGION-DIR | --cbaj-tps REGION-DIR | --taito-fx1 REGION-DIR | --taito-fx1z REGION-DIR | --system-gv REGION-DIR | --system-gq REGION-DIR | --system-gnet REGION-DIR | --system-gnet-fixture) "
     "[--frames N] [--output FRAME.ppm] [--capture-gl] [--dump-vram FILE] [--dump-ram FILE] [--board-test] [--verify-smoke] "
-    "[--inputs FILE.csv] [--audio FILE.wav] [--mixed-audio FILE.wav] [--nvram FILE] [--gnet-jp1 on|off] "
+    "[--inputs FILE.csv] [--printer-dir DIR] [--audio FILE.wav] [--mixed-audio FILE.wav] [--nvram FILE] [--gnet-jp1 on|off] "
     "[--audio-test-fixture] "
     "[--reset-at-cycle N] "
     "[--trace FILE --trace-blocks N --trace-start CYCLES] [--cycle-snapshots FILE "
@@ -726,6 +727,18 @@ static void poll_interactive_input(void)
     if (event.type != SDL_EVENT_KEY_DOWN && event.type != SDL_EVENT_KEY_UP)
       continue;
     if (event.key.repeat) continue;
+#ifdef PCSX_SYSTEM_GV
+    if(selected_board && selected_board->family==102 && systemgv_has_sensors()){
+      int pressed=event.type==SDL_EVENT_KEY_DOWN;
+      if(event.key.scancode==SDL_SCANCODE_H){if(pressed)systemgv_set_analog("heartbeat",0);systemgv_set_input("heartbeat_pulse",pressed);continue;}
+      if(pressed){unsigned heart,gsr;if(!systemgv_sensor_values(&heart,&gsr)){
+        if(event.key.scancode==SDL_SCANCODE_EQUALS){systemgv_set_analog("heartbeat",heart>91?101:heart+10);continue;}
+        if(event.key.scancode==SDL_SCANCODE_MINUS){systemgv_set_analog("heartbeat",heart<10?0:heart-10);continue;}
+        if(event.key.scancode==SDL_SCANCODE_PAGEUP){systemgv_set_analog("gsr",gsr>126?128:gsr+2);continue;}
+        if(event.key.scancode==SDL_SCANCODE_PAGEDOWN){systemgv_set_analog("gsr",gsr<2?0:gsr-2);continue;}
+      }}
+    }
+#endif
     /* Escape pauses, as Start + Select on the Vita. */
     if (event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_ESCAPE) {
       pause_requested = 1;
@@ -1182,6 +1195,8 @@ int main(int argc, char **argv)
   int gq_fixture = 0;
   int gv_fixture = 0;
   int gv_simp_fixture = 0;
+  int gv_tok_fixture = 0;
+  const char *printer_dir = NULL;
   int gnet_fixture = 0;
   int gnet_storage_fixture = 0;
   int gnet_storage_reopen = 0;
@@ -1224,6 +1239,7 @@ int main(int argc, char **argv)
   (void)board_load_result;
   for (i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--exe") && i + 1 < argc) exe = argv[++i];
+    else if(!strcmp(argv[i],"--system-gv-tokimeki-fixture") && i+1<argc){board=argv[++i];board_family=102;gv_tok_fixture=1;}
     else if (!strcmp(argv[i], "--system-gv-simpbowl-fixture") && i+1<argc){board=argv[++i];board_family=102;gv_simp_fixture=1;}
     else if (!strcmp(argv[i], "--system-gv-fixture") && i + 1 < argc) {
       if (board) { usage(argv[0]); return 2; }
@@ -1294,6 +1310,7 @@ int main(int argc, char **argv)
     }
     else if (!strcmp(argv[i], "--output") && i + 1 < argc) output = argv[++i];
     else if (!strcmp(argv[i], "--capture-gl")) capture_gl = 1;
+    else if (!strcmp(argv[i], "--printer-dir") && i+1<argc)printer_dir=argv[++i];
     else if (!strcmp(argv[i], "--dump-ram") && i + 1 < argc) ram_path = argv[++i];
     else if (!strcmp(argv[i], "--dump-vram") && i + 1 < argc) vram_path = argv[++i];
     else if (!strcmp(argv[i], "--inputs") && i + 1 < argc) inputs_path = argv[++i];
@@ -1534,14 +1551,14 @@ int main(int argc, char **argv)
     usage(argv[0]); return 2;
   }
 #ifndef PCSX_SYSTEM_GV
-  if (gv_fixture || gv_simp_fixture || (board && board_family == 102)) {
+  if (gv_fixture || gv_simp_fixture || gv_tok_fixture || (board && board_family == 102)) {
     fprintf(stderr, "Rebuild with BOARD=1 and HAVE_CHD=1 for Konami GV.\n"); return 2;
   }
 #endif
 #ifndef PCSX_SYSTEM_GQ
   if(gq_fixture || (board && board_family==113)){fprintf(stderr,"Rebuild with BOARD=1 and HAVE_CHD=1 for Konami GQ.\n");return 2;}
 #endif
-  if(gv_simp_fixture && (interactive || use_drc || board_test)){usage(argv[0]);return 2;}
+  if((gv_simp_fixture || gv_tok_fixture) && (interactive || use_drc || board_test)){usage(argv[0]);return 2;}
   if(gq_fixture && (interactive || use_drc)){usage(argv[0]);return 2;}
   if (trace_path) {
     trace = fopen(trace_path, "w");
@@ -1627,7 +1644,13 @@ int main(int argc, char **argv)
       if (trace) fclose(trace);
       return 2;
     }
-    if(gv_simp_fixture){
+    if(gv_tok_fixture){
+#ifdef PCSX_SYSTEM_GV
+      board_load_result=systemgv_test_load_tokimeki(board);
+#else
+      board_load_result=-1;
+#endif
+    }else if(gv_simp_fixture){
 #ifdef PCSX_SYSTEM_GV
       board_load_result=systemgv_test_load_simpbowl(board);
 #else
@@ -1728,6 +1751,15 @@ int main(int argc, char **argv)
       fprintf(stderr,"SystemGV: outputs must use a separate path from flash.nvram\n");selected_board->unload();return 2;
     }
   }
+#endif
+#ifdef PCSX_SYSTEM_GV
+  if(printer_dir && (!selected_board || selected_board->family!=102 || !systemgv_has_sensors())){
+    fprintf(stderr,"--printer-dir requires a Tokimeki profile\n");return 2;
+  }
+  if(selected_board && selected_board->family==102 && systemgv_has_sensors() &&
+     systemgv_set_printer_video(harness_printer_rgb,NULL,printer_dir)){fprintf(stderr,"Tokimeki video hookup failed\n");return 1;}
+#else
+  if(printer_dir){fprintf(stderr,"--printer-dir requires BOARD=1 and HAVE_CHD=1\n");return 2;}
 #endif
   psxReset();
 #ifdef PCSX_SYSTEM12
@@ -1897,6 +1929,11 @@ int main(int argc, char **argv)
       const system12_romset_info *set = system12_romset_is_zip(board) ? system12_romset_identify(board) : NULL;
       if (set) snprintf(art_path, sizeof(art_path), "%s/snap/%s.png", art_dir, set->name);
     }
+#ifdef PCSX_SYSTEM_GV
+    if (selected_board->family==102 && systemgv_has_sensors())
+      fprintf(stderr,"Tokimeki controls: 5 coin, arrows + A select, +/- simulated pulse rate, H direct pulse, PageUp/Down GSR, Escape pause\n");
+    else
+#endif
     if (selected_board->family==102)
       fprintf(stderr,"GV controls: 5/6 coin, 1/2/3/4 Start, A/S/D buttons, Simpsons mouse trackball (source reversed X) and left/right click, gamepad stick, Escape pause\n");
     else if (selected_board->family==110)

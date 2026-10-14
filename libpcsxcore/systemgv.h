@@ -10,6 +10,7 @@ int systemgv_load(const char *directory);
 /* Test-only boot path. The BIOS image is generated in memory and is never
  * accepted by the source-profile loader; `chd_path` must still be a real CHD. */
 int systemgv_test_load(const char *chd_path);
+int systemgv_test_load_tokimeki(const char *chd_path);
 int systemgv_test_load_simpbowl(const char *chd_path);
 void systemgv_unload(void);
 int systemgv_active(void);
@@ -23,6 +24,11 @@ int systemgv_dma5(uint32_t madr, uint32_t bcr, uint32_t chcr);
 const char *systemgv_flash_path(void);
 int systemgv_flush_flash(void);
 int systemgv_has_trackball(void);
+int systemgv_has_sensors(void);
+int systemgv_sensor_values(unsigned *heartbeat,unsigned *gsr);
+typedef int (*systemgv_printer_capture_cb)(void *,const uint8_t **,unsigned *,unsigned *,unsigned *);
+int systemgv_set_printer_video(systemgv_printer_capture_cb,void *opaque,const char *directory);
+void systemgv_vblank(int state);
 unsigned systemgv_analog_max(const char *name);
 int systemgv_set_analog(const char *name,unsigned value);
 int systemgv_trackball_delta(int x,int y);

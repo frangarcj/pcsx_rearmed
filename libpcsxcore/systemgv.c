@@ -15,6 +15,7 @@
 #include "arcade/chd_cd.h"
 #include "arcade/konamigv.h"
 #include "arcade/simpbowl_io.h"
+#include "arcade/tokimeki_io.h"
 #include "gpu_vram.h"
 
 #include <CommonCrypto/CommonDigest.h>
@@ -43,6 +44,12 @@ typedef struct GvProfile {
 
 /* Exact supported profiles from scripts/konamigv_boards.json. */
 static const GvProfile gv_profiles[] = {
+    {"tmoshs", "konamigv", "tmoshs_init", "MACHINE_IMPERFECT_SOUND | MACHINE_IMPERFECT_GRAPHICS",
+     "755jaa01", "fc742a0b763ba38350ba7eb5d775948632aafd9d", "GOOD",
+     "f18a0974a6be69dc179706643aab837ff61c2738"},
+    {"tmoshsp", "konamigv", "tmoshsp_init", "MACHINE_IMPERFECT_SOUND | MACHINE_IMPERFECT_GRAPHICS",
+     "756jab01", "b2c59b9801debccbbd986728152f314535c67e53", "GOOD",
+     "97041e287e4c80066043967450779b81b62b2b8e"},
     {"simpbowl", "konamigv", "empty_init", "MACHINE_IMPERFECT_SOUND",
      "829uaa02", "2ec4cc608d5582e478ee047b60ccee67b52f060c", "GOOD",
      "16ae7f81cbe841c429c5c7326cf83e87db1782bf"},
@@ -74,6 +81,10 @@ typedef struct GvBoard {
     psx_sio_t *sio[2];
     ChdCd *cd;
     SimpBowlIO *simp;
+    TokimekiIO *tok;
+    systemgv_printer_capture_cb capture;
+    void *capture_opaque;
+    char printer_dir[GV_MAX_PATH];
     uint8_t *flash;
     uint16_t track[2];
     char flash_path[GV_MAX_PATH];
@@ -176,6 +187,11 @@ static void irq10(void *opaque, int asserted)
 static uint32_t read_input(void *opaque, unsigned port)
 {
     (void)opaque;
+    if(board.tok){
+      if(port==0)return board.inputs[0]|0xffffc3e0u;
+      if(port==1)return 0xfffffbffu|(tokimeki_io_device_bit(board.tok)<<10);
+      return UINT32_MAX;
+    }
     return port < 3 ? board.inputs[port] : UINT32_MAX;
 }
 
@@ -351,12 +367,14 @@ static int validate_ini(const char *directory, const GvProfile *profile)
         strcmp(ini_value(values, "disk.cdrom"), disk_filename) ||
         strcmp(ini_value(values, "disk.cdrom.sha1"), profile->disk_sha1) ||
         strcmp(ini_value(values, "disk.cdrom.status"), profile->disk_status)) return -1;
-    int special = !strcmp(profile->set, "simpbowl");
-    if (strcmp(ini_value(values,"mame_machine"), special?"simpbowl":"konamigv") ||
-        strcmp(ini_value(values,"mame_input"), special?"simpbowl":"konamigv") ||
-        strcmp(ini_value(values,"mame_state"), special?"simpbowl_state":"konamigv_state") ||
-        (*ini_value(values,"unsupported_game_io") && (!special ||
-          strcmp(ini_value(values,"unsupported_game_io"),"trackball interface; flash command protocol")))) return -1;
+    int special = !strcmp(profile->set,"simpbowl"),tok=!strncmp(profile->set,"tmosh",5);
+    const char *machine=tok?"tmosh":special?"simpbowl":"konamigv";
+    const char *state=tok?"tokimeki_state":special?"simpbowl_state":"konamigv_state";
+    const char *io=ini_value(values,"unsupported_game_io");
+    if(strcmp(ini_value(values,"mame_machine"),machine) || strcmp(ini_value(values,"mame_input"),machine) ||
+       strcmp(ini_value(values,"mame_state"),state) || (*io &&
+       (tok?strcmp(io,"Tokimeki sensor/printer controller and print media path"):
+        special?strcmp(io,"trackball interface; flash command protocol"):1)))return -1;
     for (i = 0; i < sizeof(common) / sizeof(common[0]); i++)
         if (strcmp(ini_value(values, common[i].key), common[i].value)) return -1;
     return 0;
@@ -421,10 +439,46 @@ int systemgv_flush_flash(void)
     if(failed || rename(temporary,board.flash_path)){remove(temporary);return -1;}return 0;
 }
 int systemgv_has_trackball(void){return board.active && board.simp!=NULL;}
-unsigned systemgv_analog_max(const char *name){return systemgv_has_trackball() && name && (!strcmp(name,"p1trackx") || !strcmp(name,"p1tracky"))?0xfff:0;}
-int systemgv_set_analog(const char *name,unsigned value){if(!systemgv_analog_max(name) || value>0xfff)return -1;board.track[name[7]=='y']=value;return 0;}
+unsigned systemgv_analog_max(const char *name){if(systemgv_has_sensors() && name){if(!strcmp(name,"heartbeat"))return 101;if(!strcmp(name,"gsr"))return 128;}return systemgv_has_trackball() && name && (!strcmp(name,"p1trackx") || !strcmp(name,"p1tracky"))?0xfff:0;}
+static unsigned tok_heart=31,tok_gsr=0,tok_meta=3;
+int systemgv_sensor_values(unsigned *heart,unsigned *gsr){if(!systemgv_has_sensors())return -1;if(heart)*heart=tok_heart;if(gsr)*gsr=tok_gsr;return 0;}
+int systemgv_set_analog(const char *name,unsigned value){
+ if(board.tok){unsigned max=systemgv_analog_max(name);if(!max || value>max)return -1;if(!strcmp(name,"heartbeat"))tok_heart=value;else tok_gsr=value;tokimeki_io_inputs(board.tok,tok_heart,tok_gsr,tok_meta);return 0;}
+ if(!systemgv_analog_max(name) || value>0xfff)return -1;board.track[name[7]=='y']=value;return 0;}
 int systemgv_trackball_delta(int x,int y){if(!systemgv_has_trackball())return -1;board.track[0]=(board.track[0]+(uint32_t)x)&0xfff;board.track[1]=(board.track[1]+(uint32_t)y)&0xfff;return 0;}
 void systemgv_frame(void){if(board.active && board.simp)simpbowl_io_frame(board.simp,board.track[0],board.track[1]);}
+
+static int capture_printer(void *opaque,const uint8_t **rgb,unsigned *w,unsigned *h,unsigned *stride)
+{(void)opaque;return board.capture?board.capture(board.capture_opaque,rgb,w,h,stride):0;}
+static void printed_page(void *opaque,const uint8_t *rgb,unsigned w,unsigned h,unsigned stride)
+{
+ (void)opaque;if(!*board.printer_dir)return;char path[GV_MAX_PATH];TokimekiIOStatus st;tokimeki_io_status(board.tok,&st);
+ if(snprintf(path,sizeof(path),"%s/print-%04" PRIu64 ".ppm",board.printer_dir,st.prints)>=(int)sizeof(path)){board.fault=1;return;}
+ FILE *f=fopen(path,"wb");if(!f){board.fault=1;return;}int failed=fprintf(f,"P6\n%u %u\n255\n",w,h)<0;
+ for(unsigned y=0;y<h && !failed;y++)failed=fwrite(rgb+(size_t)y*stride,1,w*3,f)!=w*3;
+ if(fclose(f))failed=1;if(failed)board.fault=1;else fprintf(stderr,"Tokimeki printed page: %s\n",path);
+}
+int systemgv_has_sensors(void){return board.active && board.tok!=NULL;}
+int systemgv_set_printer_video(systemgv_printer_capture_cb cb,void *opaque,const char *dir)
+{
+ if(!board.tok)return -1;if(dir && snprintf(board.printer_dir,sizeof(board.printer_dir),"%s",dir)>=(int)sizeof(board.printer_dir))return -1;
+ board.capture=cb;board.capture_opaque=opaque;return 0;
+}
+void systemgv_vblank(int state)
+{
+ if(board.active && board.tok){if(systemgv_sync(psxRegs.cycle))return;tokimeki_io_vblank(board.tok,state);TokimekiIOStatus st;tokimeki_io_status(board.tok,&st);if(st.fault)board.fault=1;}
+}
+static int tok_bus(uint32_t a,unsigned w,uint32_t *v,uint32_t mask,int write)
+{
+ if(!board.tok)return 0;
+ if(write){
+  if(a<0x1f680090 || a>=0x1f680092)return 0;uint16_t data=0;int selected=0;
+  for(unsigned i=0;i<w;i++)if(a+i<0x1f680092 && (mask&(0xffu<<(8*i)))){data|=((*v>>(8*i))&255)<<((a+i-0x1f680090)*8);selected=1;}
+  if(selected)tokimeki_io_serial_write(board.tok,data);return 1;
+ }else{
+  if(a<0x1f680080 || a>=0x1f680082)return 0;uint16_t data=tokimeki_io_serial_read(board.tok);*v=(data>>((a-0x1f680080)*8));return 1;
+ }
+}
 
 static int sync_devices(uint64_t now_ns)
 {
@@ -434,15 +488,19 @@ static int sync_devices(uint64_t now_ns)
         return -1;
     }
     konamigv_get_status(board.device, &after);
+    if(chd_cd_advance_to(board.cd,now_ns)!=1){board.fault=1;return -1;}
     if (after.faults || after.uart_faults || after.cdrom.target.faults) {
         board.fault = 1;
         return -1;
     }
+    if(board.tok && tokimeki_io_advance_to(board.tok,now_ns)){board.fault=1;return -1;}
     if(board.simp && simpbowl_io_advance_to(board.simp,now_ns)){board.fault=1;return -1;}
     board.now_ns = now_ns;
     return 0;
 }
 
+static int advance_cd_media(void *opaque,uint64_t ns)
+{(void)opaque;return chd_cd_advance_to(board.cd,ns);}
 static int activate_device(const nscsi_cd_media_ops_t *media)
 {
     konamigv_config_t config;
@@ -455,6 +513,7 @@ static int activate_device(const nscsi_cd_media_ops_t *media)
     config.write_ram8 = write_ram8;
     config.irq10 = irq10;
     config.cd_media = *media;
+    config.advance_media=advance_cd_media;
     /* The audited ROM_REGION16_BE bytes are the on-disk dump. The 93C46
      * port stores words as little-endian bytes, matching MAME's NVRAM export.
      * Normalize in device memory while keeping the original hash-checked
@@ -526,6 +585,11 @@ int systemgv_load(const char *directory)
     }
     if (activate_device(&media)) goto fail;
     if(!strcmp(profile->set,"simpbowl") && init_simp(directory,0))goto fail;
+    if(!strncmp(profile->set,"tmosh",5)){
+      TokimekiIOConfig cfg={0};cfg.device_initial=!strcmp(profile->set,"tmoshs")?0xf073:0xf0ba;
+      cfg.manual_layout=!strcmp(profile->set,"tmoshsp");cfg.capture=capture_printer;cfg.printed=printed_page;
+      tok_heart=31;tok_gsr=0;tok_meta=3;board.tok=tokimeki_io_create(&cfg);if(!board.tok)goto fail;
+    }
     return 0;
 fail:
     systemgv_unload();
@@ -652,11 +716,323 @@ int systemgv_test_load_simpbowl(const char *chd_path)
     return 0;
 }
 
+/* Explicit generated MIPS fixture; never a substitute for game firmware. */
+int systemgv_test_load_tokimeki(const char *chd_path){
+ static const uint32_t guest[]={
+        0x3c08bf80u, 0x35081000u, 0x3c090000u, 0x35290000u, 0xad090814u, 0x3c090300u,
+        0x35290000u, 0xad090814u, 0x3c090500u, 0x35290000u, 0xad090814u, 0x3c0906c6u,
+        0x35290260u, 0xad090814u, 0x3c090704u, 0x35292018u, 0xad090814u, 0x3c090800u,
+        0x35290001u, 0xad090814u, 0x3c090200u, 0x352900ffu, 0xad090810u, 0x3c090000u,
+        0x35290000u, 0xad090810u, 0x3c0900f0u, 0x35290140u, 0xad090810u, 0x3c08bf68u,
+        0x35080000u, 0x3c0a8000u, 0x354a0000u, 0x3c0dbf10u, 0x35ad0000u, 0x3c0ebf18u,
+        0x35ce0000u, 0x8da90004u, 0x00000000u, 0x31290400u, 0xad490100u, 0x3c090000u,
+        0x35290010u, 0xadc90000u, 0x3c090000u, 0x35290000u, 0xadc90000u, 0x8da90004u,
+        0x00000000u, 0x31290400u, 0xad490104u, 0x3c090000u, 0x35290010u, 0xadc90000u,
+        0x3c090000u, 0x35290000u, 0xadc90000u, 0x8da90004u, 0x00000000u, 0x31290400u,
+        0xad490108u, 0x3c090000u, 0x35290010u, 0xadc90000u, 0x3c090000u, 0x35290000u,
+        0xadc90000u, 0x8da90004u, 0x00000000u, 0x31290400u, 0xad49010cu, 0x3c090000u,
+        0x35290010u, 0xadc90000u, 0x3c090000u, 0x35290000u, 0xadc90000u, 0x8da90004u,
+        0x00000000u, 0x31290400u, 0xad490110u, 0x3c090000u, 0x35290010u, 0xadc90000u,
+        0x3c090000u, 0x35290000u, 0xadc90000u, 0x8da90004u, 0x00000000u, 0x31290400u,
+        0xad490114u, 0x3c090000u, 0x35290010u, 0xadc90000u, 0x3c090000u, 0x35290000u,
+        0xadc90000u, 0x8da90004u, 0x00000000u, 0x31290400u, 0xad490118u, 0x3c090000u,
+        0x35290010u, 0xadc90000u, 0x3c090000u, 0x35290000u, 0xadc90000u, 0x8da90004u,
+        0x00000000u, 0x31290400u, 0xad49011cu, 0x3c090000u, 0x35290010u, 0xadc90000u,
+        0x3c090000u, 0x35290000u, 0xadc90000u, 0x8da90004u, 0x00000000u, 0x31290400u,
+        0xad490120u, 0x3c090000u, 0x35290010u, 0xadc90000u, 0x3c090000u, 0x35290000u,
+        0xadc90000u, 0x8da90004u, 0x00000000u, 0x31290400u, 0xad490124u, 0x3c090000u,
+        0x35290010u, 0xadc90000u, 0x3c090000u, 0x35290000u, 0xadc90000u, 0x8da90004u,
+        0x00000000u, 0x31290400u, 0xad490128u, 0x3c090000u, 0x35290010u, 0xadc90000u,
+        0x3c090000u, 0x35290000u, 0xadc90000u, 0x8da90004u, 0x00000000u, 0x31290400u,
+        0xad49012cu, 0x3c090000u, 0x35290010u, 0xadc90000u, 0x3c090000u, 0x35290000u,
+        0xadc90000u, 0x8da90004u, 0x00000000u, 0x31290400u, 0xad490130u, 0x3c090000u,
+        0x35290010u, 0xadc90000u, 0x3c090000u, 0x35290000u, 0xadc90000u, 0x8da90004u,
+        0x00000000u, 0x31290400u, 0xad490134u, 0x3c090000u, 0x35290010u, 0xadc90000u,
+        0x3c090000u, 0x35290000u, 0xadc90000u, 0x8da90004u, 0x00000000u, 0x31290400u,
+        0xad490138u, 0x3c090000u, 0x35290010u, 0xadc90000u, 0x3c090000u, 0x35290000u,
+        0xadc90000u, 0x8da90004u, 0x00000000u, 0x31290400u, 0xad49013cu, 0x3c090000u,
+        0x35290010u, 0xadc90000u, 0x3c090000u, 0x35290000u, 0xadc90000u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c3200u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c3200u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c3200u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c3200u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c3200u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c3200u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c0c0004u,
+        0x358c0000u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c3200u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c3200u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c3200u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u,
+        0xa5090090u, 0x3c0c0000u, 0x358c0c80u, 0x258cffffu, 0x1580fffeu, 0x00000000u,
+        0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u,
+        0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u,
+        0x35290000u, 0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u,
+        0x358c1900u, 0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u,
+        0xa5090090u, 0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u,
+        0x258cffffu, 0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u,
+        0x3c090000u, 0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu,
+        0x1580fffeu, 0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x3c090000u,
+        0x35290001u, 0xa5090090u, 0x3c0c0000u, 0x358c1900u, 0x258cffffu, 0x1580fffeu,
+        0x00000000u, 0x3c090000u, 0x35290000u, 0xa5090090u, 0x95090080u, 0x00000000u,
+        0x31290040u, 0xad490140u, 0x3c09544fu, 0x35294b50u, 0xad490144u, 0x1000ffffu,
+        0x00000000u,
+ };
+ if(systemgv_test_load(chd_path))return -1;
+ TokimekiIOConfig cfg={0};cfg.device_initial=0xf073;cfg.capture=capture_printer;cfg.printed=printed_page;
+ board.tok=tokimeki_io_create(&cfg);if(!board.tok){systemgv_unload();return -1;}
+ memset(board.bios,0,GV_BIOS_BYTES);
+ for(unsigned i=0;i<sizeof(guest)/sizeof(guest[0]);i++){uint32_t w=SWAPu32(guest[i]);memcpy(board.bios+i*4,&w,4);}return 0;
+}
+
 void systemgv_unload(void)
 {
 #ifndef DRC_DISABLE
     if (board.active) new_dynarec_set_code_span_provider(NULL);
 #endif
+    if(board.tok)tokimeki_io_destroy(board.tok);
     if (board.simp) simpbowl_io_destroy(board.simp);
     free(board.flash);
     if (board.device) konamigv_destroy(board.device);
@@ -689,6 +1065,7 @@ void systemgv_reset(void)
     board.last_cycle = psxRegs.cycle;
     board.cycle_fraction = 0;
     if (!konamigv_reset(board.device)) board.fault = 1;
+    if(board.tok)tokimeki_io_reset(board.tok);
 }
 
 int systemgv_sync(uint32_t psx_cycle)
@@ -733,11 +1110,13 @@ int systemgv_read(uint32_t address, unsigned width, uint32_t *value)
         !overlaps(physical, width, 0x1f100000, 12) &&
         !overlaps(physical, width, 0x1f680000, 16) &&
         !(board.simp && (overlaps(physical,width,0x1f680080,16) || overlaps(physical,width,0x1f6800c0,10))) &&
+        !(board.tok && overlaps(physical,width,0x1f680080,2)) &&
         !overlaps(physical, width, 0x1f801040, 32)) return 0;
     if (systemgv_sync(psxRegs.cycle)) { *value = UINT32_MAX; return -1; }
     result = sony_sio_bus(physical, width, value,
                           width == 4 ? UINT32_MAX : (1u << (width * 8)) - 1, 0);
     if (result) { board.mmio_reads++; return result; }
+    result=tok_bus(physical,width,value,0,0);if(result){board.mmio_reads++;return result;}
     result = board.simp ? simpbowl_io_read(board.simp,physical,width,value) : 0;
     if(!result) result = konamigv_read(board.device, physical, width, value);
     if (result < 0) { board.fault = 1; *value = UINT32_MAX; return -1; }
@@ -756,11 +1135,16 @@ int systemgv_write(uint32_t address, unsigned width, uint32_t value,
         !overlaps(physical, width, 0x1f180000, 4) &&
         !overlaps(physical, width, 0x1f680000, 16) &&
         !(board.simp && overlaps(physical,width,0x1f680080,16)) &&
+        !(board.tok && overlaps(physical,width,0x1f680090,2)) &&
         !overlaps(physical, width, 0x1f780000, 4) &&
         !overlaps(physical, width, 0x1f801040, 32)) return 0;
     if (systemgv_sync(psxRegs.cycle)) return -1;
     result = sony_sio_bus(physical, width, &value, mem_mask, 1);
     if (result) { board.mmio_writes++; return result; }
+    if(board.tok && physical<=0x1f180000 && physical+width>0x1f180000){
+      unsigned lane=0x1f180000-physical;if(mem_mask&(0xffu<<(lane*8)))tokimeki_io_device_line(board.tok,((value>>(lane*8))&0x10)!=0);
+    }
+    result=tok_bus(physical,width,&value,mem_mask,1);if(result){board.mmio_writes++;return result;}
     result = board.simp ? simpbowl_io_write(board.simp,physical,width,value,mem_mask) : 0;
     if(!result) result = konamigv_write(board.device, physical, width, value, mem_mask);
     if (result < 0) { board.fault = 1; return -1; }
@@ -838,6 +1222,14 @@ int systemgv_set_input(const char *name, int pressed)
     };
     size_t i;
     if (!board.active || !name || (pressed != 0 && pressed != 1)) return -1;
+    if(board.tok){
+      if(!strcmp(name,"heartbeat_pulse")){tokimeki_io_pulse(board.tok,pressed);return 0;}
+      if(!strcmp(name,"printer_empty") || !strcmp(name,"printer_fault")){
+        unsigned bit=!strcmp(name,"printer_empty")?1:2;if(pressed)tok_meta&=~bit;else tok_meta|=bit;tokimeki_io_inputs(board.tok,tok_heart,tok_gsr,tok_meta);return 0;
+      }
+      if(strcmp(name,"coin1") && strcmp(name,"service") && strcmp(name,"test") &&
+         strcmp(name,"p1left") && strcmp(name,"p1right") && strcmp(name,"p1up") && strcmp(name,"p1down") && strcmp(name,"p1button1"))return -1;
+    }
     for (i = 0; i < sizeof(binds) / sizeof(binds[0]); i++) if (!strcmp(name, binds[i].name)) {
         if (pressed) board.inputs[binds[i].port] &= ~binds[i].mask;
         else board.inputs[binds[i].port] |= binds[i].mask;
@@ -947,6 +1339,9 @@ void systemgv_report(FILE *out)
     konamigv_status_t status;
     if (!board.active || !out) return;
     konamigv_get_status(board.device, &status);
+    if(board.tok){TokimekiIOStatus st;tokimeki_io_status(board.tok,&st);
+      fprintf(out,"Tokimeki IO: device=%04x sensor=%02x data=%04x heartbeat_ticks=%" PRIu64 " packets=%" PRIu64 " rejected=%" PRIu64 " captures=%" PRIu64 " prints=%" PRIu64 " unknown=%" PRIu64 " faults=%u\n",st.device,st.sensor_id,st.sensor_data,st.heartbeat_ticks,st.printer_packets,st.rejected_packets,st.captures,st.prints,st.unknown_commands,st.fault);
+    }
     if(board.simp){SimpBowlIOStatus st;simpbowl_io_status(board.simp,&st);
       fprintf(out,"Simpsons IO: flash_address=%08x reads=%" PRIu64 " writes=%" PRIu64 " frames=%" PRIu64 " reset_reads=%" PRIu64 " track=%03x/%03x faults=%u warm=%d\n",st.address,st.reads,st.writes,st.frames,st.reset_reads,st.x,st.y,st.fault,board.flash_warm);
     }

@@ -1,6 +1,7 @@
 /* GPULIB access kept apart from the core's PSEmu typedef names. */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "../plugins/gpulib/gpu.h"
 #ifdef GPU_VITA_CTR
 #include "../plugins/gpu_vita_ctr/include/platform/mac_vita_compat.h"
@@ -425,6 +426,34 @@ int harness_write_ppm(const char *path, int w, int h)
     if (fwrite(rgb, 1, 3, fp) != 3) { fclose(fp); return -1; }
   }
   return fclose(fp);
+}
+
+/* Called only by an original Tokimeki memory-in command at the next vblank.
+ * Use the actual presented video, not a synthesized gun/VRAM approximation. */
+int harness_printer_rgb(void *opaque,const unsigned char **rgb,unsigned *w,unsigned *h,unsigned *stride)
+{
+  (void)opaque;
+#ifdef GPU_VITA_CTR
+  static unsigned char *printer_rgb;
+  extern void VitaCtrNativeRenderer_GetFrameViewport(int rect[4]);
+  if(!PCSXMacVitaGL_CapturePresentedFrame())return 0;
+  int sw,sh,rect[4];const unsigned char *src=PCSXMacVitaGL_CapturedPixels(&sw,&sh);
+  VitaCtrNativeRenderer_GetFrameViewport(rect);
+  unsigned width=gpu.screen.hres,height=gpu.screen.vres;
+  if(!src || !width || !height || width>1024 || height>1024 || rect[2]<1 || rect[3]<1 ||
+     rect[0]<0 || rect[1]<0 || rect[0]+rect[2]>sw || rect[1]+rect[3]>sh)return 0;
+  unsigned char *next=realloc(printer_rgb,(size_t)width*height*3);if(!next)return 0;printer_rgb=next;
+  for(unsigned y=0;y<height;y++)for(unsigned x=0;x<width;x++){
+    unsigned px=rect[0]+(uint64_t)x*rect[2]/width;
+    unsigned py=rect[1]+rect[3]-1-(uint64_t)y*rect[3]/height;
+    memcpy(printer_rgb+((size_t)y*width+x)*3,src+((size_t)py*sw+px)*4,3);
+  }
+  *rgb=printer_rgb;*w=width;*h=height;*stride=width*3;return 1;
+#else
+  renderer_flush_queues();
+  if(!presented_valid)return 0;
+  *rgb=presented_rgb;*w=presented_w;*h=presented_h;*stride=presented_w*3;return 1;
+#endif
 }
 
 int harness_configure_gl_capture(int enabled, unsigned int target_frame)

@@ -24,6 +24,8 @@ int PCSXMacVitaGL_IsCurrent(void);
 int PCSXMacVitaGL_CaptureCurrentFrame(void);
 int PCSXMacVitaGL_CapturePresentedFrame(void);
 int PCSXMacVitaGL_WriteCapturePpm(const char *path);
+/* Borrow bottom-up RGBA from the latest explicit framebuffer readback. */
+const unsigned char *PCSXMacVitaGL_CapturedPixels(int *width,int *height);
 void PCSXMacVitaGL_UploadP4Texture(GLsizei width, GLsizei height,
                                    const void *vita_palette4_rgba8_payload);
 
