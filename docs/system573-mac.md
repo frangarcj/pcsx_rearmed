@@ -4,15 +4,15 @@ Hyper Bishi Bashi Champ EAA (`hyperbbc`) passes a bounded native Mac interpreter
 P1 run on GL and NEON with original source-verified media. Both show PINKROCKER
 versus two COMPUTER players in a ship alignment minigame, consume 1902/1902
 input rows and produce identical RAM/SPU WAV with zero device faults. This
-covers the base flash-only board; analog/digital sound and CD configurations
-remain open. Independent MAME 0.287 captures are separate reference evidence.
+covers the base flash-only board. DDR 2nd Mix now also passes a bounded analog/CD
+P1 run and source-gain SPU/CDDA speaker mix; the digital configuration remains open. Independent MAME 0.287 captures are separate reference evidence.
 
 The full family validation still requires three distinct configurations:
 
 | Representative | Coverage | Current evidence |
 | --- | --- | --- |
 | Hyper Bishi Bashi Champ EAA (`hyperbbc`) | Base board, eight onboard flashes, timekeeper, cassette Y lamp outputs and three-player buttons | Native interpreter GL/NEON P1 minigame, live source-gain SPU/SDL audio and complete flash/NVRAM persistence verified; full P2/P3 gameplay/operator checks pending |
-| Dance Dance Revolution 2nd Mix (`ddr2m`) | Analog daughterboard, CD-ROM, cassette X, dance input multiplexing | Original cassette/CD verified; source CR-589 transport and DDR analog multiplexor integrated. Native GL/NEON cold flash initialization completes and all eight programmed chips match MAME byte for byte. Native warm GL/NEON 1st Stage/PERFECT, 92/92 inputs and original nonzero SPU/CDDA decoding pass. Speaker mix and full analog validation remain pending |
+| Dance Dance Revolution 2nd Mix (`ddr2m`) | Analog daughterboard, CD-ROM, cassette X, dance input multiplexing | Original cassette/CD verified; source CR-589 transport and DDR analog multiplexor integrated. Native GL/NEON cold flash initialization completes and all eight programmed chips match MAME byte for byte. Native warm GL/NEON 1st Stage/PERFECT, 92/92 inputs and original nonzero SPU/CDDA decoding pass. Source gain-1 SPU/CDDA mix passes headless GL/NEON and live SDL. Full song/P2/operator coverage remains separate |
 | Percussion Freaks 4th Mix KAA (`pcnfrk4mk`) | Digital daughterboard, CD-ROM, cassette ZI/serial ID, instrument inputs and multi-session unit | Source working representative selected; ID/CD carry source BAD_DUMP annotations. Media preparation, ZS01 security, digital sound devices and native runtime pending |
 
 ## Hyper Bishi Bashi media
@@ -242,4 +242,61 @@ python3 scripts/prepare_system573_cd_board.py --mame-source ../mamedev \
 python3 tests/test_system573_cd_profiles.py
 python3 tests/check_system573_cd_harness.py --harness build/mac-harness/pcsx-harness \
   --media roms/prepared/ddr2m --installed-nvram /path/to/native-ddr2m.nv
+```
+
+
+## DDR source-clock speaker output
+
+The bounded analog/CD representative now also passes actual speaker output.
+GL/NEON retain the 9600-frame 1st Stage/PERFECT replay, consume 92/92 inputs and
+have zero device/sample-clock faults. Independent 44.1 kHz CDDA and SPU samples
+are summed at the source gain-1 stereo routes without resampling or swapping
+channels. The continuous CD DAC emits silence when inactive, paused or finished;
+failed sector reads remain failures. PCM blocks use their actual emulated sample
+indexes. If SPU's even-pair rounding produces a future sample, it remains queued
+until the CD clock arrives instead of receiving a fabricated sample.
+
+This exposed an actual large-SPU-DMA bug: the console renderer advances by a
+size-based speculative delay inside SPUwriteDMAMem. System573 already delivers
+that payload at its source DMA timer edge. A 512 KiB transfer could reset the
+SPU clock into the future and lose 2740 audio frames. Its native System573 path
+now renders at the actual payload cycle, as MAME spu_device::start_dma copies
+at that edge. The console/other-board branch is retained. A generated large-DMA
+clock check passes with the fix and fails with an independently linked old
+speculative path. The speaker mixer also rejects missing/duplicated clocks and
+overwritten required history; optimized and ASan/UBSan tests pass.
+
+Both headless renderers produce exactly 7,076,500 stereo frames, matching the
+final cycle clock, with no pending samples. They have 751,541 nonzero SPU frames,
+2,268,292 nonzero CDDA frames and 270 saturated output samples at the source
+unity sum. Saturation is normal signed-PCM16 output, not a device fault.
+
+* Mixed speaker WAV SHA256: `cce2f79b5838ea2820903e69923bc11375adcf7b5e3bcc1a91ae2f86a5d888aa`.
+* Raw SPU WAV SHA256: `029104707ba062f881645f7d7710fa6281e06bab7606c333f64f0d13d968b84b`.
+
+The separate live SDL run reaches the same player capture, consumes every input,
+queues all 7,076,500 speaker frames at user volume 100%, and reports zero audio
+errors. It finishes in 160.495 wall seconds. Its raw and mixed WAVs differ from
+headless in the first coin cue between 120.368889–120.700442 seconds: that SPU cue
+is shifted two stereo samples (about 45 microseconds). Every mixed-wave
+difference equals the corresponding raw-SPU difference; CDDA data and all clock
+counters match. This is consistent with the SPU's even-pair sampling and frontend
+scheduling granularity, but is preserved as a real difference, not normalized
+away to claim a bit-identical live result.
+
+`--audio` still captures raw SPU for diagnosis. `--mixed-audio` captures actual
+source speaker output, now available for a bounded noninteractive System573 CD
+run as well as the live GL frontend. Hyperbbc retains its existing SPU-only
+output and NV1 format. Its generated guest regressions pass with and without CHD;
+shared G-Net/GV/GQ/Judge/NBA/Metro input/audio tests also pass. This establishes a
+bounded Mac analog/CD representative, not complete songs, every operator/P2
+scenario, physical Vita, or the separate digital board.
+
+Evidence is in `artifacts/boards-mac-20261014/system573/ddr2m/audio`.
+
+```sh
+build/mac-harness-vitagl-like/pcsx-harness --system573 roms/prepared/ddr2m \
+  --frames 9600 --inputs /path/to/ddr-player.csv --nvram /path/to/native-ddr2m.nv \
+  --audio /path/to/raw-spu.wav --mixed-audio /path/to/speaker.wav \
+  --interactive --capture-gl --output /path/to/player.ppm
 ```
