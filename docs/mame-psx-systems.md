@@ -13,7 +13,7 @@ the installed listxml reports MAME 0.287.
 | `sony/taitogn.cpp` | Taito G-Net (ZN-derived CPU/GPU) | 41 | `psyvaria`, `gdariusg`, `aerofgtsg` | COH-1002/3002 variants, Taito Zoom sound; CompactFlash and title-specific I/O on applicable sets | Native synthetic PSX interpreter/ARM64 DRC bus and storage execution fixtures pass. All 41 source profiles select BIOS/card/media identities; source ATA, PC Card and CHD composition fixtures pass, and the loader attaches verified CHD media. Four representative games have [Mac interpreter/GL gameplay](gnet-mac.md), captured Zoom PCM, persistent flash and source-profile analog I/O. Broader sets, event/vblank timing equivalence, frontend sound mixing and physical Vita remain pending |
 | `konami/konamigv.cpp` | Konami System GV (Baby Phoenix) | 15 | `tmosh`, `weddingr` | CXD8530-class CPU; CXD8514/CXD8561 GPU variants, CD-ROM and game I/O | All 15 media profiles audited; seven common-map profiles have native integration and generated MIPS interpreter/DRC fixtures; authentic games and special I/O remain unverified |
 | `konami/konamigq.cpp` | Konami System GQ | 1 | `cryptklr` | CXD8530BQ/CXD8538Q; MC68000 and TMS57002 sound system | Complete source profile and local ROM/HDD preparation tested; native board execution pending |
-| `konami/ksys573.cpp` | Konami System 573 | 156 | `ddr4m`, `drmn`, `sys573` | CD-ROM, cassette, PC-card, flash and game I/O configurations | No arcade board support |
+| `konami/ksys573.cpp` | Konami System 573 | 156 | `ddr4m`, `drmn`, `sys573` | CD-ROM, cassette, PC-card, flash and game I/O configurations | Native Mac Hyper Bishi Bashi Champ base flash P1/GL/NEON and SPU/SDL pass; analog/digital CD/cassette/sound variants pending |
 | `konami/twinkle.cpp` | Konami Twinkle | 19 | `bmiidx`, `bmiidx8` | CD/DVD media, MC68000/RF5C400 sound and network/session I/O | Standalone sound-board MC68000/RF5C400, sample RAM and mailbox/periodic IRQ fixtures pass; native PSX integration, ATA/media and authentic games remain pending |
 | `namco/namcos10.cpp` | Namco System 10 | 45 | `taiko2`, `mrdrilrg`, `ballpom` | Main PCB and MEM PCB generations; optional EXIO, CD-ROM on some sets | Native synthetic MEM(M)/MEM(N) MIPS execution, bank fetch, NAND DMA, GPU and I/O pass; Mr. Driller 2/G and Gamshara have short Mac interpreter/GL gameplay and SPU capture; broader sets and add-on boards pending |
 | `namco/namcos11.cpp` | Namco System 11 | 36 | `tekken`, `souledge`, `danceyes` | COH-100/110 CPU boards; motherboard and ROM daughterboard revisions; C76, C352, keycus | Tekken, Tekken 2 and Soul Edge pass short Mac interpreter/NEON/GL gameplay; broader sets and physical Vita pending |
@@ -45,7 +45,7 @@ all been recalibrated. No entire family is considered finished.
 | Taito G-Net | 80–90% | Native PSX interpreter/DRC bus/storage fixtures and Zoom composition pass; all 41 source profiles and CHD/ATA/PC Card composition are implemented and component-tested. Four representative games pass bounded Mac interpreter/GL gameplay with Zoom PCM, persistent flash and source-profile analog I/O. Broader sets, event timing equivalence, frontend sound mixing/bindings and physical Vita remain pending. This historical estimate has not been recalibrated from the Mac gameplay evidence. |
 | Konami System GV | 45–60% | Common native board MIPS interpreter/DRC, DMA5, IRQ10 and CHD fixture tested; authentic BIOS/CD execution, sound and special I/O pending |
 | Konami System GQ | 50–65% | HDD preparation, real CHD read/write NCR fixture, MC68000, TMS57002 and K056800/K054539 tested; complete board/gun wiring and real-game validation pending |
-| Konami System 573 | 85–95% | Security cassette, flash and shared CD/SCSI foundations; board configurations, audio, I/O and game validation pending |
+| Konami System 573 | 85–95% | Native Hyperbbc base flash, M48T58/ADC0834, dumped H8 response and source-default cassette Y pass bounded Mac P1/GL/NEON/audio; analog/digital CD/cassette/sound configurations remain pending. The estimate predates this representative pass |
 | Konami Twinkle | 90–95% | Sound-board MC68000/RF5C400, banked wave RAM and IRQ/mailbox fixtures pass; native PSX board, ATA/media/session I/O and game validation pending |
 | Namco System 10 | 30–45% | Native MEM(M)/MEM(N) guests exercise crypto, bank fetch, NAND DMA, inputs and GPU; three base-board games pass short Mac gameplay; broader sets, add-ons and DRC pending |
 | Namco System 11 | 25–40% | Native MIPS/C76 guests exercise banks, keycus, controls, EEPROM and sound; three authentic games pass Mac gameplay, including GPU type-1 GL; broader variants and physical Vita pending |
@@ -198,7 +198,9 @@ machine's assets does not imply that it boots.
   Mr. Driller 2, Mr. Driller G and Gamshara now have
   [short Mac interpreter/GL gameplay and SPU capture](system10-mac.md).
 - Konami security cassettes: [X76F041, X76F100 and DS2401](konami-security.md)
-  password/pin/timing traces; no System 573 boot claim.
+  password/pin/timing traces. The separate `system573.c` base adapter now runs
+  original Hyperbbc firmware through native Mac P1/GL/NEON/SPU tests; see
+  [System 573 evidence](system573-mac.md). Analog/digital generations remain open.
 - Konami Twinkle: the [sound-board component](twinkle-board.md) runs generated
   MC68000 firmware through its source bus map, RF5C400, banked 32 MiB sample
   RAM, CY7C131 mailbox and 60 Hz IRQ source. Normal and sanitizer fixtures

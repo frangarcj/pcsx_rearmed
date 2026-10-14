@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit the first System 573 flash representative; native runtime remains pending."""
+"""Audit the first System 573 flash representative separately from execution evidence."""
 from __future__ import annotations
 import argparse
 from dataclasses import replace
@@ -80,7 +80,7 @@ def prepare(name: str, source: Path, rompath: Path, output: Path, bios: str = 's
                                    'size': 0x8000, 'status': 'NO_DUMP',
                                    'reason': 'No firmware substituted; source uses dumped H8 response bytes'}],
                 'cassette_eeprom_dump_present': False,
-                'known_limitations': ['Native System 573 board integration and runtime are pending',
+                'known_limitations': ['Native board/gameplay evidence is separate from media preparation',
                                       'Hyperbbc source declares cassette Y but no EEPROM dump; its program does not check this chip',
                                       'This flash-only representative does not validate analog/digital daughterboards or CD-ROM'],
                 'source_files': {specs[i].filename: {'origin': origin, 'size': specs[i].expected_size,
@@ -110,6 +110,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     try:
         report = prepare(args.name, args.mame_source, args.rompath, args.output_dir, args.bios)
-        print(f"System 573 {args.name}: eleven verified chips, eight flash seeds and original timekeeper; runtime pending")
+        print(f"System 573 {args.name}: eleven verified chips, eight flash seeds and original timekeeper; media audit only")
     except (mame.PreparationError, assembly.TaitoFX1PreparationError) as exc:
         parser.exit(1, str(exc) + '\n')

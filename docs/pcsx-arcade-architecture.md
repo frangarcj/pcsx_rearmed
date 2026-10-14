@@ -108,7 +108,7 @@ families](mame-psx-systems.md). Optional adapters require their build flags.
 | G-Net | `systemgnet.c`; common ZN, Zoom MN10200/TMS57002/ZSG2, RF5C296 and CHD-backed ATA card | Optional profile loader exists. Synthetic MIPS storage execution passes interpreter/DRC; authentic boot, title I/O, Zoom audio mixing and persistent frontend state remain open. |
 | Konami GV | `systemgv.c`; NCR/CD/CHD, EEPROM, DUART, IRQ10 and DMA5 | No arcade profile loader. Authentic BIOS/CD boot and special I/O remain open. |
 | Konami GQ | Standalone `arcade/konamigq.cpp`; sound CPU/DSP/PCM and NCR HDD components | No adapter connecting the board to the PSX execution/frontend path. |
-| System 573 | Security, flash and shared media foundations | No native arcade board adapter or frontend path. |
+| System 573 | Native Mac `system573.c` base flash adapter, M48T58/ADC0834, source H8 response and cassette Y | Hyper Bishi Bashi Champ interpreter GL/NEON P1 and SPU/SDL verified; analog/digital CD/cassette/sound configurations and Vita frontend integration remain open. |
 | Twinkle | Standalone `arcade/twinkle_board.cpp`; MC68000, RF5C400, wave RAM and mailbox | No native PSX frontend path; ATA/media and main-board integration remain open. |
 | System10 | `system10.c`; MEM(M)/(N), crypto/banks, NAND DMA and I/O | No profile loader; authentic games and extension boards remain open. |
 | System11 | `system11.c`; C76/M37710, shared RAM, C352, keycus and EEPROM | No profile loader; authentic programs and variant validation remain open. |
