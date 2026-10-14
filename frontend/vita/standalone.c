@@ -1880,6 +1880,7 @@ int main(int argc, char **argv)
             snprintf(g_report_path, sizeof(g_report_path), "%s", argv[++ret]);
             continue;
         }
+#endif
         if (!strcmp(argv[ret], "--progress-every") && ret + 1 < argc) {
             g_progress_every = (unsigned)atoi(argv[++ret]);
             if (!g_progress_every) g_progress_every = 600;
@@ -1891,7 +1892,6 @@ int main(int argc, char **argv)
             snprintf(g_capture_path, sizeof(g_capture_path), "%s", argv[++ret]);
             continue;
         }
-#endif
         if (!system12_profile && is_game_path(argv[ret]))
             snprintf(game_path, sizeof(game_path), "%s", argv[ret]);
     }
@@ -1903,10 +1903,12 @@ int main(int argc, char **argv)
         sceClibPrintf("pcsx-vita: --verify-smoke requires the console smoke executable\n");
         return 4;
     }
-    if ((g_report_path[0] || g_capture_path[0]) && !system12_profile) {
-        sceClibPrintf("pcsx-vita: System12 report/capture requires --system12\n");
+    if (g_report_path[0] && !system12_profile) {
+        sceClibPrintf("pcsx-vita: System12 report requires --system12\n");
         return 4;
     }
+    if (g_capture_path[0] && !system12_profile &&
+        (!validation_frames || !game_path[0] || verify_smoke)) return 4;
     if (verify_system12_drc_ram_mb && !system12_profile) {
         sceClibPrintf("pcsx-vita: --verify-system12-drc requires --system12 profile-directory\n");
         return 4;
@@ -1930,12 +1932,12 @@ int main(int argc, char **argv)
         verify_smoke || verify_system12_drc_ram_mb || verify_system12_vram ||
         verify_system12_framebuffer || verify_system12_texture_window ||
         verify_system12_vram_x_wrap || verify_system12_coord_alias)) return 4;
-    if (g_inputs_path[0] && (!system12_profile || !validation_frames || verify_smoke ||
+    if (g_inputs_path[0] && (!game_path[0] || !validation_frames || verify_smoke ||
                             verify_system12_drc_ram_mb || verify_system12_vram ||
                             verify_system12_framebuffer || verify_system12_texture_window ||
                             verify_system12_vram_x_wrap || verify_system12_coord_alias ||
                             verify_system12_coord_span_cull)) {
-        sceClibPrintf("pcsx-vita: --inputs requires a finite System12 game run\n");
+        sceClibPrintf("pcsx-vita: --inputs requires a finite game run\n");
         return 4;
     }
     if (g_report_path[0] && g_capture_path[0] &&
@@ -1956,7 +1958,7 @@ int main(int argc, char **argv)
     if (g_inputs_path[0] && load_replay_inputs(g_inputs_path, validation_frames))
         return 4;
 #ifndef ARCADE_SYSTEM12
-    if (g_report_path[0] || g_capture_path[0]) return 4;
+    if (g_report_path[0]) return 4;
 #endif
 
 #ifdef STANDALONE_UI
@@ -2102,13 +2104,11 @@ int main(int argc, char **argv)
     start_audio(&av);
 
     unsigned runs = 0;
-#ifdef ARCADE_SYSTEM12
-    const bool report_progress = validation_frames && g_report_path[0];
+    const bool report_progress = validation_frames && (g_report_path[0] || g_replay_active);
     const uint64_t validation_started_ms = SDL_GetTicks();
     if (report_progress)
         sceClibPrintf("pcsx-vita: system12-progress frames=0/%u elapsed_ms=0 inputs=%u/%u\n",
             validation_frames, g_next_input_event, g_input_event_count);
-#endif
     sceClibPrintf("pcsx-vita: cpu_driver=%s\n", pcsx_vita_uses_dynarec() ? "ari64" : "interpreter");
     while (!g_exit_requested && (!validation_frames || runs < validation_frames)) {
 #ifdef STANDALONE_VITAGL
@@ -2125,7 +2125,6 @@ int main(int argc, char **argv)
          * emulating (input from the replay never touches the system). */
         if (runs % 60 == 0)
             sceKernelPowerTick(SCE_KERNEL_POWER_TICK_DEFAULT);
-#ifdef ARCADE_SYSTEM12
         if (report_progress && (runs % g_progress_every == 0 || runs == validation_frames)) {
             /* Source frames the audio device consumed since the last line, per
              * second of wall time: the pacing clock's real rate. */
@@ -2152,12 +2151,13 @@ int main(int argc, char **argv)
                 runs, validation_frames,
                 (unsigned long long)(SDL_GetTicks() - validation_started_ms),
                 g_next_input_event, g_input_event_count, (unsigned)(mem.size_user / 1024), gl_free_kb);
+#ifdef ARCADE_SYSTEM12
             print_wait_stats(runs);
-        }
 #endif
+        }
     }
     int validation_result = 0;
-    if (g_report_path[0])
+    if (g_report_path[0] || g_replay_active)
         sceClibPrintf("pcsx-vita: arcade-audio rate=%u frames=%llu peak=%u nonzero=%llu errors=%u\n",
             (unsigned)av.timing.sample_rate, (unsigned long long)g_audio_put_frames,
             g_audio_peak, (unsigned long long)g_audio_nonzero, g_audio_put_errors);
@@ -2351,6 +2351,7 @@ int main(int argc, char **argv)
         if (report_result != 0)
             validation_result = 6;
     }
+#endif
     if (g_capture_path[0]) {
         int capture_result;
 #ifdef STANDALONE_VITAGL
@@ -2364,7 +2365,6 @@ int main(int argc, char **argv)
         if (capture_result != 0)
             validation_result = 7;
     }
-#endif
 
     /* Stop SDL playback before unloading any core board or plugins. */
     audio_finish();
