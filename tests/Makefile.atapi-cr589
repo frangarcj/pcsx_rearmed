@@ -1,0 +1,21 @@
+CXX ?= c++
+BUILD ?= build/atapi-cr589-tests
+ARCADE := libpcsxcore/arcade
+SOURCES := tests/test_atapi_cr589.cpp $(ARCADE)/atapi_cr589.cpp \
+ $(ARCADE)/atapi_mame/atapihle_port.cpp $(ARCADE)/atapi_mame/t10spc_port.cpp \
+ $(ARCADE)/atapi_mame/t10mmc_port.cpp $(ARCADE)/ata_mame/atahle_port.cpp
+HEADERS := $(ARCADE)/atapi_cr589.h $(ARCADE)/atapi_mame_compat.h $(wildcard $(ARCADE)/atapi_mame/*.h) $(ARCADE)/atapi_mame/cr589_methods.inc $(ARCADE)/ata_mame/atahle_port.h $(ARCADE)/ata_mame/ata_mame_compat.h
+FLAGS := -std=c++20 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-sign-compare -I$(ARCADE)
+.PHONY: test sanitize check-generated
+$(BUILD)/test: $(SOURCES) $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CXX) $(FLAGS) -O2 $(SOURCES) -o $@
+$(BUILD)/sanitize: $(SOURCES) $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CXX) $(FLAGS) -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer $(SOURCES) -o $@
+test: $(BUILD)/test
+	$(BUILD)/test
+sanitize: $(BUILD)/sanitize
+	$(BUILD)/sanitize
+check-generated:
+	python3 tools/port_mame_atapi.py --check
