@@ -115,5 +115,5 @@ no-board console smoke passes.
 
 This establishes bounded USA player coverage on Mac. Full machine timing and
 sound fidelity versus hardware/MAME, other regional gameplay, physical Vita and
-authentic ARM64 DRC remain unverified. The next distinct board is Atlus ZN-1
-Heaven's Gate (68000/YMZ280B). See [the complete Mac matrix](arcade-mac-validation.md).
+authentic ARM64 DRC remain unverified. Atlus Heaven's Gate now has bounded
+68000/YMZ280B player coverage in `atlus-zn-mac.md`. See [the complete Mac matrix](arcade-mac-validation.md).

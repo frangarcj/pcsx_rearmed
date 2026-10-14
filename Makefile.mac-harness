@@ -88,7 +88,7 @@ SOURCES += libpcsxcore/system12.c libpcsxcore/system11.c libpcsxcore/system10.c 
   libpcsxcore/arcade/eeprom93c46.c
 CFLAGS += -I$(BUILD)/gnet-generated -Ilibpcsxcore/arcade/tms57002 -I$(BUILD)/m68000-generated -Ilibpcsxcore/arcade/m68000
 SOURCES += libpcsxcore/arcade/zsg2.c
-CXXSOURCES := libpcsxcore/arcade/ymf271.cpp libpcsxcore/arcade/raizing_sound.cpp libpcsxcore/arcade/m68000.cpp \
+CXXSOURCES := libpcsxcore/arcade/ymz280b.cpp libpcsxcore/arcade/atlus_sound.cpp libpcsxcore/arcade/ymf271.cpp libpcsxcore/arcade/raizing_sound.cpp libpcsxcore/arcade/m68000.cpp \
  libpcsxcore/arcade/gnet_zoom.cpp libpcsxcore/arcade/rf5c296.cpp \
  libpcsxcore/arcade/gnet_pccard.cpp \
  libpcsxcore/arcade/ata_storage.cpp \
@@ -148,7 +148,7 @@ $(M68000_OBJECTS): $(BUILD)/m68000-generated/%.o: $(BUILD)/m68000-generated/%.cp
 endif
 CXX_STANDARD = c++17
 
-.PHONY: all clean smoke board-test system11-test system10-test systemgv-test tecmo-tps-test raizing-zn-test visco-zn-test taito-fx1z-test capcom-zn-test taito-fx1-test systemgnet-test gpu-type1-test devices-test FORCE
+.PHONY: all clean smoke board-test system11-test system10-test systemgv-test tecmo-tps-test raizing-zn-test visco-zn-test atlus-zn-test taito-fx1z-test capcom-zn-test taito-fx1-test systemgnet-test gpu-type1-test devices-test FORCE
 all: $(TARGET)
 $(TARGET): $(OBJECTS) $(SHELF_LIB)
 	$(CXX) -arch arm64 -Wl,-dead_strip -o $@ $(OBJECTS) -lz -lm $(GPU_LIBS)
@@ -193,6 +193,9 @@ systemgv-test: $(TARGET)
 ifeq ($(DRC),1)
 	python3 tests/check_systemgv_harness.py --harness $(TARGET) --drc
 endif
+atlus-zn-test: $(TARGET)
+	python3 scripts/generate_atlus_zn_profiles.py --check
+	python3 tests/check_atlus_zn_harness.py --harness $(TARGET)
 visco-zn-test: $(TARGET)
 	python3 scripts/generate_visco_zn_profiles.py --check
 	python3 tests/check_visco_zn_harness.py --harness $(TARGET)
@@ -299,6 +302,8 @@ devices-test: $(BUILD)/test-nor-flash $(BUILD)/test-c352 $(BUILD)/test-serial $(
 	$(MAKE) -f tests/Makefile.mb89371 BUILD=$(BUILD)/mb89371-tests test
 	$(MAKE) -f tests/Makefile.nscsi-hd BUILD=$(BUILD)/nscsi-hd-tests test
 	$(MAKE) -f tests/Makefile.nscsi-cd BUILD=$(BUILD)/nscsi-cd-tests test
+	$(MAKE) -f tests/Makefile.atlus-sound BUILD=$(BUILD)/atlus-sound-tests CXX='$(CXX)' test
+	$(MAKE) -f tests/Makefile.ymz280b BUILD=$(BUILD)/ymz280b-tests CXX='$(CXX)' test
 	$(MAKE) -f tests/Makefile.raizing-sound BUILD=$(BUILD)/raizing-sound-tests CXX='$(CXX)' test
 	$(MAKE) -f tests/Makefile.ymf271 BUILD=$(BUILD)/ymf271-tests CXX='$(CXX)' test
 	$(MAKE) -f tests/Makefile.m68000 BUILD=$(BUILD)/m68000-tests CXX='$(CXX)' test

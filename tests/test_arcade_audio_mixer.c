@@ -54,9 +54,18 @@ int main(void)
     }
     assert(frames == 44032 && mix.lane[0].inputs == mix.lane[1].inputs && !mix.error);
     arcade_mix_reset(&mix); assert(mix.lane[1].divider == 384);
+    frames = mode = 0;
+    arcade_mix_init_rates(&mix,33868800,16934400,192,output,NULL);
+    for (unsigned i = 0; i < 44100; ++i) {
+        arcade_mix_push(&mix,0,.25f,.25f);
+        arcade_mix_push(&mix,1,-.125f,-.125f);
+        arcade_mix_push(&mix,1,-.125f,-.125f);
+    }
+    assert(frames==44032 && mix.lane[1].inputs==88200 && !mix.error);
+    arcade_mix_reset(&mix); assert(mix.lane[1].divider==192);
     arcade_mix_push(&mix,1,NAN,0); assert(mix.error);
     arcade_mix_reset(&mix);
-    for (unsigned i = 0; i < 10000; ++i) arcade_mix_push(&mix,1,0,0);
+    for (unsigned i = 0; i < 4 * ARCADE_MIX_RING; ++i) arcade_mix_push(&mix,1,0,0);
     assert(mix.error); /* producer imbalance fails instead of dropping samples */
     puts("Exact source-clock resampling, stereo sum, clipping, reset epochs and overflow/NaN checks PASS");
 }
