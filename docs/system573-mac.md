@@ -12,7 +12,7 @@ The full family validation still requires three distinct configurations:
 | Representative | Coverage | Current evidence |
 | --- | --- | --- |
 | Hyper Bishi Bashi Champ EAA (`hyperbbc`) | Base board, eight onboard flashes, timekeeper, cassette Y lamp outputs and three-player buttons | Native interpreter GL/NEON P1 minigame, live source-gain SPU/SDL audio and complete flash/NVRAM persistence verified; full P2/P3 gameplay/operator checks pending |
-| Dance Dance Revolution 2nd Mix (`ddr2m`) | Analog daughterboard, CD-ROM, cassette X, dance input multiplexing | Source configuration reviewed; cassette/CD carry source BAD_DUMP annotations. Media preparation and native runtime pending |
+| Dance Dance Revolution 2nd Mix (`ddr2m`) | Analog daughterboard, CD-ROM, cassette X, dance input multiplexing | Original cassette/CD verified; source CR-589 transport and DDR analog multiplexor integrated. Native GL/NEON cold flash initialization completes and all eight programmed chips match MAME byte for byte. Native warm GL/NEON 1st Stage/PERFECT, 92/92 inputs and original nonzero SPU/CDDA decoding pass. Speaker mix and full analog validation remain pending |
 | Percussion Freaks 4th Mix KAA (`pcnfrk4mk`) | Digital daughterboard, CD-ROM, cassette ZI/serial ID, instrument inputs and multi-session unit | Source working representative selected; ID/CD carry source BAD_DUMP annotations. Media preparation, ZS01 security, digital sound devices and native runtime pending |
 
 ## Hyper Bishi Bashi media
@@ -153,3 +153,93 @@ The analog and digital configurations remain separate open work; this base
 flash representative cannot replace their CD transport, security or sound
 validation. Physical Vita is also outside the present Mac evidence.
 Authentic DRC, full-tournament progression and operator checks remain unverified.
+
+
+## DDR 2nd Mix analog/CD integration
+
+The reviewed original `ddr2m` JAA profile uses the same standard BIOS and H8
+response as the base machine, a 548-byte X76F041 cassette X (`gn895jaa.u1`,
+CRC `5d906be5`, SHA1 `4ea9c5506aaaf1726f2a39d0a37a8df35a6aad47`) and read-only
+CD `895jaa02` (source SHA1 `cfe3a6f3ed62ba388b07045e29e22472d17dcfe4`).
+Both cassette and CD retain the source BAD_DUMP status. H8 firmware remains
+NO_DUMP; the actual separate response dump is used at the source response pins.
+The preparer verifies all three original chip size/CRC/SHA1 values and the full
+CHD data/metadata hashes before publication. No flash or timekeeper dump is
+declared for this set. Its source defaults are eight erased FF Fujitsu flashes
+and FF M48T58 SRAM with the actual host RTC counters. No pre-extracted executable
+or installed flash image substitutes for native cold installation.
+
+`--system573 roms/prepared/ddr2m` accepts the exact separate CD profile; a build
+without CHD support rejects it while retaining Hyperbbc support. Cassette X uses
+the original 548-byte image and source X76F041 pins, without cassette Y lamp
+callbacks or its unrelated factory-default exception. The analog output aperture
+at `1f640000` retains the source bit permutation, output latches and two-player
+GN845 stage shift/mask handshake. Directions drive the stage port; the source
+panel buttons and Start use IN2/IN3. `boot_cd` in an ordered input CSV controls
+the source boot-device DIP (pressed=CD, released=Flash), independently of Test.
+Normal cold board defaults select Flash as in source; an empty installation
+still reaches the CD initialization prompt.
+
+The source CR-589 engine maps CS0 at `1f480000`, CS1 at `1f4c0000`, reset at
+`1f560000` and IRQ10. DMA5 follows the source's board-write callback dispatch,
+which is RAM-bound despite its name, with two actual DATA-register reads per
+32-bit word. DMA channel completion is immediate; payload delivery belongs to
+the board timer. The original 30,000 MAME CPU cycles per sector use the PSX
+input/4 domain, equivalent to 60,000 cycles in this core's input/2 domain. The
+source's remaining-DRQ retransfer is preserved. Host bounds reject RAM overflow.
+Instruction fetches retain actual flash bytes; dirty spans are collected over
+all byte writes in a CPU word, and only those spans need copying/invalidation.
+Bank control changes update the whole fetch view only when the bank changes.
+
+Independent MAME cold initialization progresses through erase/programming and
+finishes at FLASH-ROM INITIALIZE COMPLETE. A separate Flash-DIP warm boot reaches
+HOW TO PLAY / INSERT COIN(S). Native GL and NEON each run 18,000 frames from
+source erased/default state, pulse Test at frames 1800–1860 and finish at the
+same initialization-complete screen with zero faults. Each reads 8,719 original
+sectors, transfers 4,464,128 DMA words and generates identical final RAM. All
+eight programmed flash chips match each other and the independent MAME
+installation byte for byte. MAME NVRAM is never imported to create native
+installation evidence. A further current-code GL cold installation also completes and matches all
+eight MAME chips after the timer/dirty-span bookkeeping refinements. These
+installation results remain separate from player-gameplay evidence.
+
+DDR snapshots use a separate `S573NV2\0ddr2m\0\0\0` 16-byte identity within the
+32-byte length/CRC header. Its 16,851,524-byte payload layout includes the eight
+2 MiB flashes, 8 KiB timekeeper, 548-byte cassette and original 64 KiB mutable
+CR-589 buffer. Hyperbbc's NV1 shape remains unchanged. Original prepared media
+remain immutable. Original-media loader tests exercise both players' stage and
+panel controls, DIP changes, complete NVRAM persistence and rejection of
+corrupted chips, malformed headers/payloads and mixed/unreviewed profiles.
+Hyperbbc guest regressions pass on GL/NEON and with CHD support disabled.
+
+Warm native Flash boot reaches flash verification (31% at 1800 frames). A
+separate replay then inserts coins and reaches SELECT PLAY MODE at frame 7800.
+The 9600-frame GL/NEON replay enters actual 1st Stage, exercises all four P1
+stage directions and displays PERFECT!! with the dance arrows and score HUD.
+Both consume 92/92 events with zero faults, 70 original sector transfers and
+1948 stage clock edges. Their raw SPU WAVs are byte-identical: SHA256
+`516192c876d06aec8b8498c5047b32ac3505ca63b1a3cb1a47e70544ef843484`,
+7,073,760 stereo frames at 44.1 kHz, peak 26,546. Final 4 MiB RAM differs in
+one byte at `92854` (BCD `25` versus `26`), consistent with source host-clock
+startup one second apart. The mismatch is preserved in the evidence rather
+than discarded to claim an identical RAM hash.
+
+The actual guest's ATAPI audio commands decode 2,322,708 stereo CDDA frames,
+2,268,288 nonzero frames and peak 32,639 in both runs. Those samples still need
+to be mixed with SPU at the source gain-1 speaker routes. Raw SPU output and CDDA
+decoding are explicitly reported separately; there is no complete speaker mix
+or live mixed-audio claim yet. The separate original-disc component is recorded
+in `atapi-cr589-port.md`. A longer provisional 11,000-frame replay returns to
+the warning/title flow and schedules its final release outside the bound
+(279/280 events); it is not substituted for the fully consumed 9600-frame player
+run. Full song completion, P2/operator checks and physical Vita remain open.
+
+Evidence is under `artifacts/boards-mac-20261014/system573/ddr2m`.
+
+```sh
+python3 scripts/prepare_system573_cd_board.py --mame-source ../mamedev \
+  --rompath roms --output-dir roms/prepared/ddr2m
+python3 tests/test_system573_cd_profiles.py
+python3 tests/check_system573_cd_harness.py --harness build/mac-harness/pcsx-harness \
+  --media roms/prepared/ddr2m --installed-nvram /path/to/native-ddr2m.nv
+```
