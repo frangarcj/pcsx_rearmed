@@ -27,7 +27,7 @@ intermediate results. Physical Vita is outside this Mac pass.
 | Metro ZN storage variants | Bust a Move 2 (`bam2`, `bam2a`) | Source has HDD/CD configurations and marks both nonworking with imperfect sound. Complete native integration and game evidence remain pending |
 | Eighting/Raizing ZN | Bloody Roar 2 (`bldyror2`), Brave Blade (`brvblade`) | Both World sets source-audited; native interpreter/GL player combat/shooter gameplay with source MC68000/YMF271, live SPU/YMF audio, portrait rotation and zero device faults; `raizing-zn-mac.md` |
 | Konami System GV common map | Hyper Athlete (`hyperath`) | Authenticated BIOS/EEPROM/CD prepared. Interpreter/GL enters a P1 running event with 110/110 input events, nonzero SPU and no device faults; `konamigv-mac.md`. CDDA mixing and authentic DRC remain pending |
-| Konami System GV special maps | Simpsons Bowling; remaining shooting/trackball/printer variants | Simpsons original CD and EEPROM verified; native installation generates four flash images and EEPROM byte-identical to MAME. GL/NEON player bowl with pins down, 598/598 events, identical headless RAM/WAV, warm state and zero faults; source swapped-SPU0.75 SDL verified in a separate replay. Full rounds/score table and CDDA remain pending; `simpbowl-mac.md`. Beat the Champ, Dead Eye and Tokimeki remain pending |
+| Konami System GV special maps | Simpsons Bowling; Tokimeki Seal Version; remaining shooting/trackball variants | Simpsons original installation matches MAME flash/EEPROM; GL/NEON player bowl with pins down, warm state and live SPU verified (`simpbowl-mac.md`). Tokimeki original `tmoshs` reaches player scenes and generates a virtual page from operator TEST PRINT; source sensor/printer integration has native GL/NEON fixture coverage (`tokimeki-mac.md`). Beat the Champ, Dead Eye, original Plus/final reports and CDDA mixing remain pending |
 | Konami System GQ | Crypt Killer (`cryptklr`) | Original BIOS/sound/PCM ROMs, source EEPROM defaults and HDD CHD fully audited/prepared. Native interpreter GL/NEON P1 gameplay, 382/382 events, hearts/enemy/empty-ammo prompt, real HDD loads and zero faults. GL/NEON RAM and both raw/SDL 48 kHz dual-K054539 WAVs are byte-identical. Separate warm GL restart consumes 384/384 events, refills ammo and retains EEPROM. Scored hits, calibration and three-player coverage remain pending; `konamigq-mac.md` |
 | Konami System 573 | ROM/flash and analog/digital sound generations | Source devices/components only; representative media, complete board and runtime pending |
 | Konami Twinkle | beatmania IIDX | BIOS archive available; game media, native PSX integration and runtime pending |
@@ -39,6 +39,17 @@ sound or peripheral configurations. Retail PlayStation is inventoried separately
 from the arcade boards.
 
 ## Current next checks
+
+- Cabinet links: Kart Duel and Gallop Racer 2 Link pass local game checks;
+  transport between two cabinets is neither implemented nor validated. The
+  pinned source leaves those link paths unemulated/unmapped.
+- Mutable flash: System 10 and G-Net have exercised programming/persistence;
+  Simpsons installation matches MAME byte for byte. Beat the Champ/Dead Eye
+  Sharp flash and System 573 installations still need native game checks.
+- Printers: Technodrive responds at its JVS printer endpoint but has no
+  validated complete ticket. Tokimeki Seal Version produces its original
+  operator test page in virtual paper output; final game reports, original
+  Plus sheets and physical printers remain open.
 
 - Psychic Force: PLAYER1 selection and combat pass with the later coin/start
   replay. Independent MAME reaches both screens, and its independently configured

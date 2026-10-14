@@ -3,7 +3,7 @@
 `tokimeki_io.c` follows MAME `konami/konamigv.cpp` at
 `deb2f54fe7300e7a192690318beb860159bfd52a`. The protocol module has no game
 firmware, media, GPU or fabricated measurement results. Native Mac integration
-and original-game validation are separate work.
+and original-game evidence are documented separately in `tokimeki-mac.md`.
 
 The device-check word rotates on a rising output line, starting at F073 for
 Seal Version and F0BA for Seal Plus. The GSR interface shifts a five-bit sensor
@@ -33,5 +33,5 @@ heartbeat clock and output line state. Callbacks must not destroy the controller
 identity bits, repeated line writes, heartbeat deadlines, GSR serial bits,
 rejected printer packets, a full-page capture, exact busy timeout, and all 16
 Plus cells under O2 and ASan/UBSan. Synthetic captures are not game/printer
-compatibility evidence. The original CD/EEPROM and native player checks remain
-in progress.
+compatibility evidence. Original `tmoshs` CD/EEPROM, bounded player scenes and
+the operator test print have separate native evidence in `tokimeki-mac.md`.

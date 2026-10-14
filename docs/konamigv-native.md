@@ -10,8 +10,11 @@ and `weddingr`. It checks the complete preparer's `board.ini`, pinned manifest
 metadata, exact BIOS/EEPROM sizes and SHA1s, and the declared CHD header SHA1
 before opening the CHD-backed XM-5401 target. Source `BAD_DUMP` labels persist.
 The preparer performs full CHD hunk verification; runtime loading checks the
-header identity and decoder. The BIOS root and trackball, gun, printer,
-sensor and flash variants are rejected. Hyper Athlete has an authenticated Mac player run below.
+header identity and decoder. Special native profiles now also include
+`simpbowl` (flash/trackball; `simpbowl-mac.md`) and `tmoshs`/`tmoshsp`
+(sensors/virtual printer; `tokimeki-mac.md`). The BIOS root, Beat the Champ,
+Dead Eye, base Tokimeki and the alternate Plus profile remain rejected.
+Hyper Athlete has an authenticated Mac player run below.
 
 The board uses 2 MiB main RAM, a 512 KiB BIOS and a type-2 GPU with 1 MiB VRAM.
 MMIO goes through the shared board's width/lane decoders; NCR IRQ drives PSX
