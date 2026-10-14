@@ -723,7 +723,7 @@ static size_t audio_batch_cb(const int16_t *data, size_t frames)
         return frames;
     }
     g_audio_put_frames += frames;
-    if (g_report_path[0]) {
+    if (g_report_path[0] || g_replay_active) {
         for (size_t i = 0; i < frames * 2; i++) {
             unsigned magnitude = data[i] < 0 ? -(int)data[i] : data[i];
             if (magnitude > g_audio_peak) g_audio_peak = magnitude;
