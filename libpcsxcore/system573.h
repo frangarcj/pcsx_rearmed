@@ -16,9 +16,13 @@ int system573_read(u32 address,unsigned width,u32 *value);
 int system573_write(u32 address,unsigned width,u32 value);
 int system573_set_input(const char *control,int pressed);
 int system573_selftest(void);
+int system573_dma5(u32 madr,u32 bcr,u32 chcr);
+size_t system573_nvram_size(void);
 void system573_report(FILE *out);
-/* Versioned checksummed snapshot of eight flash chips, timekeeper and cassette
- * bytes. Original media stay immutable; transient chip/protocol state is not NVRAM. */
+/* Versioned checksummed snapshot of eight flash chips, timekeeper, cassette,
+ * and (CD profile) writable CR589 buffer. Query the active profile's size.
+ * This constant retains the original Hyperbbc NV1 shape. Original media stay
+ * immutable; transient protocol state is not NVRAM. */
 #define SYSTEM573_NVRAM_SIZE (32u+0x1000000u+8192u+132u)
 int system573_nvram_import(const unsigned char *image,size_t size);
 int system573_nvram_export(unsigned char *image,size_t size);

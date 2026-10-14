@@ -115,6 +115,8 @@ CFLAGS += -DPCSX_SYSTEM12_CDXA
 CXXSOURCES += libpcsxcore/arcade/sh2.cpp libpcsxcore/arcade/system12_cdxa.cpp
 CXXSOURCES += libpcsxcore/arcade/konamigv.cpp libpcsxcore/arcade/nscsi_cd.cpp libpcsxcore/arcade/konamigq.cpp libpcsxcore/arcade/nscsi_hd.cpp
 CXXSOURCES += libpcsxcore/arcade/chd_hd.cpp libpcsxcore/arcade/chd_cd.cpp
+CXXSOURCES += libpcsxcore/arcade/atapi_cr589.cpp libpcsxcore/arcade/atapi_mame/atapihle_port.cpp libpcsxcore/arcade/atapi_mame/t10spc_port.cpp libpcsxcore/arcade/atapi_mame/t10mmc_port.cpp
+$(BUILD)/libpcsxcore/arcade/atapi_cr589.o $(addprefix $(BUILD)/libpcsxcore/arcade/atapi_mame/,atapihle_port.o t10spc_port.o t10mmc_port.o): CXX_STANDARD = c++20
 CXXSOURCES += libpcsxcore/arcade/gnet_storage.cpp
 endif
 CFLAGS += -DPCSX_SYSTEM12

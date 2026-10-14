@@ -72,6 +72,11 @@ void psxDma5(u32 madr, u32 bcr, u32 chcr)
 		}
 	}
 #endif
+#ifdef PCSX_SYSTEM573
+    else if(system573_active() && !system573_dma5(madr,bcr,chcr)){
+        psxHu32ref(0x10d8) &= SWAPu32(~0x11000000u);DMA_INTERRUPT(5);
+    }
+#endif
 	else if (system12_active()) system12_dma5(madr, bcr, chcr);
 }
 #endif

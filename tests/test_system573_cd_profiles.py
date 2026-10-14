@@ -20,6 +20,21 @@ class System573CDProfiles(unittest.TestCase):
         self.assertNotIn('mcu', r.regions)
         self.assertEqual(set(board.FILES), set(r.regions))
 
+    def test_native_identity_checks_match_pinned_source(self):
+        import re
+        r, _, bios = board.source_profile(ROOT.parent / 'mamedev')
+        expected = {}
+        for tag, filename in board.FILES.items():
+            specs = [next(f for f in r.files if f.index == op.file_index)
+                     for op in r.regions[tag].operations]
+            f = next(f for f in specs if f.bios_id is None or r.bios[f.bios_id] == bios)
+            expected[filename] = (f.expected_size, int(f.crc32, 16))
+        text = (ROOT / 'libpcsxcore/system573.c').read_text()
+        actual = {name: (int(size, 0), int(crc, 16)) for name, size, crc in
+                  re.findall(r'original_file\(dir,"([^"]+)",([0-9a-fx]+),0x([0-9a-f]+),0,', text)}
+        self.assertEqual(expected, actual)
+        self.assertIn('chd_cd_verify_sha1(board.cd,"' + board.DISK_SHA + '")', text)
+
     def test_erased_flash_and_timekeeper_are_not_fabricated_dumps(self):
         r, _, _ = board.source_profile(ROOT.parent / 'mamedev')
         self.assertFalse(any(tag.startswith('29f016a') or tag == 'm48t58' for tag in r.regions))

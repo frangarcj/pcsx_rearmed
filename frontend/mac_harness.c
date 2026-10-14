@@ -1032,7 +1032,7 @@ static void close_interactive_audio(void)
 static size_t nvram_size(void)
 {
 #ifdef PCSX_SYSTEM573
-  if(selected_board->family==115)return SYSTEM573_NVRAM_SIZE;
+  if(selected_board->family==115)return system573_nvram_size();
 #endif
   return selected_board->family==111?34848:(selected_board->family==102 || selected_board->family==113)?128:selected_board->family==105?2592:2080;
 }
