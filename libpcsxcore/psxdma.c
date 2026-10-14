@@ -31,6 +31,9 @@
 #ifdef PCSX_SYSTEM_GV
 #include "systemgv.h"
 #endif
+#ifdef PCSX_SYSTEM_GQ
+#include "systemgq.h"
+#endif
 
 void psxDma5(u32 madr, u32 bcr, u32 chcr)
 {
@@ -53,6 +56,14 @@ void psxDma5(u32 madr, u32 bcr, u32 chcr)
 		 * payload pending until NCR DRQ; that payload is still gated by its
 		 * real controller/target status. */
 		if (systemgv_dma5(madr, bcr, chcr) == 0) {
+			psxHu32ref(0x10d8) &= SWAPu32(~0x11000000u);
+			DMA_INTERRUPT(5);
+		}
+	}
+#endif
+#ifdef PCSX_SYSTEM_GQ
+	else if (systemgq_active()) {
+		if (systemgq_dma5(madr,bcr,chcr)==0) {
 			psxHu32ref(0x10d8) &= SWAPu32(~0x11000000u);
 			DMA_INTERRUPT(5);
 		}

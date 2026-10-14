@@ -37,6 +37,9 @@
 #ifdef PCSX_SYSTEM_GV
 #include "systemgv.h"
 #endif
+#ifdef PCSX_SYSTEM_GQ
+#include "systemgq.h"
+#endif
 #endif
 #include "psxinterpreter.h"
 #include "psxbios.h"
@@ -122,6 +125,9 @@ void psxReset() {
 		systemgv_reset();
 		return;
 	}
+#endif
+#ifdef PCSX_SYSTEM_GQ
+	if (systemgq_active()) { systemgq_reset(); return; }
 #endif
 	if (systemzn_active()) {
 		systemzn_reset();

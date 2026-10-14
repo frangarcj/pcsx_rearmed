@@ -106,11 +106,11 @@ CXXSOURCES := libpcsxcore/arcade/adsp2181.cpp libpcsxcore/arcade/rax_sound.cpp l
   libpcsxcore/arcade/ncr53cf96.cpp \
   libpcsxcore/arcade/nscsi_bus.cpp libpcsxcore/arcade/nscsi_target.cpp
 ifeq ($(HAVE_CHD),1)
-CFLAGS += -DPCSX_SYSTEM_GV -DPCSX_SYSTEM_GNET
-SOURCES += libpcsxcore/systemgv.c libpcsxcore/systemgnet.c
+CFLAGS += -DPCSX_SYSTEM_GV -DPCSX_SYSTEM_GNET -DPCSX_SYSTEM_GQ
+SOURCES += libpcsxcore/systemgv.c libpcsxcore/systemgnet.c libpcsxcore/systemgq.c libpcsxcore/arcade/k056800.c libpcsxcore/arcade/k054539.c
 CFLAGS += -DPCSX_SYSTEM12_CDXA
 CXXSOURCES += libpcsxcore/arcade/sh2.cpp libpcsxcore/arcade/system12_cdxa.cpp
-CXXSOURCES += libpcsxcore/arcade/konamigv.cpp libpcsxcore/arcade/nscsi_cd.cpp
+CXXSOURCES += libpcsxcore/arcade/konamigv.cpp libpcsxcore/arcade/nscsi_cd.cpp libpcsxcore/arcade/konamigq.cpp libpcsxcore/arcade/nscsi_hd.cpp
 CXXSOURCES += libpcsxcore/arcade/chd_hd.cpp libpcsxcore/arcade/chd_cd.cpp
 CXXSOURCES += libpcsxcore/arcade/gnet_storage.cpp
 endif
@@ -201,6 +201,9 @@ systemgv-test: $(TARGET)
 ifeq ($(DRC),1)
 	python3 tests/check_systemgv_harness.py --harness $(TARGET) --drc
 endif
+.PHONY: systemgq-test
+systemgq-test: $(TARGET)
+	python3 tests/check_systemgq_harness.py --harness $(TARGET)
 cbaj-tps-test: $(TARGET)
 	python3 scripts/generate_cbaj_tps_profiles.py --check
 	python3 tests/check_cbaj_tps_harness.py --harness $(TARGET)

@@ -48,6 +48,9 @@ extern uint32_t systemgnet_main_clock_hz(void);
 #ifdef PCSX_SYSTEM_GV
 extern int systemgv_active(void);
 #endif
+#ifdef PCSX_SYSTEM_GQ
+extern int systemgq_active(void);
+#endif
 #endif
 
 static u32 arcade_source_input_clock(void)
@@ -62,6 +65,9 @@ static u32 arcade_source_input_clock(void)
     if (!clock && systemzn_active()) clock = systemzn_main_clock_hz();
 #ifdef PCSX_SYSTEM_GV
     if (!clock && systemgv_active()) clock = 67737600u;
+#endif
+#ifdef PCSX_SYSTEM_GQ
+    if (!clock && systemgq_active()) clock = 67737600u;
 #endif
     if (!clock && system11_active()) clock = 67737600u;
     if (!clock && system10_active()) clock = 101491200u;

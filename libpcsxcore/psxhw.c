@@ -25,6 +25,9 @@
 #ifdef PCSX_SYSTEM12
 #include "systemzn.h"
 #endif
+#ifdef PCSX_SYSTEM_GQ
+#include "systemgq.h"
+#endif
 #include "psxevents.h"
 #include "mdec.h"
 #include "cdrom.h"
@@ -53,6 +56,9 @@ void psxHwWriteIstat(u32 value)
     /* Pinned MAME PSX IRQ device also clears masked pending lines on I_STAT
      * acknowledgement. Apply this source-controller contract to Judge's ATA map. */
     if(systemzn_jdredd_active())stat &= psxHu16(0x1074);
+#endif
+#ifdef PCSX_SYSTEM_GQ
+    if(systemgq_active())stat &= psxHu16(0x1074);
 #endif
 	psxHu16ref(0x1070) = SWAPu16(stat);
 

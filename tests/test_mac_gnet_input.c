@@ -3,9 +3,12 @@
 #define main harness_original_main
 #define systemgnet_set_analog gnet_test_analog
 #define systemzn_set_gun_position judge_test_gun
+#define systemgq_set_gun_position gq_test_gun
 #include "../frontend/mac_harness.c"
 #undef main
 #include <assert.h>
+static unsigned gq_x[3],gq_y[3];
+int gq_test_gun(unsigned p,unsigned x,unsigned y){assert(p<3);gq_x[p]=x;gq_y[p]=y;return 0;}
 static unsigned judge_x[2],judge_y[2];
 int judge_test_gun(unsigned p,unsigned x,unsigned y){assert(p<2);judge_x[p]=x;judge_y[p]=y;return 0;}
 static unsigned wheel=128, trigger=128, handle[2]={128,128};
@@ -221,6 +224,16 @@ int main(void)
     assert(SDL_PushEvent(&e));poll_interactive_input();assert(fire && judge_x[0]==0x392 && judge_y[0]==0x02c);
     memset(&e,0,sizeof(e));e.type=SDL_EVENT_WINDOW_FOCUS_LOST;assert(SDL_PushEvent(&e));poll_interactive_input();assert(!fire && !interactive_mouse_trigger);
     puts("Judge SDL mouse/gamepad raw aim, offscreen trigger, viewport scaling and focus release PASS");
+    board.family=113;interactive_focused=1;
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_MOUSE_MOTION;e.motion.windowID=SDL_GetWindowID(w);e.motion.x=400;e.motion.y=300;
+    assert(SDL_PushEvent(&e));poll_interactive_input();assert(gq_x[0]>=0x11c && gq_x[0]<=0x11f && gq_y[0]>=0x77 && gq_y[0]<=0x79);
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_MOUSE_BUTTON_DOWN;e.button.windowID=SDL_GetWindowID(w);e.button.x=-10;e.button.y=300;e.button.button=SDL_BUTTON_LEFT;
+    assert(SDL_PushEvent(&e));poll_interactive_input();assert(fire && gq_x[0]==0 && gq_y[0]==255);
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_WINDOW_FOCUS_LOST;assert(SDL_PushEvent(&e));poll_interactive_input();assert(!fire && !interactive_mouse_trigger);
+    interactive_focused=1;refresh_interactive_gamepads();
+    assert(SDL_SetJoystickVirtualAxis(joy,SDL_GAMEPAD_AXIS_LEFTX,32767));assert(SDL_SetJoystickVirtualAxis(joy,SDL_GAMEPAD_AXIS_LEFTY,-32768));
+    SDL_UpdateJoysticks();frame_counter++;poll_interactive_input();assert(gq_x[0]==0x1bc && gq_y[0]==0);
+    puts("GQ SDL source 9-bit gun X, mouse/gamepad extrema, offscreen trigger and focus release PASS");
     refresh_interactive_gamepads();
     SDL_CloseGamepad(interactive_pads[0]);interactive_pads[0]=NULL;
     SDL_CloseJoystick(joy);assert(SDL_DetachVirtualJoystick(id));
