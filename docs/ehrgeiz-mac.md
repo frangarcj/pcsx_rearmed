@@ -111,3 +111,79 @@ Memory-card saves, warm restart, live console SDL audio, Quest/minigames,
 PAL BIOS comparisons and long-term disc/protection coverage remain open.
 Original media, generated packages, BIOSes, binaries and captures are not
 committed.
+
+## Targeted High Octane issue checks
+
+[Upstream issue 8](https://github.com/Rinnegatamante/PCSX_AwO/issues/8)
+reports a complete Vita crash when selecting a title-screen option in USA
+and Japan console releases with High Octane. High Octane is this fork's
+VitaGL HD renderer. A passing Mac OpenGL compatibility run cannot establish
+that the hardware/GXM failure is fixed.
+
+The additional USA archive is from the public
+[`2024-sony-playstation-usa-hearto-1g1r-collection`](https://archive.org/details/2024-sony-playstation-usa-hearto-1g1r-collection).
+Its 471506696-byte ZIP has SHA1 `c8d6c1c0c43cb3079ac51662231eb064375519bd`.
+The raw 697565568-byte BIN has SHA1 `37c5746e0969d159f6b1111a2904e72857c252d0`,
+ZIP CRC `25031f7d`; cue SHA1 is `197d3dafbd9369fee6514c6a5c78306b99375d38`.
+The core identifies `SLUS00809`, NTSC, and the same real BIOS (`HLE=0`).
+
+The additional Mac build uses `DRC=1 GPU_THREAD=1 GPU=vitagl-like`, with
+default `VITA_GL_HD=1`. At runtime `--gpu-thread` enables the gpulib worker;
+the newly shared `--gl-1x` diagnostic disables HD target scaling without
+changing CPU, media, input or thread settings. Startup explicitly logs the
+resolution setting and requested worker state.
+
+| Configuration | Evidence |
+| --- | --- |
+| PAL, ARM64 ari64, HD, GPU worker | 6100 frames, 414/414 inputs, nonzero SPU, clean GL shutdown |
+| USA, interpreter, HD, GPU worker | 6200 frames, 414/414 inputs, Godhand/Inoba combat, clean shutdown |
+| USA, ARM64 ari64, HD, GPU worker | 6200 frames, 414/414 inputs, Godhand/Inoba combat, clean shutdown |
+| USA, ARM64 ari64, 1x, GPU worker | Same final PC, block count and cycle as HD; RAM and WAV byte-identical |
+
+USA ari64 HD/1x RAM SHA256 is
+`346d27ab1402c55c88980e7e81c6c518f6856e84a861a1b451c3b019affca7c4`;
+WAV SHA256 is `c42cb599809d7d9e6eda330c14c2d23370b5c89982062702c408d945e191ae85`.
+Both produce 4554860 stereo frames at 44.1 kHz. Interpreter and ari64 do not
+reach the same final fight state/cycle; these checks do not assert timing
+equivalence between CPU implementations. No crash is reproduced in these
+Mac runs, including the reported selection-to-gameplay transition.
+
+Vita uses an additional dedicated VitaGL renderer thread and real GXM
+framebuffer/MSAA allocation. Mac uses host OpenGL context handoff; it does not
+execute those Vita-specific paths. The Japan disc, original 0.1.0 binary and
+physical Vita remain separate untested cases.
+
+## ARMv7/VitaGL diagnostic in Vita3K
+
+The standalone frontend now accepts bounded console pad replays and presented
+frame capture in the console build as well as arcade builds. It retains strict
+CSV ordering and complete-event checks. Reports remain restricted to arcade
+profiles; ordinary game selection without diagnostic arguments is unchanged.
+
+The current arcade-enabled Vita link fails because newly added native arcade
+adapters reference sound/storage modules not yet included in that build. This
+is a build-integration limitation, not an Ehrgeiz crash. The console diagnostic
+therefore uses the normal PlayStation build: ARCADE_SYSTEM12=0, VitaGL HD,
+VITA_GPU_THREAD=1, ARMv7 ari64 and the exact audited USA disc/BIOS above.
+
+An isolated Vita3K run reaches 3700/3700 frames and 240/240 replay events with
+both pads released, then shuts VitaGL down cleanly. VPK SHA256 is
+`609c7fe8be3604dfa7432212f5c80930cb093954f49aa754e2cf2ab961422dc2`;
+host SHA256 is `18b9bf5b232747a238e7b6d7a5d4ad8d390a93aefacc06a57d5215b09b4af87f`.
+All 1078 forwarded protected accesses have matched recoveries; none remains
+unresolved. The host screenshots show player combat, but HUD/background parts
+are absent. The 960x544 guest PPM is completely black, and the audio capture
+statistics show peak/nonzero zero despite 2719500 delivered stereo frames.
+
+This is **not a passing Vita validation**. `result.json` deliberately reports
+`passed=false` even though the replay and shutdown protocol completed. It does
+not reproduce the reported whole-system crash; neither does it establish
+correct graphics/sound or a physical Vita fix. HD and 1x must be compared using
+the actual pictures. A second run of the identical VPK/profile with `--gl-1x`
+also reaches 3700 frames and 240/240 inputs, with zero unresolved protected
+accesses and a clean shutdown. It has the same silent-audio statistics and
+identical black PPM hash; its host screenshots also show missing scene
+elements. Disabling HD does not resolve these Vita3K fidelity failures.
+Evidence is retained in ignored
+`artifacts/boards-mac-20261014/ehrgeiz/issue8-vita3k`; the isolated host/media
+and intermediate files are under `/tmp/pcsx-ehrgeiz-vita3k-20261014`.
