@@ -5,8 +5,7 @@ the native Mac interpreter. A 4800-frame NEON run reaches the animated attract
 scene with all three INSERT COIN labels, 15802 sector reads, 314 SCSI commands,
 312 DMA5 requests, nonzero source PCM audio and zero board/media faults.
 A separate 6500-frame GL/NEON replay reaches P1 gameplay, and its live SDL
-audio matches the raw native output exactly. Explicit reload and warm EEPROM
-checks are still in progress.
+audio matches the raw native output exactly. A separate 6580-frame warm GL restart also verifies reload and retained EEPROM.
 
 ## Original media and source
 
@@ -57,8 +56,8 @@ ROM/RAM checks marked OK and the SOUND check at 30 emulated seconds. That is
 an intermediate reference result. A separate 120-second reference run reaches
 the animated three-player attract scene (all three INSERT COIN labels),
 confirming that this original media boots in MAME. Neither reference run has
-player input. Native NEON boot and nonzero PCM output now pass. GL/NEON player entry and live SDL audio now pass. Explicit reload,
-calibration, warm persistence and DRC retain separate checks.
+player input. Native NEON boot and nonzero PCM output now pass. GL/NEON player entry and live SDL audio now pass. A warm GL restart also verifies reload and retained EEPROM. Calibration
+and DRC retain separate checks.
 
 Source/media manifests, CHD information, download/audit logs, component logs
 and MAME snapshots are in `artifacts/boards-mac-20261014`. The overall board
@@ -133,11 +132,33 @@ zero clipping and no unmatched chip samples. WAV SHA256 is
 `c0022cb596145d4bd2f2e87f944d5cfadc874ce8f0bf9e7382d960e1117d5161`.
 Live capture finishes with `Interactive GQ audio: error=0`. GL capture uses the
 actual OpenGL back buffer. The source EEPROM remains the original 128-byte image
-in these runs; a separate restart/reload run is required before claiming warm
-player coverage or verified reload behavior.
+in these runs. The separate warm restart/reload run below verifies those paths.
 
 Logs, input CSV, GL/NEON PNGs and `cryptklr-player-validation.json` are stored in
 `artifacts/boards-mac-20261014`. WAVs and complete RAM dumps remain under
 `/tmp/pcsx-boards-mac-20261014`. This is bounded P1 coverage; a scored hit,
 three simultaneous players, full-game completion and physical Vita are not
 established by these captures.
+
+## Warm restart and reload
+
+A new GL process imports the previous run's 128-byte EEPROM and repeats the
+player sequence. At frame 6500 it holds `p1button2` for 16 frames with no later
+shots. The final frame 6580 retains the P1 HUD and two hearts, removes the RELOAD
+prompt, and shows refilled ammunition. The prior frame-6500 run has the empty
+ammo prompt. This verifies reload through the original game's digital input.
+
+The warm run consumes 384/384 events, reads 26892 sectors, executes 414 SCSI
+commands and 412 DMA5 requests, and reports zero board/media faults. Audio is
+5279293 stereo frames, 1467696 nonzero frames, peak 11982, zero clipping and no
+unmatched samples. EEPROM is byte-identical before/after, source SHA1
+`d9ff0458478ee42b7b14f101be96dd2e45edbba3`; the game does not need to rewrite
+factory settings during this short replay. The original HDD has no game writes
+in these runs. The independent native fixture proves overlay writes persist;
+it is not substituted for a claim that the authentic game wrote sectors.
+
+Evidence includes `cryptklr-warm-gl.log`, `cryptklr-warm-gl.png`, the paired
+before/after EEPROM images and `cryptklr-player-reload.csv` in the validation
+directory. This closes bounded Mac P1 startup/shooting/reload/audio/persistence
+coverage. Scored hits, simultaneous three-player gameplay, calibration, full
+analog sound routing, DRC, save states and physical Vita remain separate work.
