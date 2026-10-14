@@ -32,6 +32,11 @@ static void test_media_and_cdda(const char *path) {
   ChdCd *cd = chd_cd_open(path, &cfg, error, sizeof(error));
   if (!cd) std::fprintf(stderr, "CHD open: %s\n", error);
   assert(cd && chd_cd_track_count(cd) == 3 && chd_cd_last_lba(cd) == 16);
+  chd_cd_track_info_t track{};
+  assert(chd_cd_get_track_info(cd,0,&track) && track.type==0 && !track.pregap);
+  assert(chd_cd_get_track_info(cd,1,&track) && track.type==7 && track.pregap==2);
+  assert(!chd_cd_get_track_info(cd,3,&track) && !chd_cd_get_track_info(cd,0xaa,&track));
+  assert(!chd_cd_get_track_info(nullptr,0,&track) && !chd_cd_get_track_info(cd,0,nullptr));
   nscsi_cd_media_ops_t m{};
   assert(chd_cd_get_media_ops(cd, &m));
   assert(m.present(m.opaque) && m.last_track(m.opaque) == 3);

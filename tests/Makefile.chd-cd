@@ -42,6 +42,13 @@ $(CHDOBJDIR)/zstddeclib.o: $(LIBCHDR_ZSTD)/zstddeclib.c | $(CHDOBJDIR)
 
 $(TARGET): $(OBJS) tests/test_chd_cd.cpp tests/test_system12_cdxa.cpp
 	$(CXX) $(CXXFLAGS) -MMD -MP -MF $(BUILD)/test_chd_cd.d -I$(ARCADE) $(LIBCHDR_CFLAGS) tests/test_chd_cd.cpp tests/test_system12_cdxa.cpp $(OBJS) -lz -o $@
+ATAPI_SRC := $(ARCADE)/atapi_cr589.cpp $(ARCADE)/atapi_mame/atapihle_port.cpp $(ARCADE)/atapi_mame/t10spc_port.cpp $(ARCADE)/atapi_mame/t10mmc_port.cpp $(ARCADE)/ata_mame/atahle_port.cpp
+ATAPI_HEADERS := $(ARCADE)/atapi_cr589.h $(ARCADE)/atapi_mame_compat.h $(wildcard $(ARCADE)/atapi_mame/*.h) $(ARCADE)/atapi_mame/cr589_methods.inc $(ARCADE)/ata_mame/atahle_port.h $(ARCADE)/ata_mame/ata_mame_compat.h
+$(BUILD)/check-atapi-cr589: $(OBJS) tests/check_atapi_cr589_chd.cpp $(ATAPI_SRC) $(ATAPI_HEADERS)
+	$(CXX) $(CXXFLAGS) -std=c++20 -Wno-sign-compare -I$(ARCADE) $(LIBCHDR_CFLAGS) tests/check_atapi_cr589_chd.cpp $(ATAPI_SRC) $(OBJS) -lz -o $@
+.PHONY: atapi-original
+atapi-original: $(BUILD)/check-atapi-cr589
+	$(BUILD)/check-atapi-cr589 $(CHD)
 -include $(OBJS:.o=.d) $(BUILD)/test_chd_cd.d
 
 test: $(TARGET)

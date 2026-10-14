@@ -30,6 +30,11 @@ int chd_cd_verify_sha1(ChdCd *cd, const char *expected_hex);
 int chd_cd_advance_to(ChdCd *cd, uint64_t now_ns);
 uint32_t chd_cd_last_lba(const ChdCd *cd);
 uint32_t chd_cd_track_count(const ChdCd *cd);
+typedef struct chd_cd_track_info {
+  uint32_t type,frames,pregap,pregap_data_bytes;
+} chd_cd_track_info_t;
+/* Exact parsed CHD metadata, for MMC raw-type/TOC validation. */
+int chd_cd_get_track_info(const ChdCd *cd,unsigned track,chd_cd_track_info_t *out);
 const char *chd_cd_last_error(const ChdCd *cd);
 #ifdef __cplusplus
 }

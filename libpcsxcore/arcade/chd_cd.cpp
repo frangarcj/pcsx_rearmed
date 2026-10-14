@@ -451,6 +451,11 @@ extern "C" int chd_cd_get_media_ops(ChdCd *cd, nscsi_cd_media_ops_t *ops) {
           op_audio_start, op_audio_pause, op_audio_status, op_audio_gain};
   return 1;
 }
+extern "C" int chd_cd_get_track_info(const ChdCd *cd,unsigned track,chd_cd_track_info_t *out) {
+  if (!cd || !out || track >= cd->tracks.size()) return 0;
+  const Track &t=cd->tracks[track];
+  *out={t.type,t.frames,t.pregap,t.pg_data_bytes};return 1;
+}
 extern "C" int chd_cd_read_raw_sector(ChdCd *cd, uint32_t lba, uint8_t out[2352]) {
   if (!cd || !out || reject_callback_mutation(cd)) return 0;
   uint32_t track = 0;
