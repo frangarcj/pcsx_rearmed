@@ -213,6 +213,9 @@ static void array_program(nor_flash_t *flash, uint32_t address, uint16_t value)
             flash->image[off] &= (uint8_t)(value >> 8);
             flash->image[off + 1] &= (uint8_t)value;
         }
+    } else if (flash->profile == NOR_FLASH_FUJITSU_MBM29F016A) {
+        /* Pinned intelfsh.cpp FM_BYTEPROGRAM assigns data on this x8 part. */
+        flash->image[off] = (uint8_t)value;
     } else {
         flash->image[off] &= (uint8_t)value;
     }

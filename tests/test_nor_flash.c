@@ -218,12 +218,12 @@ static void test_amd_profile(nor_flash_profile_t profile, size_t size,
     assert(rd(f, 0) == maker && rd(f, 1) == device && rd(f, 2) == 0);
     amd_reset(f);
     amd_program(f, target, 0x0f);
-    assert(image[target] == 0x00); /* initial image had zero bits already */
+    assert(image[target] == (profile == NOR_FLASH_FUJITSU_MBM29F016A ? 0x0f : 0x00));
     image[target] = 0xff;
     amd_program(f, target, 0x0f);
     assert(image[target] == 0x0f);
     amd_program(f, target, 0xff);
-    assert(image[target] == 0x0f);
+    assert(image[target] == (profile == NOR_FLASH_FUJITSU_MBM29F016A ? 0xff : 0x0f));
 
     image[target] = 0;
     image[target + 1] = 0x7e;

@@ -43,8 +43,10 @@ name. Their x16 programming assigns the supplied word to the image, matching
 MAME's `FM_WRITEPART1` behavior. The older 28F640J5 profile retains its
 previous bit-clearing behavior for API compatibility. AMD/Fujitsu profiles
 support the AMD unlock, autoselect, byte-program, sector-erase, and chip-erase
-sequences. SST uses MAME's 39SF040 unlock aliasing and 4 KiB sector geometry.
-The x8 profiles only clear bits (`1` to `0`) when programming.
+commands. Fujitsu MBM29F016A byte programming assigns the supplied byte, including
+zero-to-one transitions, matching the pinned `FM_BYTEPROGRAM` source model.
+The other existing x8 profiles retain their bit-clearing behavior. SST uses
+MAME's 39SF040 unlock aliasing and 4 KiB sector geometry.
 
 E28F400B's `0x20`/`0xd0` erase follows MAME's asymmetric boot-block map: 16 KiB
 at the bottom, two 8 KiB parameter blocks, one 96 KiB block, then 128 KiB
