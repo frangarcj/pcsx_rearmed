@@ -1,0 +1,16 @@
+CC ?= clang
+BUILD ?= build/fifo7200-tests
+SOURCES := libpcsxcore/arcade/fifo7200.c tests/fifo7200_standalone.c
+HEADERS := libpcsxcore/arcade/fifo7200.h
+FLAGS := -std=c99 -Wall -Wextra -Ilibpcsxcore/arcade
+.PHONY: test sanitize
+$(BUILD)/test-fifo7200: $(SOURCES) $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CC) $(FLAGS) -O2 $(SOURCES) -o $@
+$(BUILD)/test-fifo7200-sanitize: $(SOURCES) $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CC) $(FLAGS) -O1 -fsanitize=address,undefined -fno-omit-frame-pointer $(SOURCES) -o $@
+test: $(BUILD)/test-fifo7200
+	$(BUILD)/test-fifo7200
+sanitize: $(BUILD)/test-fifo7200-sanitize
+	ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $(BUILD)/test-fifo7200-sanitize
