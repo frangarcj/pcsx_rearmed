@@ -27,6 +27,13 @@ static int digital(const char *name,int down)
     return 0;
 }
 static unsigned atlus_mix_frames;
+static unsigned cbaj_mix_frames;
+static void cbaj_mix_output(void *opaque,const int16_t *pcm,unsigned frames)
+{
+    (void)opaque;
+    for(unsigned i=0;i<frames;i++) {assert(pcm[i*2]==8601);assert(pcm[i*2+1]==0);}
+    cbaj_mix_frames+=frames;
+}
 static void atlus_mix_output(void *opaque,const int16_t *pcm,unsigned frames)
 {
     (void)opaque;
@@ -132,6 +139,21 @@ int main(void)
     }
     assert(atlus_mix_frames==512 && !interactive_mix.error && !interactive_mix.clipped);
     puts("Atlus SDL controls/focus and production SPU0.175/YMZ0.35 gain/rate routing PASS");
+    board.family=109; interactive_focused=1;
+    key(SDL_SCANCODE_5,1);key(SDL_SCANCODE_1,1);key(SDL_SCANCODE_A,1);key(SDL_SCANCODE_9,1);
+    assert(coin && start && fire && service);
+    release_interactive_input();assert(!coin && !start && !fire && !service);
+    SDL_UpdateJoysticks();frame_counter++;poll_interactive_input();assert(coin && start && fire);
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_WINDOW_FOCUS_LOST;
+    assert(SDL_PushEvent(&e));poll_interactive_input();assert(!coin && !start && !fire && !service);
+    arcade_mix_init_rates(&interactive_mix,33868800,16934400,192,cbaj_mix_output,NULL);
+    for(unsigned i=0;i<512;i++) {
+        interactive_spu_pcm((void *)source_spu,4);
+        interactive_zoom_pcm(NULL,.25f,.5f,i*384);
+        interactive_zoom_pcm(NULL,.25f,.5f,i*384+192);
+    }
+    assert(cbaj_mix_frames==512 && !interactive_mix.error && !interactive_mix.clipped);
+    puts("CBaj SDL keyboard/gamepad/focus and production SPU0.35/YMZ0.35 gain/rate routing PASS");
     SDL_CloseGamepad(interactive_pads[0]);interactive_pads[0]=NULL;
     SDL_CloseJoystick(joy);assert(SDL_DetachVirtualJoystick(id));
     SDL_DestroyWindow(w);SDL_Quit();

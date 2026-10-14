@@ -1,0 +1,22 @@
+CXX ?= clang++
+CC ?= clang
+BUILD ?= build/cbaj-sound-tests
+SOURCES := libpcsxcore/arcade/z80.cpp libpcsxcore/arcade/ymz280b.cpp libpcsxcore/arcade/cbaj_sound.cpp tests/cbaj_sound_standalone.cpp
+HEADERS := libpcsxcore/arcade/cbaj_sound.h libpcsxcore/arcade/z80.h libpcsxcore/arcade/ymz280b.h libpcsxcore/arcade/ymz280b_internal.h libpcsxcore/arcade/fifo7200.h $(wildcard libpcsxcore/arcade/z80*.inc)
+COMMON := -Wall -Wextra -Wno-sign-compare -Wno-unused-but-set-variable -Ilibpcsxcore/arcade
+SAN := -O1 -fsanitize=address,undefined -fno-omit-frame-pointer
+.PHONY: test sanitize
+$(BUILD)/fifo7200.o: libpcsxcore/arcade/fifo7200.c libpcsxcore/arcade/fifo7200.h
+	@mkdir -p $(BUILD)
+	$(CC) -std=c99 $(COMMON) -O2 -c $< -o $@
+$(BUILD)/fifo7200-san.o: libpcsxcore/arcade/fifo7200.c libpcsxcore/arcade/fifo7200.h
+	@mkdir -p $(BUILD)
+	$(CC) -std=c99 $(COMMON) $(SAN) -c $< -o $@
+$(BUILD)/test-cbaj-sound: $(SOURCES) $(HEADERS) $(BUILD)/fifo7200.o
+	$(CXX) -std=c++17 $(COMMON) -O2 $(SOURCES) $(BUILD)/fifo7200.o -o $@
+$(BUILD)/test-cbaj-sound-sanitize: $(SOURCES) $(HEADERS) $(BUILD)/fifo7200-san.o
+	$(CXX) -std=c++17 $(COMMON) $(SAN) $(SOURCES) $(BUILD)/fifo7200-san.o -o $@
+test: $(BUILD)/test-cbaj-sound
+	$(BUILD)/test-cbaj-sound
+sanitize: $(BUILD)/test-cbaj-sound-sanitize
+	ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $(BUILD)/test-cbaj-sound-sanitize

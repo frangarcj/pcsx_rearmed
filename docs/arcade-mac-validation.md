@@ -17,7 +17,8 @@ intermediate results. Physical Vita is outside this Mac pass.
 | Taito FX1S | Psychic Force (`psyforce`) | Native interpreter/GL PLAYER1 selection and combat, 146/146 inputs, nonzero YM2610B and zero watchdog/device faults in the later replay; `taito-fx1-mac.md`. Earlier coin sequence still resets in native and MAME |
 | Taito FX1Z, 1/2 MiB VRAM | RayStorm (`raystorm`), G-Darius Ver.2 (`gdarius2`) | Both interpreter/GL interactive player runs pass with exercised controls, live SPU/Zoom mix, persisted FRAM/EEPROM and zero device faults; `taito-fx1z-mac.md` |
 | Tecmo TPS common SPU map | Gallop Racer 2 (`glpracr2`) | Interpreter/GL interactive player race, 138/138 inputs, exact source-gain SDL/SPU capture and zero board faults; `tecmo-tps-mac.md` |
-| Tecmo TPS sound/link variants | Cool Boarders Arcade Jam (`cbaj`), Gallop Racer 2 Link (`glpracr2l`) | Z80/YMZ280B/FIFO and Z80 link configurations require separate native coverage; media/runtime pending |
+| Tecmo TPS Z80/YMZ280B/FIFO | Cool Boarders Arcade Jam (`cbaj`) | Source-audited; native interpreter GL/NEON P1 downhill race, 200/200 inputs, original Z80/YMZ sound, dual FIFO startup/commands, live mixed SPU/YMZ audio and zero faults; `cbaj-tps-mac.md` |
+| Tecmo TPS Z80 link | Gallop Racer 2 Link (`glpracr2l`) | Separate Z80/link configuration; media/runtime pending |
 | Video System/Visco ZN-1 | Aero Fighters Special (`aerofgts`) | USA source-audited; native interpreter/GL 1P shooting, 112/112 inputs, portrait presentation, exact source-gain SPU/SDL capture and zero faults; `visco-zn-mac.md` |
 | Atlus ZN-1 | Heaven's Gate (`hvnsgate`) | Source-audited; native interpreter/GL Jin combat, 198/198 inputs, MC68000/YMZ280B IRQs, mixed SPU/YMZ audio and zero faults; `atlus-zn-mac.md` |
 | Time Warner/Atari ZN-1 | Primal Rage II (`primrag2`) | Source COH1000W uses 8 MiB RAM, VT83C461 HDD and DMA5, with a 600 ms watchdog; media/adapter/runtime pending |
@@ -55,9 +56,10 @@ from the arcade boards.
   Brave Blade 1P shooting with its MC68000/YMF271 and portrait presentation.
   Video System/Visco now passes Aero Fighters Special USA player shooting with
   its 24-bank ROM map and live SPU audio. Atlus now passes Heaven's Gate player
-  combat with its 68000/YMZ280B, independent IRQ2/IRQ3 and mixed sound. Proceed
-  to the TPS Cool Boarders Arcade Jam Z80/YMZ/FIFO variant and remaining source
-  families; the TPS link variant retains its separate pending row.
+  combat with its 68000/YMZ280B, independent IRQ2/IRQ3 and mixed sound. Cool
+  Boarders Arcade Jam now passes P1 downhill racing in GL/NEON with its real
+  Z80, YMZ280B, dual FIFOs and live SPU/YMZ mix. Proceed to the separate TPS
+  Gallop Racer 2 Link configuration and remaining source families.
 
 Local evidence is in `artifacts/boards-mac-20261014`; scratch/reference runs are
 under `/tmp/pcsx-boards-mac-20261014`. The user-linked Internet Archive collection

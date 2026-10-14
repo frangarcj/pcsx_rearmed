@@ -137,5 +137,6 @@ Raizing, Capcom, FX1Z/G-Net and mixer regressions and no-board console smoke pas
 
 This establishes bounded Heaven's Gate player coverage. Whole-machine timing
 and full sound fidelity versus MAME/hardware remain unverified. The next distinct
-configuration is Cool Boarders Arcade Jam (Tecmo TPS Z80/YMZ280B with two FIFOs).
+configuration, Cool Boarders Arcade Jam (Tecmo TPS Z80/YMZ280B with two FIFOs),
+now has [its own bounded player validation](cbaj-tps-mac.md).
 All remaining boards stay tracked in [the full Mac matrix](arcade-mac-validation.md).

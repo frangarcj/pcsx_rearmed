@@ -75,7 +75,7 @@ int psxSourceSpuDmaActive(void)
     if (systemgnet_active()) return 1;
 #endif
 #ifdef PCSX_SYSTEM12
-    if (systemtaito_active() || systemzn_tps_active() || systemzn_raizing_active() || systemzn_visco_active() || systemzn_atlus_active()) return 1;
+    if (systemtaito_active() || systemzn_tps_active() || systemzn_raizing_active() || systemzn_visco_active() || systemzn_atlus_active() || systemzn_cbaj_active()) return 1;
 #ifdef PCSX_SYSTEM_GV
     if (systemgv_active()) return 1;
 #endif
