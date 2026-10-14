@@ -15,11 +15,22 @@ typedef struct System573Flash {
     uint16_t control,security;
     uint8_t h8_index,h8_clk,lamp_color,strobe,lamps[3];
     uint8_t jvs[512];unsigned jvs_r,jvs_w;
+    unsigned cassette_type;
+    uint8_t analog_output[4];
+    struct {unsigned shift,bit;uint8_t data,clk,init;} stage[2];
+    uint32_t stage_input,stage_mask;
+    uint64_t stage_edges;
+    /* Union of x8 dirty spans in the latest CPU flash write, including
+     * changes before a later byte clears the chip's last-write diagnostics. */
+    size_t dirty_start[2],dirty_length[2];
     uint64_t flash_reads,flash_writes,h8_edges,rtc_reads,rtc_writes,jvs_packets,empty_ata_reads;
     unsigned faults;
 } System573Flash;
 int system573_flash_init(System573Flash *b,uint8_t *flash[8],uint8_t *rtc,
                          const uint8_t *response,const uint8_t *cassette,const struct tm *local);
+int system573_flash_init_cassette(System573Flash *b,uint8_t *flash[8],uint8_t *rtc,
+                         const uint8_t *response,const uint8_t *cassette,
+                         unsigned cassette_type,const struct tm *local);
 void system573_flash_destroy(System573Flash *b);
 void system573_flash_reset(System573Flash *b);
 void system573_flash_advance_us(System573Flash *b,uint64_t us);

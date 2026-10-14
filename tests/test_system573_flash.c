@@ -56,13 +56,49 @@ int main(void){
     system573_flash_write(&b,0x1f000aaa,1,0xa0);
     system573_flash_write(&b,0x1f000100,1,0);
     assert(chips[0][0x80]==0 && chips[1][0x80]==0x11);
+    system573_flash_write(&b,0x1f000aaa,2,0xaaaa);
+    system573_flash_write(&b,0x1f000554,2,0x5555);
+    system573_flash_write(&b,0x1f000aaa,2,0xa0a0);
+    system573_flash_write(&b,0x1f000200,4,0xf0f00000);
+    assert(chips[0][0x100]==0 && chips[1][0x100]==0);
+    assert(b.dirty_start[0]==0x100 && b.dirty_start[1]==0x100);
+    assert(b.dirty_length[0]==1 && b.dirty_length[1]==1);
     system573_flash_advance_us(&b,1000000);assert(b.rtc.ticks==1);
     system573_flash_reset(&b);assert(b.control==0 && b.security==0 && b.h8_index==0 && rtc[0]==0xdd && b.rtc.ticks==1);
     assert(chips[0][0x80]==0); // soft reset does not recreate the original seed
     assert(!b.faults);
     assert(system573_flash_read(&b,0x1f000001,4,&v)==-1);
     assert(system573_flash_read(&b,0x1f700000,4,&v)==0);
-    system573_flash_destroy(&b);for(unsigned i=0;i<8;i++)free(chips[i]);
-    puts("System 573 flash bank/x8 lanes, Fujitsu commands, H8 response pins, RTC byte lanes, cassette lamps, empty ATA/JVS and warm reset PASS");
+    system573_flash_destroy(&b);
+    /* Explicit synthetic EEPROM fixture for the X cassette/analog DDR bus. */
+    uint8_t ximage[548];memset(ximage,0x5a,sizeof(ximage));
+    assert(!system573_flash_init_cassette(&b,chips,rtc,response,ximage,KONAMI_X76F041,&t));
+    uint8_t exported[548];assert(!konami_secure_flash_get_image(b.cassette,exported,548));
+    assert(!memcmp(ximage,exported,548));
+    system573_flash_write(&b,0x1f6a0000,2,0xf8);assert(!b.lamps[0] && !b.lamp_color);
+    b.stage_input=0xfffffeff;
+    system573_flash_read(&b,0x1f400008,4,&v);assert(v==0xfeff);
+    for(unsigned i=0;i<13;i++){
+        unsigned data=((0xc90>>i)&1)<<5;
+        system573_flash_write(&b,0x1f640080,2,data);
+        system573_flash_write(&b,0x1f640080,2,data|4);
+        system573_flash_write(&b,0x1f640080,2,data);
+    }
+    assert(b.stage[0].init && b.stage[0].bit==0 && b.stage_mask==0xfffff9f9);
+    system573_flash_read(&b,0x1f400008,4,&v);assert(v==0xf8f9);
+    for(unsigned i=1;i<=22;i++){
+        system573_flash_write(&b,0x1f640080,2,4);
+        system573_flash_write(&b,0x1f640080,2,0);
+        if(i==1)assert(b.stage_mask==0xfffffff9u);
+    }
+    assert(!b.stage[0].init && b.stage_mask==UINT32_MAX && b.stage_edges==35);
+    system573_flash_write(&b,0x1f640088,2,0x20);
+    assert(b.stage[1].data==1 && b.analog_output[1]==0x20);
+    system573_flash_write(&b,0x1f640089,1,0xff);assert(b.analog_output[1]==0 && !b.stage[1].data);
+    system573_flash_write(&b,0x1f640088,2,0x20);system573_flash_reset(&b);
+    assert(b.analog_output[1]==0x20 && b.stage[1].data==1);
+    system573_flash_read(&b,0x1f640088,4,&v);assert(v==0);
+    assert(!b.faults);system573_flash_destroy(&b);for(unsigned i=0;i<8;i++)free(chips[i]);
+    puts("System 573 flash/x8 dirty lanes, H8/RTC, X/Y cassettes, analog DDR two-stage multiplexor, empty ATA/JVS and warm reset PASS");
     return 0;
 }

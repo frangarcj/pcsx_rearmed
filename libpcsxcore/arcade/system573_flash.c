@@ -4,10 +4,16 @@
 #include <string.h>
 int system573_flash_init(System573Flash *b,uint8_t *flash[8],uint8_t *rtc,
                          const uint8_t *response,const uint8_t *cassette,const struct tm *local){
+    return system573_flash_init_cassette(b,flash,rtc,response,cassette,KONAMI_X76F100,local);
+}
+int system573_flash_init_cassette(System573Flash *b,uint8_t *flash[8],uint8_t *rtc,
+                         const uint8_t *response,const uint8_t *cassette,unsigned type,const struct tm *local){
     if(!b || !flash || !rtc || !response || !cassette || !local)return -1;
+    if(type!=KONAMI_X76F100 && type!=KONAMI_X76F041)return -1;
     memset(b,0,sizeof(*b));b->h8_response=response;
+    b->cassette_type=type;b->stage_input=b->stage_mask=UINT32_MAX;
     for(unsigned i=0;i<8;i++)if(!(b->flash[i]=nor_flash_create(NOR_FLASH_FUJITSU_MBM29F016A,flash[i],0x200000)))goto bad;
-    b->cassette=konami_secure_flash_create(KONAMI_X76F100,cassette,132);if(!b->cassette)goto bad;
+    b->cassette=konami_secure_flash_create(type,cassette,type==KONAMI_X76F041?548:132);if(!b->cassette)goto bad;
     if(m48t58_init(&b->rtc,rtc,local))goto bad;
     adc0834_init(&b->adc);
     b->input[0]=UINT32_MAX;b->input[1]=0x13001007;b->input[2]=0xffff;b->input[3]=0x0f000f00;
@@ -55,6 +61,7 @@ static void security(System573Flash *b,uint16_t v,uint16_t mask){
     if(mask&2)konami_secure_flash_scl(b->cassette,(v>>1)&1);
     if(mask&4)konami_secure_flash_cs(b->cassette,(v>>2)&1);
     if(mask&8)konami_secure_flash_rst(b->cassette,(v>>3)&1);
+    if(b->cassette_type!=KONAMI_X76F100)return; /* Cassette X has no lamp callbacks. */
     uint8_t colors=0;
     /* Output latches update per source output line, in increasing bit order. */
     const unsigned strobes[]={8,2,1};
@@ -66,6 +73,38 @@ static void security(System573Flash *b,uint16_t v,uint16_t mask){
         }
         if(bit>=4){colors=1u<<(bit-4);b->lamp_color=(b->lamp_color&~colors)|(high?colors:0);}
     }
+}
+/* GX700-PWB(F) output permutation and GN845-PWB(B) multiplexor, from
+ * ksys573.cpp. These latches initialise at machine_start, not soft reset. */
+static void stage_clk(System573Flash *b,unsigned p,int clk){
+    static const unsigned mask[]={0,6,2,4,0,4,0,4,0,4,0,4,0,4,0,4,0,4,0,4,0,6};
+    if(clk==b->stage[p].clk)return;b->stage[p].clk=clk;if(!clk)return;
+    b->stage_edges++;b->stage[p].shift=(b->stage[p].shift>>1)|(b->stage[p].data<<12);
+    if(!b->stage[p].init){
+        if(b->stage[p].shift==0xc90){b->stage[p].init=1;b->stage[p].bit=0;b->stage_mask=0xfffff9f9;}
+    }else if(++b->stage[p].bit<22){
+        unsigned a=((~6u|mask[b->stage[0].bit])&255)<<8;
+        unsigned c=(~6u|mask[b->stage[1].bit])&255;b->stage_mask=0xffff0000|a|c;
+    }else {b->stage[p].bit=b->stage[p].init=0;b->stage_mask=UINT32_MAX;}
+}
+static int analog_bus(System573Flash *b,uint32_t a,unsigned w,uint32_t *v,int write){
+    if(b->cassette_type!=KONAMI_X76F041 || a<0x1f640000 || a>=0x1f640100)return 0;
+    if(!write){*v=0;return 1;}
+    static const unsigned shift[]={7,6,1,0,5,4,3,2};
+    for(unsigned byte=0;byte<w;byte+=2){
+        unsigned offset=(a+byte-0x1f640000)/2;
+        if(offset<0x40 || offset>0x4c || (offset&3))continue;
+        unsigned bank=(offset-0x40)/4;
+        /* The source ignores mem_mask and takes data&ff, even for high-byte access. */
+        uint8_t data=(a&1)?0:*v>>(byte*8),old=b->analog_output[bank];
+        for(unsigned i=0;i<8;i++)if((old^data)&(1u<<shift[i])){
+            unsigned line=bank*8+i;int high=(data>>shift[i])&1;
+            if(line==4 || line==12)b->stage[line/8].data=high;
+            if(line==7 || line==15)stage_clk(b,line/8,high);
+        }
+        b->analog_output[bank]=data;
+    }
+    return 1;
 }
 static uint16_t jvs_read(System573Flash *b){
     if(b->jvs_r+2>sizeof(b->jvs)){b->faults|=1;return 0;}
@@ -82,8 +121,9 @@ static void jvs_write(System573Flash *b,uint16_t v){
     /* Empty source JVS chain returns no packet. */
 }
 int system573_flash_read(System573Flash *b,uint32_t a,unsigned w,uint32_t *v){
-    if(!b || !v)return -1;if(!aperture(a))return 0;
+    if(!b || !v)return -1;
     if((w!=1 && w!=2 && w!=4) || (a&(w-1)))return -1;
+    if(analog_bus(b,a,w,v,0))return 1;if(!aperture(a))return 0;
     *v=0;uint32_t base=a&~3u,raw=0;
     if(a<0x1f400000){
         unsigned bank=b->control&63;
@@ -103,7 +143,9 @@ int system573_flash_read(System573Flash *b,uint32_t a,unsigned w,uint32_t *v){
     switch(base){
     case 0x1f400000:raw=b->input[0];break;
     case 0x1f400004:raw=in1(b);break;
-    case 0x1f400008:raw=b->input[2]&0xffff;break;
+    case 0x1f400008:raw=b->input[2]&0xffff;
+        if(b->cassette_type==KONAMI_X76F041)raw=(raw&~0xf0fu)|(b->stage_input&b->stage_mask&0xf0f);
+        break;
     case 0x1f40000c:raw=b->input[3];break;
     case 0x1f500000:raw=b->control;break;
     case 0x1f6a0000:raw=b->security;break;
@@ -118,13 +160,22 @@ int system573_flash_read(System573Flash *b,uint32_t a,unsigned w,uint32_t *v){
     *v=raw>>(8*(a&3));if(w<4)*v&=(1u<<(8*w))-1;return 1;
 }
 int system573_flash_write(System573Flash *b,uint32_t a,unsigned w,uint32_t v){
-    if(!b)return -1;if(!aperture(a))return 0;
+    if(!b)return -1;
     if((w!=1 && w!=2 && w!=4) || (a&(w-1)))return -1;
+    if(analog_bus(b,a,w,&v,1))return 1;if(!aperture(a))return 0;
     if(a<0x1f400000){
         unsigned bank=b->control&63;
+        b->dirty_length[0]=b->dirty_length[1]=0;
         if(bank<4)for(unsigned i=0;i<w;i++){
             unsigned off=a+i-0x1f000000;
             int r=nor_flash_write(b->flash[bank*2+(off&1)],off/2,(v>>(i*8))&255);
+            size_t start,length;unsigned lane=off&1;
+            if(nor_flash_last_write_dirty_span(b->flash[bank*2+lane],&start,&length)>0){
+                if(!b->dirty_length[lane]){b->dirty_start[lane]=start;b->dirty_length[lane]=length;}
+                else {size_t end=b->dirty_start[lane]+b->dirty_length[lane];
+                    if(start+length>end)end=start+length;if(start<b->dirty_start[lane])b->dirty_start[lane]=start;
+                    b->dirty_length[lane]=end-b->dirty_start[lane];}
+            }
             if(r!=NOR_FLASH_OK && r!=NOR_FLASH_ERR_BUSY && r!=NOR_FLASH_ERR_SEQUENCE)b->faults|=2;
             b->flash_writes++;
         }
