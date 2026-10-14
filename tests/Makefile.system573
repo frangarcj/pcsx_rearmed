@@ -1,0 +1,30 @@
+CC ?= cc
+BUILD ?= build/system573-tests
+OPT ?= -O2
+CXX ?= c++
+SOURCES := tests/test_system573_peripherals.c libpcsxcore/arcade/m48t58.c libpcsxcore/arcade/adc0834.c
+.PHONY: test sanitize
+$(BUILD)/peripherals: $(SOURCES) libpcsxcore/arcade/m48t58.h libpcsxcore/arcade/adc0834.h
+	@mkdir -p $(BUILD)
+	$(CC) -std=c99 $(OPT) -Wall -Wextra -Werror $(SOURCES) -o $@
+$(BUILD)/flash-c.o: libpcsxcore/arcade/system573_flash.c libpcsxcore/arcade/system573_flash.h
+	@mkdir -p $(BUILD)
+	$(CC) -std=c99 $(OPT) -Wall -Wextra -Werror -c $< -o $@
+$(BUILD)/flash-test.o: tests/test_system573_flash.c
+	@mkdir -p $(BUILD)
+	$(CC) -std=c99 $(OPT) -Wall -Wextra -Werror -c $< -o $@
+$(BUILD)/nor.o: libpcsxcore/arcade/nor_flash.c
+	$(CC) -std=c99 $(OPT) -Wall -Wextra -Werror -c $< -o $@
+$(BUILD)/rtc.o: libpcsxcore/arcade/m48t58.c
+	$(CC) -std=c99 $(OPT) -Wall -Wextra -Werror -c $< -o $@
+$(BUILD)/adc.o: libpcsxcore/arcade/adc0834.c
+	$(CC) -std=c99 $(OPT) -Wall -Wextra -Werror -c $< -o $@
+$(BUILD)/security.o: libpcsxcore/arcade/konami_security.cpp libpcsxcore/arcade/konami_security_x76.inc
+	$(CXX) -std=c++17 $(OPT) -Wall -Wextra -Wno-unused-parameter -c $< -o $@
+$(BUILD)/flash: $(BUILD)/flash-c.o $(BUILD)/flash-test.o $(BUILD)/nor.o $(BUILD)/rtc.o $(BUILD)/adc.o $(BUILD)/security.o
+	$(CXX) $(OPT) $^ -o $@
+test: $(BUILD)/peripherals $(BUILD)/flash
+	$(BUILD)/peripherals
+	$(BUILD)/flash
+sanitize:
+	$(MAKE) -f tests/Makefile.system573 BUILD=$(BUILD)/sanitize OPT='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' test
