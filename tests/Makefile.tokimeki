@@ -1,0 +1,13 @@
+.DEFAULT_GOAL := test
+CC ?= clang
+BUILD ?= build/tokimeki-tests
+OPT ?= -O2 -g
+CFLAGS := -std=c99 $(OPT) -Wall -Wextra -Werror
+.PHONY: test sanitize
+$(BUILD)/test-tokimeki: tests/test_tokimeki_io.c libpcsxcore/arcade/tokimeki_io.c libpcsxcore/arcade/tokimeki_io.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) tests/test_tokimeki_io.c libpcsxcore/arcade/tokimeki_io.c -o $@
+test: $(BUILD)/test-tokimeki
+	$(BUILD)/test-tokimeki
+sanitize:
+	$(MAKE) -f tests/Makefile.tokimeki BUILD=$(BUILD)/sanitize OPT='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' test
