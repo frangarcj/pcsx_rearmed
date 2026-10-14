@@ -1,0 +1,16 @@
+CXX ?= clang++
+BUILD ?= build/ymz280b-tests
+SOURCES := libpcsxcore/arcade/ymz280b.cpp tests/ymz280b_standalone.cpp
+HEADERS := libpcsxcore/arcade/ymz280b.h libpcsxcore/arcade/ymz280b_internal.h
+FLAGS := -std=c++17 -Wall -Wextra -Wno-sign-compare -Wno-unused-but-set-variable -Ilibpcsxcore/arcade
+.PHONY: test sanitize
+$(BUILD)/test-ymz280b: $(SOURCES) $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CXX) $(FLAGS) -O2 $(SOURCES) -o $@
+$(BUILD)/test-ymz280b-sanitize: $(SOURCES) $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CXX) $(FLAGS) -O1 -fsanitize=address,undefined -fno-omit-frame-pointer $(SOURCES) -o $@
+test: $(BUILD)/test-ymz280b
+	$(BUILD)/test-ymz280b
+sanitize: $(BUILD)/test-ymz280b-sanitize
+	ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $(BUILD)/test-ymz280b-sanitize
