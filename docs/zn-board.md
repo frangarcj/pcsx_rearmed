@@ -35,12 +35,19 @@ The MAME common map provides these address ranges:
 | `0x1fa10200` | Board configuration |
 | `0x1fa10300` | Security and ZNMCU mux select/readback latch |
 | `0x1fa20000` | Coin counter/lockout output latch/readback |
-| `0x1fa30000..03` | MAME `noprw` range |
-| `0x1fa40000..03` | MAME no-op read range |
+| `0x1fa30000..03` | MAME `noprw`: reads zero; writes ignored |
+| `0x1fa40000..03` | MAME no-op read range: reads zero |
 | `0x1faf0000..07ff` | 2 KiB AT28C16 EEPROM |
 | `0x1fb20000..07` | Unknown read returns all ones |
 | `0x1fa60000..01` | ZN-2-only SPU workaround read |
-| `0x1fa51c00..1dff` | ZN-2-only MAME no-op read range |
+| `0x1fa51c00..1dff` | ZN-2-only MAME no-op read range: reads zero |
+
+These `nopr` handlers use MAME's default-zero program-map unmapped value.
+They differ from the explicit `unknown_r` handler at `0x1fb20000`, which returns
+all ones. Returning FF for the no-op ranges makes the original Judge Dredd
+interrupt dispatcher enter a daughterboard transfer path that source does not
+activate, preventing the synchronous HDD boot read. Independent MAME 0.287
+read taps confirm zero at both common no-op apertures.
 
 `boardconfig_r` returns fixed bits `0x60`, VRAM bit 3 when configured for 2
 MiB, and RAM size in bits 1:0 (`1` for 4 MiB, `2` for 8 MiB, `3` for 16 MiB).

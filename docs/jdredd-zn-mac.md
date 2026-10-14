@@ -1,12 +1,17 @@
-# Judge Dredd / Acclaim ZN-1 work in progress
+# Judge Dredd / Acclaim ZN-1 on Mac
 
-Judge Dredd Rev C (`jdredd`) now has source-audited original ROM/HDD media and
-native Mac daughterboard wiring for ATA, IRQ10, multiplexed pistols and GPU
-coordinate queries. Analytical and native MIPS/SDL tests pass, but the authentic
-native game **does not yet pass boot or player validation**. The first HDD
-read is requested but its IRQ-driven firmware path does not consume the sector;
-the loader reaches `HDLOAD vB1.7 Error 001 / Can't find _GAME.EXE`. Independent
-MAME 0.287 instead reaches the expected cold-NVRAM restore prompt.
+Judge Dredd Rev C (`jdredd`) passes a bounded native interpreter player run
+with GL and NEON using the original source-verified ROM and HDD. The 4800-frame
+replay restores cold NVRAM through the original START prompt, inserts coins,
+starts P1, aims, shoots and reloads offscreen. Both final captures show score
+100, health 100%, one credit remaining and refilled ammunition. All 238 input
+rows are consumed; device/backing errors are zero.
+
+The boot failure was a common ZN no-op read returning FF instead of the pinned
+program map's default zero. That made the original IRQ dispatcher enter an
+asynchronous transfer path during a synchronous HDD read. Correcting the source
+bus value lets unmodified firmware consume the first sector and load the game.
+Independent MAME 0.287 read taps confirm zero at `1fa30000` and `1fa40000`.
 
 ## Source and media
 
@@ -75,11 +80,12 @@ trigger with invalid raw coordinates; focus loss releases buttons. A mouse
 movement takes aim ownership from the P1 stick until another stick-axis event;
 P2 has its own stick coordinates. Replay accepts raw 16-bit `p1gunx/p1guny` /
 `p2gunx/p2guny`, separate from digital pressed values. Source SPU gain 0.35 is
-routed to ordinary 44.1 kHz SDL playback. Live game sound remains unproven.
+routed to ordinary 44.1 kHz SDL playback. Live source-gain SPU/SDL game sound is validated below.
 
-## Component evidence and unresolved boot
+## Component and authentic player evidence
 
 ```sh
+make -f tests/Makefile.zn-board test
 make -f tests/Makefile.jdredd-zn-bus test sanitize
 make -f Makefile.mac-harness BUILD=build/mac-harness-gnet-gl \
   GPU=vitagl-like DRC=0 HAVE_CHD=1 jdredd-zn-test gnet-frontend-test
@@ -87,36 +93,69 @@ make -f Makefile.mac-harness BUILD=build/mac-harness-primal-neon \
   GPU=neon DRC=0 HAVE_CHD=1 jdredd-zn-test
 ```
 
-O2 and ASan/UBSan pass direct ATA16 lanes, real HDD identify/sector read/write,
-status/alternate IRQ handling, guest byte-transfer mode, ROM protection,
-VBlank multiplexing and exact offscreen boundaries. GL/NEON native MIPS guests
-verify IRQ10, a CHD-backed 512-byte sector, GPU raw coordinate query, repeated
-GP1 clear, preserved latch across GPU reset, active-low mux, source I_STAT mask,
-NVRAM roundtrip and the original SPU DMA timing. Ordinary loading rejects
-synthetic fixture chips. Production SDL tests cover mouse/gamepad aim, viewport,
-offscreen trigger and focus release; existing frontend families still pass.
+O2 and ASan/UBSan cover ATA16 lanes, real HDD identify/sector read/write,
+status/alternate IRQ handling, guest transfer width, ROM protection, VBlank
+multiplexing and offscreen boundaries. Native MIPS guests exercise IRQ10,
+CHD-backed sector data, GPU coordinate query/reset and source I_STAT masks.
+Common no-op read tests cover all byte lanes and 8/16/32-bit widths; writes
+do not create a latch. Production SDL tests cover mouse/stick aim, viewport,
+offscreen trigger, focus release and replay isolation.
 
-These tests do not establish the authentic firmware's full IRQ callback path.
-Its first 256 IDENTIFY words match MAME byte for byte. Both then issue SET
-MULTIPLE (8), SET FEATURES (PIO mode 4) and READ MULTIPLE for sector zero.
-Native asserts IRQ10 and reads status 58, but never reads the sector's data
-port. MAME consumes that data and continues to subsequent sectors. Native
-reports no device/backing errors, so a zero diagnostic flag is not accepted
-as game compatibility. This is the next investigation, before restoring NVRAM,
-calibrating guns and testing a live shooting stage.
+These fixtures are distinct from the authentic player evidence. At 4800 frames,
+both authentic renderers report 28688 HDD sector reads, 3662 real IRQ10 rising
+edges, no disk writes/errors and no board faults. Guns report 4800 rising
+VBlanks, 4686 valid coordinate latches and 114 offscreen samples. Repeated
+outside-screen shots reload ammunition, then valid aim/fire produces score 100
+and leaves health at 100%. A control replay with only the same initial eight
+restore/coin/start rows loses without shooting and reaches a movie screen.
 
-The former native black run stalled in BIOS dispatch; source I_STAT semantics
-now produce a visible loader error, still not a passing run. Temporary ATA/CPU
-traces are preserved under `/tmp/pcsx-boards-mac-20261014`; successful analytical
-and fixture logs and independent MAME snapshots are under
-`artifacts/boards-mac-20261014`. Normal reproduction is:
+A saved 2080-byte AT28C16 data/ID image survives a process restart. A warm
+1800-frame run skips the cold restore prompt and reaches attract mode. A
+4100-frame warm player replay consumes all 236 rows and reaches another player
+shooting scene with score 300 and health 100%. These runs preserve immutable
+ROM/CHD inputs separately from runtime EEPROM and the optional sector overlay.
+
+Interactive GL sends 3538250 stereo frames to SDL at 44100 Hz, peak 7522,
+3743090 nonzero samples and zero audio errors. Every output sample equals the
+same run's captured raw SPU sample multiplied by source gain 35/100, with integer
+truncation toward zero: zero mismatches. Raw SPU peak is 21494 in that interactive
+run; the NEON run is also nonzero. Raw PCM across different pacing/rendering
+runs is not claimed sample-identical.
+
+The shared ZN change passes common O2/ASan/UBSan tests and GL native fixtures
+for Judge, NBA, Primal, CBaj, Atlus, Visco, Raizing, Tecmo and Capcom. Authentic
+NEON regressions retain NBA's player match (114/114 inputs, 2:43 / score 0–2),
+Primal's player combat (80/80) and TPS Link's player race (138/138), all without
+board faults. NBA's original RAX command/DMA/nonzero-DAC counters match its
+previous validation.
+
+## Reproduction and controls
 
 ```sh
-build/mac-harness-primal-neon/pcsx-harness --jdredd-zn roms/prepared/jdredd \
-  --frames 600 --max-blocks 800000000 \
-  --output artifacts/boards-mac-20261014/jdredd-boot-neon.ppm
+build/mac-harness-gnet-gl/pcsx-harness --jdredd-zn roms/prepared/jdredd \
+  --frames 4800 --max-blocks 800000000 --capture-gl \
+  --inputs artifacts/boards-mac-20261014/jdredd-player-inputs.csv \
+  --nvram /tmp/jdredd-cold-player.nv \
+  --output /tmp/jdredd-player-gl.ppm
 ```
 
-The overall Mac board-validation goal remains open. Judge player gameplay,
-nonzero authentic sound, warm-game persistence, physical Vita, authentic DRC
-and whole-machine timing remain unverified.
+Use an absent NVRAM path for this cold replay; it includes the restore START.
+For a restart, reuse the saved NVRAM and `jdredd-warm-player-inputs.csv` with
+4100 frames. NEON uses the same cold replay without `--capture-gl`.
+Interactive Mac: 5/6 insert coins, 1/2 Start, mouse aims, left click/A fires,
+right click/S supplies the second gun button. Aim outside the viewport and fire
+to reload; mapped gamepad sticks also aim. Escape opens pause.
+
+`--capture-gl` is diagnostic-only. If no scene is presented in the last eight
+VBlanks, the harness now captures the last displayed front buffer once on exit.
+This fixes the missing final image for a held Judge scene. Gun samples remain
+raw board inputs and never use GL framebuffer readback.
+
+Evidence is under `artifacts/boards-mac-20261014`, including
+`jdredd-player-validation.json`, GL/NEON captures, passive/warm captures,
+input replays, audio gain checks, MAME read probes and regression logs. Prior
+loader-failure evidence remains historical, superseded by this player pass.
+
+Physical Vita, authentic DRC, a two-player match, operator calibration menus,
+whole-machine save states and full game completion remain unverified. The
+representative validation goal stays open for the remaining board families.

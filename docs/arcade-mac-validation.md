@@ -23,7 +23,7 @@ intermediate results. Physical Vita is outside this Mac pass.
 | Atlus ZN-1 | Heaven's Gate (`hvnsgate`) | Source-audited; native interpreter/GL Jin combat, 198/198 inputs, MC68000/YMZ280B IRQs, mixed SPU/YMZ audio and zero faults; `atlus-zn-mac.md` |
 | Time Warner/Atari ZN-1 | Primal Rage II (`primrag2`) | Source-audited ROM/EEPROM/CHD; native interpreter GL/NEON Arik player combat, 82/82 inputs, VIA HDD/DMA5 into 8 MiB RAM, watchdog, source-gain SPU/SDL sound and zero faults; `primal-zn-mac.md` |
 | Acclaim ZN-1 ROM/sound | NBA Jam Extreme (`nbajamex`) | Native GL/NEON P1 Dallas–Seattle match, 114/114 inputs, live clock 2:43 / score 0–2; passive control stays in help at 3:00. Original ADSP2181/RAX sound, source ROM/SRAM banking, warm NVRAM, four-player controls and timed SPU0.35/RAX1 mix; zero faults/overruns. `nbajam-zn-mac.md` |
-| Acclaim ZN-1 disk | Judge Dredd (`jdredd`) | All 5 original chips and HDD data/metadata SHA1 verified. Native ATA16/IRQ10, gun VBlank mux, GPU query/reset and SDL mouse/gamepad components pass (GL/NEON MIPS, O2/ASan/UBSan). Authentic first-sector IRQ callback fails before game boot (`_GAME.EXE` loader error); player/audio validation remains pending. `jdredd-zn-mac.md` |
+| Acclaim ZN-1 disk | Judge Dredd (`jdredd`) | Original ROM/CHD verified; native interpreter GL/NEON P1 shooting, 238/238 inputs, offscreen reload, score 100 / health 100%, exact SPU0.35 SDL capture, warm EEPROM player restart and zero device faults. Common source no-op read fix resolves loader failure. `jdredd-zn-mac.md` |
 | Metro ZN storage variants | Bust a Move 2 (`bam2`, `bam2a`) | Source has HDD/CD configurations and marks both nonworking with imperfect sound. Complete native integration and game evidence remain pending |
 | Eighting/Raizing ZN | Bloody Roar 2 (`bldyror2`), Brave Blade (`brvblade`) | Both World sets source-audited; native interpreter/GL player combat/shooter gameplay with source MC68000/YMF271, live SPU/YMF audio, portrait rotation and zero device faults; `raizing-zn-mac.md` |
 | Konami System GV common map | Hyper Athlete (`hyperath`) | Authenticated BIOS/EEPROM/CD prepared. Interpreter/GL enters a P1 running event with 110/110 input events, nonzero SPU and no device faults; `konamigv-mac.md`. CDDA mixing and authentic DRC remain pending |
@@ -64,7 +64,10 @@ from the arcade boards.
   source itself exposes no link devices/ports. Primal Rage II now passes actual
   Arik combat in GL/NEON with the original HDD, VIA/DMA5, 8 MiB RAM, six buttons
   and live SPU audio. Its intentional watchdog reset also preserves upper RAM.
-  NBA Jam Extreme now passes native player validation. Proceed to Judge Dredd and remaining families.
+  NBA Jam Extreme and Judge Dredd now pass native player validation. Judge's
+  original cold restore, live P1 shots/offscreen reload, GL/NEON score and warm
+  EEPROM restart pass. Remaining Metro, Konami GV variants/GQ/573/Twinkle,
+  CDDA/DRC and physical link checks retain their separate open rows.
 
 Local evidence is in `artifacts/boards-mac-20261014`; scratch/reference runs are
 under `/tmp/pcsx-boards-mac-20261014`. The user-linked Internet Archive collection

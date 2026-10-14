@@ -1771,6 +1771,8 @@ int main(int argc, char **argv)
     }
     if (selected_board->family==110)
       fprintf(stderr,"Primal controls: 5/6 coin, 1/2 Start, P1 arrows + A/S/D/Space/F/H, P2 I/K/J/L + Z/X/C/V/B/N, gamepad face buttons/shoulders, Escape pause\n");
+    else if (selected_board->family==112)
+      fprintf(stderr,"Judge controls: 5/6 coin, 1/2 Start, mouse aim, left click/A trigger, right click/S second button, shoot outside the viewport to reload, gamepad stick aim, Escape pause\n");
     else fprintf(stderr, "Interactive: 5/6 coin, 1/2 start, arrows/JL move or steer, A/S/D buttons, G-Net mouse/gamepad analog, Escape pause\n");
   }
 #endif
