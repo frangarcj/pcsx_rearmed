@@ -1618,7 +1618,7 @@ int main(int argc, char **argv)
 #ifndef PCSX_SYSTEM_GQ
   if(gq_fixture || (board && board_family==113)){fprintf(stderr,"Rebuild with BOARD=1 and HAVE_CHD=1 for Konami GQ.\n");return 2;}
 #endif
-  if((gv_dead_fixture || gv_simp_fixture || gv_tok_fixture) && (interactive || use_drc || board_test)){usage(argv[0]);return 2;}
+  if(((gv_simp_fixture || gv_tok_fixture) && (interactive || use_drc || board_test)) || (gv_dead_fixture && (interactive || use_drc))){usage(argv[0]);return 2;}
   if(gq_fixture && (interactive || use_drc)){usage(argv[0]);return 2;}
   if (trace_path) {
     trace = fopen(trace_path, "w");

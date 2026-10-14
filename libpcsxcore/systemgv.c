@@ -1393,11 +1393,22 @@ int systemgv_selftest(void)
     psxMemWrite16(&psxRegs, 0x1f80105a, 0x0040);
     CHECK(psxMemRead32(&psxRegs, 0x1f801058) == 0x0040000d);
     CHECK(psxMemRead16(&psxRegs, 0x1f801054) == 5);
+    uint32_t input_address=board.dead?0x1f6800c0u:0x1f100000u;
+    uint32_t button_mask=board.dead?1u:0x10u;
     CHECK(systemgv_set_input("p1button1", 1) == 0);
-    CHECK(systemgv_read(0x1f100000, 4, &input) == 1 && (input & 0x10) == 0);
-    CHECK(systemgv_read(0x9f100000, 4, &value) == 1 && (value & 0x10) == 0);
+    CHECK(systemgv_read(input_address, 4, &input) == 1 && (input & button_mask) == 0);
+    CHECK(systemgv_read(input_address|0x80000000u, 4, &value) == 1 && (value & button_mask) == 0);
     CHECK(systemgv_set_input("p1button1", 0) == 0);
-    CHECK(systemgv_read(0xbf100000, 4, &input) == 1 && (input & 0x10) != 0);
+    CHECK(systemgv_read(input_address|0xa0000000u, 4, &input) == 1 && (input & button_mask) != 0);
+    if(board.dead){
+        CHECK(systemgv_read(0x1f100000,4,&input)==1 && (input&0x7f)==0x7f);
+        CHECK(systemgv_read(0x1f100004,4,&input)==1 && (input&0x7f)==0x7f);
+        CHECK(systemgv_read(0x1f100008,4,&input)==1 && input==UINT32_MAX);
+        CHECK(systemgv_set_input("p1left",1)==-1 && systemgv_set_input("p1button2",1)==-1);
+        CHECK(systemgv_set_input("p2button1",1)==0);
+        CHECK(systemgv_read(0x1f6800c0,4,&input)==1 && input==0xfffd);
+        CHECK(systemgv_set_input("p2button1",0)==0);
+    }
     CHECK(systemgv_read(0x1f10000c, 4, &value) == 0);
     CHECK(dma_words(4, 0x11000000u) == 4);
     CHECK(dma_words(0x00030004u, 0x11000000u) == 12);

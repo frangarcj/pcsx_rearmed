@@ -30,13 +30,13 @@ def main():
 
         def run(inputs=csv):
             return subprocess.run([str(args.harness), '--system-gv-kdeadeye-fixture',
-                                   str(root / 'disc.chd'), '--frames', '2', '--inputs', str(inputs),
+                                   str(root / 'disc.chd'), '--board-test', '--frames', '2', '--inputs', str(inputs),
                                    '--dump-ram', str(root / 'ram.bin'), '--output', str(root / 'out.ppm')],
                                   capture_output=True, text=True, timeout=30)
 
         first = run()
         output = first.stdout + first.stderr
-        assert first.returncode == 0, output
+        assert first.returncode == 0 and 'SystemGV selftest: PASS' in output, output
         words = struct.unpack_from('<11I', (root / 'ram.bin').read_bytes(), 0x100)
         assert words[:5] == (0x4c, 0, 0x1bb, 0xef, 0xfffe), (words, output)
         # Bit 13 of P1 is the original EEPROM DO pin, independently of buttons.
