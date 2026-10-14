@@ -506,9 +506,10 @@ static void poll_interactive_analog(void)
   if(selected_board && selected_board->family==102 && systemgv_has_trackball() &&
       !interactive_replay && interactive_focused && interactive_gv_track_frame!=frame_counter){
     interactive_gv_track_frame=frame_counter;
-    if(interactive_pads[0])systemgv_trackball_delta(
-      -SDL_GetGamepadAxis(interactive_pads[0],SDL_GAMEPAD_AXIS_LEFTX)/512,
-       SDL_GetGamepadAxis(interactive_pads[0],SDL_GAMEPAD_AXIS_LEFTY)/512);
+    for(unsigned p=0;p<systemgv_trackball_players();p++)if(interactive_pads[p])
+      systemgv_trackball_delta_player(p,
+       (systemgv_trackball_reverse_x()?-1:1)*SDL_GetGamepadAxis(interactive_pads[p],SDL_GAMEPAD_AXIS_LEFTX)/512,
+       SDL_GetGamepadAxis(interactive_pads[p],SDL_GAMEPAD_AXIS_LEFTY)/512);
     return;
   }
 #endif
@@ -698,7 +699,7 @@ static void poll_interactive_input(void)
 #ifdef PCSX_SYSTEM_GV
     if(selected_board && selected_board->family==102 && systemgv_has_trackball()){
       if(event.type==SDL_EVENT_MOUSE_MOTION){
-        interactive_gv_mouse_remainder[0]-=event.motion.xrel;
+        interactive_gv_mouse_remainder[0]+=(systemgv_trackball_reverse_x()?-1:1)*event.motion.xrel;
         interactive_gv_mouse_remainder[1]+=event.motion.yrel;
         int dx=(int)interactive_gv_mouse_remainder[0],dy=(int)interactive_gv_mouse_remainder[1];
         interactive_gv_mouse_remainder[0]-=dx;interactive_gv_mouse_remainder[1]-=dy;
@@ -2011,8 +2012,14 @@ int main(int argc, char **argv)
       fprintf(stderr,"Tokimeki controls: 5 coin, arrows + A select, +/- simulated pulse rate, H direct pulse, PageUp/Down GSR, Escape pause\n");
     else
 #endif
-    if (selected_board->family==102)
-      fprintf(stderr,"GV controls: 5/6 coin, 1/2/3/4 Start, A/S/D buttons, Simpsons mouse trackball (source reversed X) and left/right click, gamepad stick, Escape pause\n");
+    if (selected_board->family==102) {
+#ifdef PCSX_SYSTEM_GV
+      if(systemgv_has_trackball())fprintf(stderr,"GV controls: 5/6 coin, 1/2 Start, A/S/D buttons, mouse P1 trackball (%s X), left/right click, %u gamepad trackball(s), Escape pause\n",
+        systemgv_trackball_reverse_x()?"reversed":"normal",systemgv_trackball_players());
+      else
+#endif
+      fprintf(stderr,"GV controls: 5/6 coin, 1/2/3/4 Start, A/S/D buttons, Escape pause\n");
+    }
     else if (selected_board->family==110)
       fprintf(stderr,"Primal controls: 5/6 coin, 1/2 Start, P1 arrows + A/S/D/Space/F/H, P2 I/K/J/L + Z/X/C/V/B/N, gamepad face buttons/shoulders, Escape pause\n");
     else if (selected_board->family==113)

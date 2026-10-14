@@ -129,7 +129,7 @@ def _io_class_facts(game: dict[str, Any]) -> tuple[list[str], list[str]]:
         return (["P1/P2/P3_P4 active-low port words", "MB89371 dual UART", "93C46 EEPROM"], [])
     if state == "konamigv_state" and machine == "btchamp":
         return (["P1/P2 active-low port words", "dual UPD4701A trackballs", "Sharp LH28F400 flash", "MB89371 dual UART", "93C46 EEPROM"],
-                ["dual trackball serial/read interface", "flash command protocol"])
+                [])
     if state == "konamigv_state" and machine == "kdeadeye":
         return (["gun X/Y ports for both players", "buttons port", "Sharp LH28F400 flash", "MB89371 dual UART", "93C46 EEPROM"],
                 ["two lightguns and crosshair inputs", "flash command protocol"])

@@ -6,6 +6,9 @@
 #define systemgq_set_gun_position gq_test_gun
 #define systemgv_has_trackball gv_test_has_trackball
 #define systemgv_trackball_delta gv_test_track_delta
+#define systemgv_trackball_players gv_test_track_players
+#define systemgv_trackball_reverse_x gv_test_track_reverse
+#define systemgv_trackball_delta_player gv_test_track_delta_player
 #define systemgv_has_sensors gv_test_has_sensors
 #define systemgv_sensor_values gv_test_sensor_values
 #define systemgv_set_analog gv_test_sensor_set
@@ -13,7 +16,7 @@
 #include "../frontend/mac_harness.c"
 #undef main
 #include <assert.h>
-static int gv_dx,gv_dy,gv_sensor_mode;static unsigned gv_heart=31,gv_gsr,gv_pulses;
+static int gv_dx,gv_dy,gv_sensor_mode,gv_btc_mode,gv_p2dx,gv_p2dy;static unsigned gv_heart=31,gv_gsr,gv_pulses;
 int gv_test_has_sensors(void){return gv_sensor_mode && selected_board && selected_board->family==102;}
 int gv_test_sensor_values(unsigned *h,unsigned *g){if(!gv_test_has_sensors())return -1;*h=gv_heart;*g=gv_gsr;return 0;}
 int gv_test_sensor_set(const char *name,unsigned value){if(!strcmp(name,"heartbeat")){assert(value<=101);gv_heart=value;}else{assert(!strcmp(name,"gsr") && value<=128);gv_gsr=value;}return 0;}
@@ -21,6 +24,9 @@ int gv_test_sensor_input(const char *name,int down){assert(!strcmp(name,"heartbe
 
 int gv_test_has_trackball(void){return selected_board && selected_board->family==102;}
 int gv_test_track_delta(int x,int y){gv_dx+=x;gv_dy+=y;return 0;}
+unsigned gv_test_track_players(void){return gv_btc_mode?2:1;}
+int gv_test_track_reverse(void){return !gv_btc_mode;}
+int gv_test_track_delta_player(unsigned p,int x,int y){assert(p<gv_test_track_players());if(!p)return gv_test_track_delta(x,y);gv_p2dx+=x;gv_p2dy+=y;return 0;}
 static unsigned gq_x[3],gq_y[3];
 int gq_test_gun(unsigned p,unsigned x,unsigned y){assert(p<3);gq_x[p]=x;gq_y[p]=y;return 0;}
 static unsigned judge_x[2],judge_y[2];
@@ -279,6 +285,20 @@ int main(void)
     for(unsigned n=0;n<300;n++)assert(gv_output[2*n]==-9000 && gv_output[2*n+1]==3000);
     assert(!interactive_audio_error);SDL_DestroyAudioStream(interactive_audio);interactive_audio=NULL;
     puts("GV SDL fractional reversed-X trackball, frame-sampled gamepad, held mouse/focus release and source swapped SPU0.75 stereo PASS");
+    gv_btc_mode=1;interactive_focused=1;interactive_gv_track_frame=~0u;
+    int btc_before_x=gv_dx;
+    frame_counter++;poll_interactive_input();assert(gv_dx==btc_before_x+63);
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_MOUSE_MOTION;e.motion.xrel=2;e.motion.yrel=1;
+    assert(SDL_PushEvent(&e));poll_interactive_input();assert(gv_dx==btc_before_x+65);
+    SDL_JoystickID btc_id=SDL_AttachVirtualJoystick(&desc);assert(btc_id);
+    SDL_Joystick *btc_joy=SDL_OpenJoystick(btc_id);assert(btc_joy);refresh_interactive_gamepads();
+    assert(interactive_pads[1]);
+    assert(SDL_SetJoystickVirtualAxis(btc_joy,SDL_GAMEPAD_AXIS_LEFTX,-32768));
+    assert(SDL_SetJoystickVirtualAxis(btc_joy,SDL_GAMEPAD_AXIS_LEFTY,32767));
+    SDL_UpdateJoysticks();frame_counter++;poll_interactive_input();assert(gv_p2dx==-64 && gv_p2dy==63);
+    SDL_CloseGamepad(interactive_pads[1]);interactive_pads[1]=NULL;
+    SDL_CloseJoystick(btc_joy);SDL_DetachVirtualJoystick(btc_id);gv_btc_mode=0;
+    puts("Beat the Champ SDL unreversed mouse and independent second trackball gamepad PASS");
     gv_sensor_mode=1;interactive_focused=1;
     key(SDL_SCANCODE_EQUALS,1);key(SDL_SCANCODE_EQUALS,0);assert(gv_heart==41);
     key(SDL_SCANCODE_MINUS,1);key(SDL_SCANCODE_MINUS,0);assert(gv_heart==31);

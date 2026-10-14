@@ -51,7 +51,7 @@ class KonamiGVProfilesTest(unittest.TestCase):
 
     def test_unsupported_game_io_and_bad_dump_are_explicit(self) -> None:
         self.assertEqual([], self.profiles["hyperath"]["unsupported_game_io"])
-        self.assertTrue(any("trackball" in item for item in self.profiles["btchamp"]["unsupported_game_io"]))
+        self.assertEqual([], self.profiles["btchamp"]["unsupported_game_io"])
         self.assertTrue(any("printer" in item.lower() for item in self.profiles["tmosh"]["unsupported_game_io"]))
         self.assertTrue(any("lightgun" in item.lower() for item in self.profiles["kdeadeye"]["unsupported_game_io"]))
         bad = {profile["set"] for profile in self.registry["profiles"]

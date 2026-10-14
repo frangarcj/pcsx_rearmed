@@ -92,10 +92,7 @@
         "MB89371 dual UART",
         "93C46 EEPROM"
       ],
-      "unsupported_game_io": [
-        "dual trackball serial/read interface",
-        "flash command protocol"
-      ],
+      "unsupported_game_io": [],
       "rom_regions": [
         {
           "tag": "maincpu:rom",
