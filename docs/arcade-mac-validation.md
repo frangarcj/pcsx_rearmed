@@ -9,7 +9,7 @@ intermediate results. Physical Vita is outside this Mac pass.
 
 | Family / configuration | Representatives | Current runtime evidence |
 | --- | --- | --- |
-| Namco System 12 | Soul Calibur, Tekken 3/Tag; special gun/JVS/link/CDXA cabinets | Existing bounded Mac gameplay; see `system12.md` and `system12-special-mac.md` |
+| Namco System 12 | Soul Calibur, Tekken 3/Tag, Ehrgeiz; special gun/JVS/link/CDXA cabinets | Existing bounded Mac gameplay. Ehrgeiz World now passes interpreter GL/NEON Stage 1 player combat, 250/250 events, identical RAM/C352 WAV and zero unmapped/H8 unsupported operations; `ehrgeiz-mac.md`. See also `system12.md` and `system12-special-mac.md` |
 | Namco System 11 | Tekken, Tekken 2, Soul Edge | Existing bounded Mac interpreter/NEON/GL gameplay; `system11-mac.md` |
 | Namco System 10 MEM(M)/MEM(N) | Mr. Driller 2/G, Gamshara | Existing bounded Mac gameplay and SPU capture; `system10-mac.md` |
 | Capcom ZN-1/ZN-2 | Street Fighter EX, Star Gladiator, Rival Schools | Existing bounded GL gameplay and QSound; `capcom-zn-mac.md` |
@@ -31,6 +31,7 @@ intermediate results. Physical Vita is outside this Mac pass.
 | Konami System GQ | Crypt Killer (`cryptklr`) | Original BIOS/sound/PCM ROMs, source EEPROM defaults and HDD CHD fully audited/prepared. Native interpreter GL/NEON P1 gameplay, 382/382 events, hearts/enemy/empty-ammo prompt, real HDD loads and zero faults. GL/NEON RAM and both raw/SDL 48 kHz dual-K054539 WAVs are byte-identical. Separate warm GL restart consumes 384/384 events, refills ammo and retains EEPROM. Scored hits, calibration and three-player coverage remain pending; `konamigq-mac.md` |
 | Konami System 573 | ROM/flash and analog/digital sound generations | Source devices/components only; representative media, complete board and runtime pending |
 | Konami Twinkle | beatmania IIDX | BIOS archive available; game media, native PSX integration and runtime pending |
+| Retail PlayStation | Ehrgeiz PAL (`SLES02111`) | Native real-BIOS/CD interpreter GL/NEON intro and player combat, 414/414 events, identical 2 MiB RAM/SPU WAV. Quest, memory-card/warm checks, live SDL sound and authentic DRC remain pending; `ehrgeiz-mac.md` |
 
 The pinned `zn.cpp` inventory also contains the distinct Sony ZN daughterboards
 and storage/sound variants listed above. Passing Capcom or Raizing alone does
