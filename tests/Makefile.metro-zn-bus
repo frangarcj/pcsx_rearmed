@@ -1,0 +1,13 @@
+.DEFAULT_GOAL := test
+CC ?= cc
+BUILD ?= build/metro-zn-bus-tests
+OPT ?= -O2 -g
+CFLAGS := -std=c99 $(OPT) -Wall -Wextra -Werror
+.PHONY: test sanitize
+$(BUILD)/test-metro: tests/test_metro_zn_bus.c libpcsxcore/arcade/metro_zn_bus.c libpcsxcore/arcade/metro_zn_bus.h
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) tests/test_metro_zn_bus.c libpcsxcore/arcade/metro_zn_bus.c -o $@
+test: $(BUILD)/test-metro
+	$(BUILD)/test-metro
+sanitize:
+	$(MAKE) -f tests/Makefile.metro-zn-bus BUILD=$(BUILD)/sanitize OPT='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' test
