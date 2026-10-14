@@ -365,4 +365,19 @@ $(BUILD)/test-mac-gnet-input: $(BUILD)/tests/test_mac_gnet_input.o $(filter-out 
 gnet-frontend-test: $(BUILD)/test-arcade-audio-mixer $(BUILD)/test-mac-gnet-input
 	$(BUILD)/test-arcade-audio-mixer
 	$(BUILD)/test-mac-gnet-input
+
+ifeq ($(GPU),vitagl-like)
+$(BUILD)/tests/test_mac_gp0_control.o: tests/test_mac_gp0_control.c plugins/gpu_vita_ctr/gpulib_if.c $(BUILD)/compile-flags.txt
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+$(BUILD)/tests/mac_gp0_harness.o: frontend/mac_harness.c $(BUILD)/compile-flags.txt
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -Dmain=gp0_harness_original_main -MMD -MP -c $< -o $@
+GP0_TEST_OBJECTS = $(filter-out $(BUILD)/plugins/gpu_vita_ctr/gpulib_if.o $(BUILD)/frontend/mac_harness.o,$(OBJECTS))
+$(BUILD)/test-mac-gp0-control: $(BUILD)/tests/test_mac_gp0_control.o $(BUILD)/tests/mac_gp0_harness.o $(GP0_TEST_OBJECTS) $(SHELF_LIB)
+	$(CXX) -arch arm64 -Wl,-dead_strip -o $@ $(BUILD)/tests/test_mac_gp0_control.o $(BUILD)/tests/mac_gp0_harness.o $(GP0_TEST_OBJECTS) -lz -lm $(GPU_LIBS)
+.PHONY: gp0-control-test
+gp0-control-test: $(BUILD)/test-mac-gp0-control
+	$(BUILD)/test-mac-gp0-control
+endif
 endif

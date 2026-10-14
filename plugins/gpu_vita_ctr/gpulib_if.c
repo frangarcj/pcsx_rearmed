@@ -780,6 +780,16 @@ static void submit_gp0_packet(const uint32_t *words, int count, const uint32_t *
     if (!s_context_ready || !words || count <= 0 || count > 255)
         return;
 
+    /* GP0 control words are not PsyCross retail primitives. In particular,
+     * GP0(01h) clears the PSX texture cache in one word, while the native
+     * parser uses 01h for a five-word DR_MOVE. Forwarding the one-word packet
+     * reads its nonexistent rectangle and can write outside VRAM. This
+     * backend maintains coherent texture caches on VRAM changes, so consume
+     * the cache-clear/NOP/IRQ words as gpulib's direct control path does.
+     * The only drawable GP0 command in this group is 02h (VRAM fill). */
+    if ((LE32TOH(words[0]) >> 24) < 0x20 && (LE32TOH(words[0]) >> 24) != 0x02)
+        return;
+
     packet[0] = ((uint32_t)count << 24) | 0x00ffffffu;
     memcpy(packet + 1, words, (size_t)count * sizeof(uint32_t));
     normalize_type1_packet(packet + 1);
