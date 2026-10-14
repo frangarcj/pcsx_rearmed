@@ -18,7 +18,8 @@ no-ops at `0x1f198000` and `0x1f1a0000`, six raw lightgun axes at
 `0x1f300000`, DUART at `0x1f680000`, and watchdog write no-op at `0x1f780000`.
 Gun and switch ports retain all 32 input bits, including gun X bit 8 in the
 second byte. Inactive byte lanes of the NCR, PCM RAM, MIRAC and DUART delegates
-read zero, matching the pinned default-zero program map. Sound-side unused
+read zero, matching the pinned default-zero program map. The source NCR map
+provides no read delegates for registers 9, 10 and 15; these also read zero. Sound-side unused
 lanes and unmapped reads also return zero; the 16-bit DSP status is 0005 after
 reset. Independent MAME CPU-space probes cover these values. These bus contracts
 are tested separately from synthetic sound/DMA guests and authentic game boot.

@@ -168,9 +168,10 @@ static void mmio_width_mask_tests() {
   ncr_write(b, 8, 7);
   ncr_write(b, 9, 0x35);
   assert(read_bus(b, kNcr + 16, 1, &value) && value == 7);
-  assert(read_bus(b, kNcr + 16, 2, &value) && value == 0xff07);
+  assert(read_bus(b, kNcr + 16, 2, &value) && value == 0x0007);
   assert(read_bus(b, kNcr + 16, 4, &value));
-  assert(value == 0xffffff07); // NCR register 9 is write-only on this map.
+  assert(value == 0x00000007); // Source default-zero lanes and write-only reg 9.
+  assert(read8(b, kNcr + 20) == 0 && read8(b, kNcr + 30) == 0);
   write_bus(b, kNcr + 16, 4, 0x00aa00cc, 0x00ff0000);
   assert(ncr_read(b, 8) == 7); // lane 2 reaches write-only register 9.
   write_bus(b, kNcr + 16, 4, 0x000000f1, 0);

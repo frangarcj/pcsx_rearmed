@@ -893,7 +893,9 @@ extern "C" int konamigq_read(konamigq_t *b, uint32_t address, unsigned width,
     const uint32_t a = address + lane;
     uint8_t byte = open_bus();
     if (a >= kNcrAddress && a < kNcrAddress + 0x20 && !(a & 1)) {
-      byte = ncr53cf96_read(b->ncr, (a - kNcrAddress) >> 1);
+      const unsigned reg = (a - kNcrAddress) >> 1;
+      if (reg != 9 && reg != 10 && reg != 15)
+        byte = ncr53cf96_read(b->ncr, reg);
     } else if (a >= kMiracAddress && a < kMiracAddress + 0x20 && !(a & 1)) {
       byte = k056800_host_read(&b->mirac, (a - kMiracAddress) >> 1);
     } else if (a >= 0x1f200000 && a < 0x1f240000) {

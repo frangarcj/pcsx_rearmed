@@ -410,7 +410,7 @@ bool byte_selected(unsigned width, uint32_t mask, unsigned lane) {
   return (mask & (0xffu << (lane * 8))) != 0;
 }
 
-uint8_t open_bus_byte() { return 0xff; }
+uint8_t open_bus_byte() { return 0; }
 bool in_range(uint32_t address, unsigned width, uint32_t start,
               uint32_t bytes) {
   const uint64_t end = uint64_t(address) + width;
@@ -637,7 +637,10 @@ extern "C" int konamigv_read(KonamiGV *b, uint32_t address, unsigned width,
     if (at >= kNcrBase && at < kNcrBase + 0x20) {
       const uint32_t offset = at - kNcrBase;
       if (!(offset & 1)) {
-        byte = ncr53cf96_read(b->ncr, offset >> 1);
+        const unsigned reg = offset >> 1;
+        // The source map has no read delegates for clock/test/FIFO-align.
+        if (reg != 9 && reg != 10 && reg != 15)
+          byte = ncr53cf96_read(b->ncr, reg);
         handled = true;
       }
     } else if (at >= kInputBase && at < kInputBase + 12) {

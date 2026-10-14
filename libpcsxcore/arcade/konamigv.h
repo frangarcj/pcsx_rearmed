@@ -86,7 +86,7 @@ int konamigv_reset(KonamiGV *board);
 /* Physical 32-bit-address-space transactions. Width is 1, 2, or 4 bytes;
  * mem_mask has the conventional PSX bit-lane mask. Unmapped transactions
  * return 0; handled transactions return 1. Reads fill inactive/open lanes
- * with ones. */
+ * with the source program map's default zero. */
 int konamigv_read(KonamiGV *board, uint32_t address, unsigned width,
                   uint32_t *value);
 int konamigv_write(KonamiGV *board, uint32_t address, unsigned width,

@@ -223,6 +223,7 @@ void test_ports_masks_eeprom_irq_guest_sound(Context &ctx) {
   assert(input == 0x000001a3);
   assert(read8(b, kGunX1 + 1) == 1);
   assert(read8(b, kGunX1 + 2) == 0 && read8(b, kGunX1 + 3) == 0);
+  assert(read8(b, kNcr + 18) == 0 && read8(b, kNcr + 20) == 0 && read8(b, kNcr + 30) == 0);
   assert(konamigq_write(b, 0x1f300000, 4, 0x12345678, UINT32_MAX));
   assert(konamigq_read(b, 0x1f300000, 4, &input) && input == 0x00340078);
   assert(read8(b, 0x1f300001) == 0);

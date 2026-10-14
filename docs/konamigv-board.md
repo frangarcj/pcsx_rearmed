@@ -14,6 +14,12 @@ two DUART windows at 0x1f680000, and the watchdog write no-op at
 16-, and 32-bit widths and honor byte write masks. No game-specific flash,
 gun, trackball, printer, or sensor behavior is implied by this common adapter.
 
+Inactive delegate byte lanes read zero, matching the pinned PSX program map.
+NCR clock, test and FIFO-align registers (9, 10, 15) have write-only delegates
+and also read zero at this board aperture. The standalone NCR register API
+retains its distinct unmapped-register behavior. Independent MAME CPU-space
+probes and component regressions cover these bus contracts.
+
 DMA channel 5 stores the requested buffer direction, byte address, and
 n_size * 4 remaining count. It transfers bytes only while NCR DRQ is asserted;
 a request can remain pending until a later DRQ edge and can be advanced in
