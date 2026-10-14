@@ -202,3 +202,21 @@ unresolved accesses. Disabling HD does not resolve the black readback.
 Evidence is retained in ignored
 `artifacts/boards-mac-20261014/ehrgeiz/issue8-vita3k`; the isolated host/media
 and intermediate files are under `/tmp/pcsx-ehrgeiz-vita3k-20261014`.
+
+## Shared GP0 bridge regression after Dead Eye
+
+A later original Dead Eye scored-hit/reload replay exposed an independent
+High Octane SIGBUS: one-word GP0 `01h` cache clear reached the native retail
+five-word `DR_MOVE` parser and used nonexistent rectangle words. The gpulib
+bridge now consumes GP0 control words separately; it retains VRAM fill and
+drawing, with no added framebuffer readback. Its regression fails against
+the old bridge and passes after the fix. See `kdeadeye-mac.md` for the actual
+crash and scored GL/NEON comparison.
+
+After this shared change, the exact audited USA disc and real BIOS complete
+a fresh Mac HD interpreter run: 6200 frames, 414/414 inputs, Godhand/Inoba
+combat, 4554860 SPU stereo frames at 44100 Hz, peak 32768 and clean shutdown.
+This regression uses GPU_worker=0. It does not replace the earlier GPU worker,
+DRC and Vita3K checks, and does not establish that issue 8's physical Vita
+crash has the same cause or is fixed. Evidence is retained with the Dead Eye
+run under `artifacts/boards-mac-20261014/kdeadeye`.
