@@ -26,8 +26,8 @@ The common `konamigv_state` class supplies the shared SCSI/DMA and common memory
 
 | MAME set(s) | State/config | Source-declared extra I/O | Native adapter status |
 | --- | --- | --- | --- |
-| `hyperath`, `lacrazyc`, `naganoj`, `nagano98`, `powyak96`, `susume`, `weddingr` | `konamigv_state` / `konamigv` | Common P1/P2/P3_P4 ports | Native loader/common-board integration; generated MIPS fixtures pass, authentic games unverified |
-| `btchamp` | `konamigv_state` / `btchamp` | Two UPD4701A trackballs, serial reads/reset, LH28F400 flash | Trackball and flash command interfaces remain unsupported |
+| `hyperath`, `lacrazyc`, `naganoj`, `nagano98`, `powyak96`, `susume`, `weddingr` | `konamigv_state` / `konamigv` | Common P1/P2/P3_P4 ports | Native loader/common-board integration and generated MIPS fixtures. Hyper Athlete has a bounded original player run (`konamigv-mac.md`); the other common profiles remain unverified |
+| `btchamp` | `konamigv_state` / `btchamp` | Two UPD4701A trackballs, serial reads/reset, LH28F400 flash | Native Mac flash/dual-trackball path. TEST initialization matches MAME flash byte for byte; GL/NEON P1 football/ball flight, 597/597 events and zero faults (`btchamp-mac.md`). Source NOT_WORKING/BAD_DUMP flags remain |
 | `kdeadeye` | `konamigv_state` / `kdeadeye` | Two lightguns, buttons, LH28F400 flash | Lightgun and flash command interfaces remain unsupported; MAME marks the game not working |
 | `tmosh`, `tmoshs`, `tmoshsp`, `tmoshspa` | `tokimeki_state` / `tmosh` | Sensor serial protocol, heartbeat/GSR inputs, printer state, printer timing/video | Native `tmoshs`/`tmoshsp` sensor and virtual-printer integration. Original `tmoshs` player and operator test print exercised; Plus game, base/alternate profiles and final report remain pending (`tokimeki-mac.md`). `tmoshspa` is marked not working |
 | `simpbowl` | `simpbowl_state` / `simpbowl` | Four Fujitsu flash devices and trackball | Native Mac flash/trackball integration, original installation matches MAME; bounded GL/NEON player bowling with pins down verified (`simpbowl-mac.md`) |
