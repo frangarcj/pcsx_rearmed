@@ -14,13 +14,13 @@ def generate(source):
     for name in tps.SETS:
         romset,_,config=tps.source_profile(source,name)
         checks=[]
-        for i,tag in enumerate(tps.TAGS):
+        for i,tag in enumerate(tps.media_tags(name)):
             for op in romset.regions[tag].operations:
                 spec=next(s for s in romset.files if s.index==op.file_index)
-                checks.append(f'{{{[0,1,5,6][i]}, {op.offset:#x}, {op.length:#x}, {op.group}, {op.stride}, {int(op.swap)}, 0x{spec.crc32}u}}')
+                checks.append(f'{{{[0,1,5,6,3][i]}, {op.offset:#x}, {op.length:#x}, {op.group}, {op.stride}, {int(op.swap)}, 0x{spec.crc32}u}}')
         out += [f'static const TpsMediaCheck tps_media_{name}[] = {{',',\n'.join(checks),'};']
         fields=[name,config['mame_parent'],'coh1002m','fixed','COH1002M','TPS','glpracr2']
-        rows.append('{'+', '.join(json.dumps(f) for f in fields)+', 67737600, 53693175, 0x400000, 0x200000, 0x80000, 0x2800000, 0, 0, 0}')
+        rows.append('{'+', '.join(json.dumps(f) for f in fields)+', 67737600, 53693175, 0x400000, 0x200000, 0x80000, 0x2800000, 0, '+('0x40000' if name == 'glpracr2l' else '0')+', 0}')
     out += ['static const ZnProfile tps_profiles[] = {',',\n'.join(rows),'};']
     out += ['static const TpsMediaCheck *const tps_media[] = {'+','.join(f'tps_media_{n}' for n in tps.SETS)+'};',
             'static const size_t tps_media_count[] = {'+','.join(f'sizeof(tps_media_{n}) / sizeof(tps_media_{n}[0])' for n in tps.SETS)+'};','']

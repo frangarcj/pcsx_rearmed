@@ -31,7 +31,9 @@ fetches. Source-declared unpopulated ROM bytes retain zero padding.
 
 `prepare_tecmo_tps_board.py` verifies the 13 source ROMs by size, CRC and SHA1,
 preserves parent archive lookup and assembles the interleaved program ROMs.
-Only `glpracr2` and `glpracr2j` common-map profiles are currently admitted.
+`glpracr2` and `glpracr2j` use the common map. `glpracr2l` additionally requires
+its separately audited Z80 ROM and runs the source-defined link CPU; see
+[its local player validation and transport limits](tecmo-tps-link-mac.md).
 The exact unused `upd78081` NO_DUMP declaration is omitted because this source
 machine configures `znmcu_device`; no replacement firmware is written.
 The native loader checks the exact 14-key configuration, source-sized regions,
@@ -86,7 +88,9 @@ rejects live inputs, NVRAM, sound capture and DRC. Its generated media are never
 accepted by the normal loader. Executed MIPS reads and executes two different
 ROM banks, exercises an aligned 32-bit write reaching selector lane 2, checks
 all ROM aliases, the last bank, read-only ROM, source padding and idle SIO.
-The normal loader rejects those synthetic ROMs and unsupported link profiles.
+The normal loader rejects those synthetic ROMs. The link fixture requires its
+separate ROM and executes real Z80 RAM/I/O while retaining the source's empty
+port map; cabinet communication is not invented.
 GPU upper-VRAM and source SPU DMA vectors also pass. Capcom's existing MIPS,
 SIO/MCU/IRQ, EEPROM and QSound tests, G-Net SDL controls/mixer tests and the
 no-board console smoke remain passing. A separate `GPU=neon HAVE_CHD=0` build
@@ -95,8 +99,8 @@ is compiled only when CHD support is enabled, so ROM-only TPS can link without
 their disk backends.
 
 The Japanese clone is source-admitted but not yet a gameplay representative.
-Cool Boarders Arcade Jam adds Z80/YMZ280B and two FIFOs; Gallop Racer 2 Link adds
-a separate Z80 link CPU. Those configurations require their own devices and
-runtime evidence. This common-map pass does not validate them. The next board
-is Taito FX1Z with RayStorm and G-Darius Ver.2. See
+Cool Boarders Arcade Jam has [separate player/sound coverage](cbaj-tps-mac.md).
+Gallop Racer 2 Link has [local player coverage](tecmo-tps-link-mac.md) with its
+extra Z80; cabinet-to-cabinet transport remains unimplemented. This common-map
+pass alone does not validate those devices. See
 [the full board matrix](arcade-mac-validation.md).

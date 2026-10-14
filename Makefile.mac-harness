@@ -87,7 +87,7 @@ SOURCES += libpcsxcore/system12.c libpcsxcore/system11.c libpcsxcore/system10.c 
   libpcsxcore/arcade/mb89371.c libpcsxcore/arcade/i8251.c \
   libpcsxcore/arcade/eeprom93c46.c
 CFLAGS += -I$(BUILD)/gnet-generated -Ilibpcsxcore/arcade/tms57002 -I$(BUILD)/m68000-generated -Ilibpcsxcore/arcade/m68000
-SOURCES += libpcsxcore/arcade/zsg2.c libpcsxcore/arcade/fifo7200.c
+SOURCES += libpcsxcore/arcade/zsg2.c libpcsxcore/arcade/fifo7200.c libpcsxcore/arcade/tecmo_link.c
 CXXSOURCES := libpcsxcore/arcade/cbaj_sound.cpp libpcsxcore/arcade/ymz280b.cpp libpcsxcore/arcade/atlus_sound.cpp libpcsxcore/arcade/ymf271.cpp libpcsxcore/arcade/raizing_sound.cpp libpcsxcore/arcade/m68000.cpp \
  libpcsxcore/arcade/gnet_zoom.cpp libpcsxcore/arcade/rf5c296.cpp \
  libpcsxcore/arcade/gnet_pccard.cpp \
@@ -307,6 +307,7 @@ devices-test: $(BUILD)/test-nor-flash $(BUILD)/test-c352 $(BUILD)/test-serial $(
 	$(MAKE) -f tests/Makefile.nscsi-cd BUILD=$(BUILD)/nscsi-cd-tests test
 	$(MAKE) -f tests/Makefile.fifo7200 BUILD=$(BUILD)/fifo7200-tests test
 	$(MAKE) -f tests/Makefile.cbaj-sound BUILD=$(BUILD)/cbaj-sound-tests CXX='$(CXX)' CC='$(CC)' test
+	$(MAKE) -f tests/Makefile.tecmo-link BUILD=$(BUILD)/tecmo-link-tests CXX='$(CXX)' CC='$(CC)' test
 	$(MAKE) -f tests/Makefile.atlus-sound BUILD=$(BUILD)/atlus-sound-tests CXX='$(CXX)' test
 	$(MAKE) -f tests/Makefile.ymz280b BUILD=$(BUILD)/ymz280b-tests CXX='$(CXX)' test
 	$(MAKE) -f tests/Makefile.raizing-sound BUILD=$(BUILD)/raizing-sound-tests CXX='$(CXX)' test

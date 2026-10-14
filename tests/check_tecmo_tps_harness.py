@@ -43,6 +43,8 @@ def main():
         addiu(9,0);store(9,8,6,1);lui(11,0xbf00);addiu(9,0x1234);store(9,11,0)
         load(9,11,0);store(9,10,0x114);lui(11,0xbf20);load(9,11,0);store(9,10,0x118)
         lui(11,0x1f80);load(9,11,0x1054);store(9,10,0x11c)
+        lui(8,0x1fa2);addiu(9,0x55);store(9,8,0,1);store(9,8,0,1)
+        addiu(9,0);store(9,8,0,1);addiu(9,0x55);store(9,8,0,1)
         emit(0x1000ffff,0)
         bios=bytearray(0x80000);struct.pack_into('<'+'I'*len(code),bios,0,*code);(root/'main.bin').write_bytes(bios)
         banked=bytearray(0x2800000)
@@ -55,17 +57,31 @@ def main():
         assert rejected.returncode!=0 and 'source ROM CRC mismatch' in rejected.stdout,rejected.stdout
         result=run(a.harness,root,True,root/'ram.bin')
         assert result.returncode==0,result.stdout
-        tokens=['SystemZN selftest: PASS','TecmoTPS SPU DMA fixture: PASS','bank=0 bank_writes=4 faults=0 media=SYNTHETIC_FIXTURE']
+        tokens=['SystemZN selftest: PASS','TecmoTPS SPU DMA fixture: PASS','bank=0 bank_writes=4 faults=0 media=SYNTHETIC_FIXTURE',
+                'coin_counters=2/2/2/2 lockouts=UNWIRED']
         assert all(token in result.stdout for token in tokens),result.stdout
         ram=(root/'ram.bin').read_bytes()
         expected=(0xff,0x87654321,0x87654321,0xaabbccdd,0x13579bdf,0x12345678,0,5)
         actual=struct.unpack_from('<8I',ram,0x100)
         assert actual==expected,(actual,expected,result.stdout)
         assert struct.unpack_from('<2I',ram,0x120)==(0x44,0x77),result.stdout
-        # An unsupported daughterboard cannot use the common-map fixture path.
-        (root/'board.ini').write_text((root/'board.ini').read_text().replace('mame_set=glpracr2\n','mame_set=glpracr2l\n'))
+        # Link hardware requires its own audited full ROM, never silently omitted.
+        config.update(mame_set='glpracr2l',mame_parent='glpracr2')
+        (root/'board.ini').write_text(''.join(f'{k}={v}\n' for k,v in config.items()))
+        rejected=run(a.harness,root,True)
+        assert rejected.returncode!=0 and 'linkcpu.bin' in rejected.stdout,rejected.stdout
+        link=bytearray(0x40000)
+        program=bytes([0xf3,0x31,0xfe,0xff,0x3e,0x5a,0x32,0,0x80,0xd3,0x90,0xdb,0x91,0x32,1,0x80,0xfb,0x76])
+        link[:len(program)]=program;(root/'linkcpu.bin').write_bytes(link)
+        linked=run(a.harness,root,True,root/'link-ram.bin')
+        assert linked.returncode==0 and 'IO_reads=1 IO_writes=1 last_ports=91/90 last_write=5a RAM8000=5a map=SOURCE_UNMAPPED transport=UNIMPLEMENTED' in linked.stdout,linked.stdout
+        assert 'unsupported=0 faults=0' in linked.stdout and 'IRQ=0 NMI=0' in linked.stdout,linked.stdout
+        assert struct.unpack_from('<8I',(root/'link-ram.bin').read_bytes(),0x100)==expected,linked.stdout
+        (root/'board.ini').write_text((root/'board.ini').read_text().replace('mame_set=glpracr2l\n','mame_set=cbaj\n'))
         rejected=run(a.harness,root,True)
         assert rejected.returncode!=0 and 'invalid or unsupported Sony ZN profile' in rejected.stdout,rejected.stdout
+        print(linked.stdout,end='')
+        print('Tecmo TPS native link fixture: PASS real_Z80=1 required_ROM=1 original_main_map=1 source_unmapped_ports=1 no_fabricated_transport=1')
         print(result.stdout,end='');print('Tecmo TPS native MIPS: PASS bank8MiB=1 executed_bank_switch=1 aliases=1 write32_lane2=1 last_bank=1 ROM_readonly=1 padding=1 SIO_idle=5 normal_loader_rejects_synthetic=1')
 
 if __name__=='__main__':main()

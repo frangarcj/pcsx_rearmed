@@ -1,0 +1,34 @@
+CC ?= clang
+CXX ?= clang++
+BUILD ?= build/tecmo-link-tests
+CFLAGS := -std=c99 -Wall -Wextra -Ilibpcsxcore/arcade
+CXXFLAGS := -std=c++17 -Wall -Wextra -Wno-sign-compare -Wno-unused-but-set-variable -Ilibpcsxcore/arcade
+SAN := -O1 -fsanitize=address,undefined -fno-omit-frame-pointer
+HEADERS := libpcsxcore/arcade/tecmo_link.h libpcsxcore/arcade/z80.h
+.PHONY: test sanitize
+$(BUILD)/link.o: libpcsxcore/arcade/tecmo_link.c $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -O2 -c $< -o $@
+$(BUILD)/test.o: tests/tecmo_link_standalone.c $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -O2 -c $< -o $@
+$(BUILD)/link-san.o: libpcsxcore/arcade/tecmo_link.c $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(SAN) -c $< -o $@
+$(BUILD)/test-san.o: tests/tecmo_link_standalone.c $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(SAN) -c $< -o $@
+$(BUILD)/z80.o: libpcsxcore/arcade/z80.cpp $(wildcard libpcsxcore/arcade/z80*.inc) libpcsxcore/arcade/z80.h
+	@mkdir -p $(BUILD)
+	$(CXX) $(CXXFLAGS) -O2 -c $< -o $@
+$(BUILD)/z80-san.o: libpcsxcore/arcade/z80.cpp $(wildcard libpcsxcore/arcade/z80*.inc) libpcsxcore/arcade/z80.h
+	@mkdir -p $(BUILD)
+	$(CXX) $(CXXFLAGS) $(SAN) -c $< -o $@
+$(BUILD)/test-tecmo-link: $(BUILD)/z80.o $(BUILD)/link.o $(BUILD)/test.o
+	$(CXX) $^ -o $@
+$(BUILD)/test-tecmo-link-sanitize: $(BUILD)/z80-san.o $(BUILD)/link-san.o $(BUILD)/test-san.o
+	$(CXX) $(SAN) $^ -o $@
+test: $(BUILD)/test-tecmo-link
+	$<
+sanitize: $(BUILD)/test-tecmo-link-sanitize
+	ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $<

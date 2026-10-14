@@ -15,6 +15,7 @@
 #include "arcade/raizing_sound.h"
 #include "arcade/atlus_sound.h"
 #include "arcade/cbaj_sound.h"
+#include "arcade/tecmo_link.h"
 #include <math.h>
 #include "gpu_vram.h"
 #include <inttypes.h>
@@ -51,6 +52,7 @@ typedef struct SystemZn {
     int raizing;
     int visco, atlus, cbaj;
     CbajSound *cbaj_sound;
+    TecmoLink *tecmo_link;
     AtlusSound *atlus_sound;
     uint64_t coin_count[4];
     uint8_t coin_lockout;
@@ -430,7 +432,11 @@ static int load_board(const char *directory, int family, int synthetic)
             board.sizes[4], &board, raizing_pcm};
         if (raizing_sound_create(&cfg, &board.raizing_sound)) goto bad;
     } else if (board.tps) {
+        if (board.profile->audio_size &&
+            load_region(directory, "linkcpu.bin", 3, board.profile->audio_size)) goto bad;
         if (!synthetic && validate_tps_media()) goto bad;
+        if (board.profile->audio_size &&
+            tecmo_link_create(board.regions[3], board.sizes[3], &board.tecmo_link)) goto bad;
     } else {
         if (load_region(directory, files[2], 2, board.profile->country_size) ||
             load_region(directory, files[3], 3, board.profile->audio_size) ||
@@ -561,6 +567,7 @@ void systemzn_unload(void)
         }
     }
     pcm_wav_close(&board.wav);
+    tecmo_link_destroy(board.tecmo_link);
     cbaj_sound_destroy(board.cbaj_sound);
     atlus_sound_destroy(board.atlus_sound);
     raizing_sound_destroy(board.raizing_sound);
@@ -683,7 +690,11 @@ void systemzn_reset(void)
         if (cbaj_sound_reset(board.cbaj_sound)) board.faults |= 8;
         CbajSoundStatus status; cbaj_sound_status(board.cbaj_sound, &status); board.sound_cycles = status.cpu_cycles;
     }
-    board.qsound_fraction = 0; if (!board.raizing && !board.atlus && !board.cbaj) board.sound_cycles = 0;
+    if (board.tecmo_link) {
+        if (tecmo_link_reset(board.tecmo_link)) board.faults |= 8;
+        TecmoLinkStatus status; tecmo_link_status(board.tecmo_link, &status); board.sound_cycles = status.cycles;
+    }
+    board.qsound_fraction = 0; if (!board.raizing && !board.atlus && !board.cbaj && !board.tecmo_link) board.sound_cycles = 0;
     board.frames = 0;
     board.last_psx_cycle = psxRegs.cycle;
     map_bankedroms();
@@ -700,8 +711,8 @@ int systemzn_sync(u32 psx_cycle)
     if (elapsed) {
         uint64_t numerator;
         sound_cycles = 0;
-        if (!board.tps && !board.visco) {
-            numerator = (uint64_t)elapsed * (board.cbaj ? CBAJ_SOUND_CLOCK : board.atlus ? ATLUS_SOUND_CLOCK : board.raizing ? RAIZING_SOUND_CLOCK : CAPCOM_ZN_SOUND_CLOCK_HZ) + board.qsound_fraction;
+        if ((!board.tps && !board.visco) || board.tecmo_link) {
+            numerator = (uint64_t)elapsed * (board.tecmo_link ? TECMO_LINK_CLOCK : board.cbaj ? CBAJ_SOUND_CLOCK : board.atlus ? ATLUS_SOUND_CLOCK : board.raizing ? RAIZING_SOUND_CLOCK : CAPCOM_ZN_SOUND_CLOCK_HZ) + board.qsound_fraction;
             sound_cycles = numerator / PSXCLK;
             board.qsound_fraction = numerator % PSXCLK;
         }
@@ -711,6 +722,7 @@ int systemzn_sync(u32 psx_cycle)
         board.sio_cycles += numerator / PSXCLK;
         board.sio_fraction = numerator % PSXCLK;
         board.sound_cycles += sound_cycles;
+        if (board.tecmo_link && tecmo_link_sync(board.tecmo_link, board.sound_cycles)) board.faults |= 8;
         if (board.cbaj && cbaj_sound_sync(board.cbaj_sound, board.sound_cycles)) board.faults |= 8;
         if (board.atlus && atlus_sound_sync(board.atlus_sound, board.sound_cycles)) board.faults |= 8;
         if (board.raizing && raizing_sound_sync(board.raizing_sound, board.sound_cycles)) board.faults |= 8u;
@@ -895,13 +907,13 @@ int systemzn_write(u32 address, unsigned width, u32 value)
         if (systemzn_sync(psxRegs.cycle)) board.faults |= 1u;
     uint8_t old_coin = board.common.coin;
     result = zn_board_write(&board.common, physical, width, value);
-    if ((board.visco || board.atlus || board.cbaj) && result == ZN_BOARD_HANDLED && physical == 0x1fa20000) {
+    if ((board.visco || board.atlus || board.cbaj || board.tps) && result == ZN_BOARD_HANDLED && physical == 0x1fa20000) {
         /* Visco/Tecmo omit lockouts; Atlus connects four. Preserve each
          * source counter's rising-edge input and player ordering. */
-        for (unsigned i = 0; i < (board.atlus || board.cbaj ? 4u : 2u); ++i) {
+        for (unsigned i = 0; i < (board.visco ? 2u : 4u); ++i) {
             static const unsigned players[] = {0, 2, 1, 3};
-            unsigned mask = 1u << (i * (board.atlus || board.cbaj ? 2 : 4));
-            unsigned player = board.atlus || board.cbaj ? players[i] : i;
+            unsigned mask = 1u << (i * (board.visco ? 4 : 2));
+            unsigned player = board.visco ? i : players[i];
             if (!(old_coin & mask) && (board.common.coin & mask)) board.coin_count[player]++;
             if (board.atlus) {
                 if (board.common.coin & (mask << 1)) board.coin_lockout |= 1u << player;
@@ -1139,6 +1151,15 @@ void systemzn_report(FILE *out)
             board.synthetic ? "SYNTHETIC_FIXTURE" : "SOURCE_VERIFIED");
         fprintf(out, "Tecmo TPS: SPU=33868800Hz SIO0=%" PRIu64 " SIO1=%" PRIu64 " time_us=%" PRIu64 "\n",
             psx_sio_elapsed_cycles(board.sio[0]), psx_sio_elapsed_cycles(board.sio[1]), cycles_to_us(board.peripheral_cycles));
+        fprintf(out, "Tecmo TPS: coin_counters=%" PRIu64 "/%" PRIu64 "/%" PRIu64 "/%" PRIu64 " lockouts=UNWIRED\n",
+            board.coin_count[0],board.coin_count[1],board.coin_count[2],board.coin_count[3]);
+        if (board.tecmo_link) {
+            TecmoLinkStatus s; tecmo_link_status(board.tecmo_link, &s);
+            fprintf(out, "Tecmo TPS Link: Z80=4000000Hz clock_source=uncertain cycles=%" PRIu64 " actual=%" PRIu64 " PC=%04x SP=%04x IRQ=%" PRIu64 " NMI=%" PRIu64 " unsupported=%" PRIu64 " faults=%u debt=%" PRId64 "\n",
+                s.cycles,s.cpu.cycles,s.cpu.pc,s.cpu.sp,s.cpu.interrupts,s.cpu.nmis,s.cpu.unsupported_operations,s.faults,s.cpu.cycle_debt);
+            fprintf(out, "Tecmo TPS Link: IO_reads=%" PRIu64 " IO_writes=%" PRIu64 " last_ports=%02x/%02x last_write=%02x RAM8000=%02x map=SOURCE_UNMAPPED transport=UNIMPLEMENTED\n",
+                s.io_reads,s.io_writes,s.last_read_port,s.last_write_port,s.last_write_data,tecmo_link_peek(board.tecmo_link,0x8000));
+        }
         return;
     }
     capcom_zn_get_status(board.capcom, &status);

@@ -18,7 +18,7 @@ intermediate results. Physical Vita is outside this Mac pass.
 | Taito FX1Z, 1/2 MiB VRAM | RayStorm (`raystorm`), G-Darius Ver.2 (`gdarius2`) | Both interpreter/GL interactive player runs pass with exercised controls, live SPU/Zoom mix, persisted FRAM/EEPROM and zero device faults; `taito-fx1z-mac.md` |
 | Tecmo TPS common SPU map | Gallop Racer 2 (`glpracr2`) | Interpreter/GL interactive player race, 138/138 inputs, exact source-gain SDL/SPU capture and zero board faults; `tecmo-tps-mac.md` |
 | Tecmo TPS Z80/YMZ280B/FIFO | Cool Boarders Arcade Jam (`cbaj`) | Source-audited; native interpreter GL/NEON P1 downhill race, 200/200 inputs, original Z80/YMZ sound, dual FIFO startup/commands, live mixed SPU/YMZ audio and zero faults; `cbaj-tps-mac.md` |
-| Tecmo TPS Z80 link | Gallop Racer 2 Link (`glpracr2l`) | Separate Z80/link configuration; media/runtime pending |
+| Tecmo TPS Z80 link | Gallop Racer 2 Link (`glpracr2l`) | Source-audited; interpreter GL/NEON local player race, 138/138 inputs, real extra Z80 and source-gain SPU audio pass. Source link ports are unmapped; cabinet transport remains unimplemented/unvalidated; `tecmo-tps-link-mac.md` |
 | Video System/Visco ZN-1 | Aero Fighters Special (`aerofgts`) | USA source-audited; native interpreter/GL 1P shooting, 112/112 inputs, portrait presentation, exact source-gain SPU/SDL capture and zero faults; `visco-zn-mac.md` |
 | Atlus ZN-1 | Heaven's Gate (`hvnsgate`) | Source-audited; native interpreter/GL Jin combat, 198/198 inputs, MC68000/YMZ280B IRQs, mixed SPU/YMZ audio and zero faults; `atlus-zn-mac.md` |
 | Time Warner/Atari ZN-1 | Primal Rage II (`primrag2`) | Source COH1000W uses 8 MiB RAM, VT83C461 HDD and DMA5, with a 600 ms watchdog; media/adapter/runtime pending |
@@ -58,8 +58,11 @@ from the arcade boards.
   its 24-bank ROM map and live SPU audio. Atlus now passes Heaven's Gate player
   combat with its 68000/YMZ280B, independent IRQ2/IRQ3 and mixed sound. Cool
   Boarders Arcade Jam now passes P1 downhill racing in GL/NEON with its real
-  Z80, YMZ280B, dual FIFOs and live SPU/YMZ mix. Proceed to the separate TPS
-  Gallop Racer 2 Link configuration and remaining source families.
+  Z80, YMZ280B, dual FIFOs and live SPU/YMZ mix. The separate TPS
+  Gallop Racer 2 Link configuration now passes local racing in GL/NEON with
+  its original extra Z80 ROM. Its physical cabinet transport remains open:
+  source itself exposes no link devices/ports. Proceed to Primal Rage II's
+  HDD/DMA5/watchdog board and remaining families.
 
 Local evidence is in `artifacts/boards-mac-20261014`; scratch/reference runs are
 under `/tmp/pcsx-boards-mac-20261014`. The user-linked Internet Archive collection
