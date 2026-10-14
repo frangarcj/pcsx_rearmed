@@ -109,6 +109,34 @@ static void test_media_and_cdda(const char *path) {
   chd_cd_close(cd2); chd_cd_close(cd);
 }
 
+struct ClockedAudio {Audio pcm;std::vector<uint64_t> index;std::vector<int> playing;};
+static void clocked_pcm(void *p,int16_t l,int16_t r,uint64_t index,int playing){
+  auto *a=static_cast<ClockedAudio *>(p);a->pcm.l.push_back(l);a->pcm.r.push_back(r);
+  a->index.push_back(index);a->playing.push_back(playing);
+}
+static void test_continuous_dac_clock(const char *path){
+  ClockedAudio audio;char error[256]{};ChdCd *cd=chd_cd_open(path,nullptr,error,sizeof(error));assert(cd);
+  assert(chd_cd_set_clocked_pcm_sink(cd,clocked_pcm,&audio));
+  nscsi_cd_media_ops_t m{};assert(chd_cd_get_media_ops(cd,&m));
+  assert(chd_cd_advance_to(cd,13333334));assert(audio.index.size()==588);
+  for(unsigned i=0;i<588;i++)assert(audio.index[i]==i && !audio.playing[i] && !audio.pcm.l[i] && !audio.pcm.r[i]);
+  assert(!chd_cd_set_clocked_pcm_sink(cd,clocked_pcm,&audio));
+  m.cdda_start(m.opaque,9,1);assert(chd_cd_advance_to(cd,26666667));
+  assert(audio.index.size()==1176 && audio.playing[588] && audio.pcm.l[588]==13842 && audio.pcm.r[588]==-769);
+  nscsi_cd_audio_status_t status{};m.cdda_status(m.opaque,&status);assert(!status.active && status.ended);
+  assert(chd_cd_advance_to(cd,40000000));assert(audio.index.size()==1764 && !audio.playing.back());
+  m.cdda_start(m.opaque,10,1);m.cdda_pause(m.opaque,1);
+  assert(chd_cd_advance_to(cd,53333334));assert(audio.index.size()==2352 && !audio.playing.back());
+  m.cdda_pause(m.opaque,0);assert(chd_cd_advance_to(cd,66666667));
+  assert(audio.index.size()==2940 && audio.playing[2352] && audio.pcm.l[2352]==14098 && audio.pcm.r[2352]==-1025);
+  for(unsigned i=0;i<audio.index.size();i++)assert(audio.index[i]==i);
+  assert(chd_cd_advance_to(cd,80000000));assert(audio.index.size()==3528 && !audio.playing.back());
+  // Non-audio reads remain failures and must not become successful silence.
+  m.cdda_start(m.opaque,0,1);auto before=audio.index.size();
+  assert(!chd_cd_advance_to(cd,80022676) && audio.index.size()==before && chd_cd_last_error(cd)[0]);
+  chd_cd_close(cd);
+}
+
 struct NcrWire { NscsiBus *bus{}; Ncr53cf96 *ncr{}; uint32_t wait = 0; };
 static void wire_ctrl(void *p, uint32_t v, uint32_t mask) {
   auto *w = static_cast<NcrWire *>(p); nscsi_bus_drive_ctrl(w->bus, 7, v, mask);
@@ -251,6 +279,7 @@ void test_cdxa_mode2(const char *path);
 int main(int argc, char **argv) {
   assert(argc == 6);
   test_media_and_cdda(argv[1]);
+  test_continuous_dac_clock(argv[1]);
   real_ncr_to_chd_read(argv[1]);
   test_pcm_callback_mutations_are_rejected(argv[1]);
   test_unsupported_track_metadata_is_rejected(argv[2]);

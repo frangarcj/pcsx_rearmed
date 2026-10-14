@@ -28,6 +28,13 @@ int chd_cd_verify_sha1(ChdCd *cd, const char *expected_hex);
 /* Advance absolute nanoseconds. Time must be monotonic. CDDA emits 44.1 kHz,
  * stereo signed PCM16 samples from the actual audio sectors to the sink. */
 int chd_cd_advance_to(ChdCd *cd, uint64_t now_ns);
+/* Optional continuous DAC clock, configured before advancing/starting audio.
+ * Index 0 is the first 44.1 kHz sample of the device epoch. Inactive, paused
+ * and completed playback emits actual DAC silence; failed reads still fail.
+ * The existing PCM sink continues receiving only successfully decoded audio. */
+typedef void (*chd_cd_clocked_pcm_sink_t)(void *opaque,int16_t left,int16_t right,
+                                         uint64_t sample_index,int playing);
+int chd_cd_set_clocked_pcm_sink(ChdCd *cd,chd_cd_clocked_pcm_sink_t sink,void *opaque);
 uint32_t chd_cd_last_lba(const ChdCd *cd);
 uint32_t chd_cd_track_count(const ChdCd *cd);
 typedef struct chd_cd_track_info {

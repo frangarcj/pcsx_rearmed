@@ -162,6 +162,9 @@ struct ChdCd {
   uint64_t sequence = 1;
   uint64_t last_ns = 0;
   uint64_t sample_remainder = 0;
+  uint64_t sample_index = 0;
+  chd_cd_clocked_pcm_sink_t clocked_sink = nullptr;
+  void *clocked_opaque = nullptr;
   chd_cd_pcm_sink_t pcm_sink = nullptr;
   void *pcm_opaque = nullptr;
   nscsi_cd_audio_status_t audio{0, 0, 0, 0};
@@ -322,7 +325,7 @@ static void op_audio_start(void *opaque, uint32_t lba, uint32_t blocks) {
   cd->audio = {1, 0, 0, lba};
   cd->audio_end = lba + blocks;
   cd->audio_sector_offset = kAudioFramesPerSector;
-  cd->sample_remainder = 0;
+  if (!cd->clocked_sink) cd->sample_remainder = 0;
 }
 static void op_audio_pause(void *opaque, int pause) {
   ChdCd *cd = static_cast<ChdCd *>(opaque);
@@ -480,28 +483,49 @@ extern "C" int chd_cd_advance_to(ChdCd *cd, uint64_t now_ns) {
   cd->error[0] = 0;
   uint64_t delta = now_ns - cd->last_ns;
   cd->last_ns = now_ns;
-  if (!cd->audio.active || cd->audio.paused) return 1;
+  if (!cd->clocked_sink && (!cd->audio.active || cd->audio.paused)) return 1;
   __uint128_t total = __uint128_t(delta) * 44100 + cd->sample_remainder;
   uint64_t samples = uint64_t(total / kNsPerSecond);
   cd->sample_remainder = uint64_t(total % kNsPerSecond);
-  while (samples-- && cd->audio.active && !cd->audio.paused) {
-    if (cd->audio_sector_offset == kAudioFramesPerSector && !load_audio_sector(cd)) break;
-    const uint8_t *sample = cd->audio_sector.data() + cd->audio_sector_offset * 4;
-    int16_t left = signed_be16(sample);
-    int16_t right = signed_be16(sample + 2);
-    if (cd->pcm_sink) {
+  while (samples--) {
+    bool playing = cd->audio.active && !cd->audio.paused;
+    if (!playing && !cd->clocked_sink) break;
+    int16_t left = 0, right = 0;
+    if (playing) {
+      if (cd->audio_sector_offset == kAudioFramesPerSector && !load_audio_sector(cd)) {
+        if (cd->error[0]) return 0;
+        playing = false;
+      }
+      if (playing) {
+        const uint8_t *sample = cd->audio_sector.data() + cd->audio_sector_offset * 4;
+        left = scaled_sample(signed_be16(sample), cd->gain[0]);
+        right = scaled_sample(signed_be16(sample + 2), cd->gain[1]);
+      }
+    }
+    if (playing && cd->pcm_sink) {
       cd->in_callback = true;
-      cd->pcm_sink(cd->pcm_opaque, scaled_sample(left, cd->gain[0]),
-                   scaled_sample(right, cd->gain[1]));
+      cd->pcm_sink(cd->pcm_opaque, left, right);
       cd->in_callback = false;
     }
-    ++cd->audio_sector_offset;
-    if (cd->audio_sector_offset == kAudioFramesPerSector) {
-      ++cd->audio.lba;
-      if (cd->audio.lba >= cd->audio_end) { cd->audio.active = 0; cd->audio.ended = 1; }
+    if (cd->clocked_sink) {
+      cd->in_callback = true;
+      cd->clocked_sink(cd->clocked_opaque,left,right,cd->sample_index++,playing);
+      cd->in_callback = false;
+    }
+    if (playing) {
+      ++cd->audio_sector_offset;
+      if (cd->audio_sector_offset == kAudioFramesPerSector) {
+        ++cd->audio.lba;
+        if (cd->audio.lba >= cd->audio_end) { cd->audio.active = 0; cd->audio.ended = 1; }
+      }
     }
   }
   return !cd->error[0] ? 1 : 0;
+}
+extern "C" int chd_cd_set_clocked_pcm_sink(ChdCd *cd,chd_cd_clocked_pcm_sink_t sink,void *opaque) {
+  if (reject_callback_mutation(cd)) return 0;
+  if (!cd || cd->last_ns || cd->audio.active || !sink) return 0;
+  cd->clocked_sink = sink;cd->clocked_opaque = opaque;return 1;
 }
 extern "C" uint32_t chd_cd_last_lba(const ChdCd *cd) { return cd ? cd->leadout : 0; }
 extern "C" uint32_t chd_cd_track_count(const ChdCd *cd) { return cd ? uint32_t(cd->tracks.size()) : 0; }
