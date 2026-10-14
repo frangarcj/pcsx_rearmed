@@ -6,7 +6,7 @@
 #define ARCADE_MIX_RING 8192
 typedef struct ArcadeMixLane {
     uint64_t position, next_output, inputs, nonzero;
-    unsigned clock, head, count;
+    unsigned clock, divider, head, count;
     float previous[2];
     int16_t ring[ARCADE_MIX_RING][2];
 } ArcadeMixLane;
@@ -19,6 +19,10 @@ typedef struct ArcadeAudioMixer {
     void *opaque;
 } ArcadeAudioMixer;
 void arcade_mix_init(ArcadeAudioMixer *, unsigned spu_clock,
+    void (*output)(void *, const int16_t *, unsigned), void *opaque);
+/* Daughterboard sample cadence is oscillator/divider; preserves exact ratios. */
+void arcade_mix_init_rates(ArcadeAudioMixer *, unsigned spu_clock,
+    unsigned daughter_clock, unsigned daughter_divider,
     void (*output)(void *, const int16_t *, unsigned), void *opaque);
 void arcade_mix_reset(ArcadeAudioMixer *);
 void arcade_mix_push(ArcadeAudioMixer *, unsigned lane, float left, float right);

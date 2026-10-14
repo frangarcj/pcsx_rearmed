@@ -109,5 +109,5 @@ support is disabled. Zoom ROM/flash/reset tests pass under ASan/UBSan. Existing
 FX1S, Tecmo TPS, G-Net frontend/mixer and no-board console checks remain passing.
 
 Physical Vita, authentic ARM64 DRC and gameplay of the other regional/Fighters'
-Impact profiles are separate checks. The next major board is Eighting/Raizing
-ZN with Bloody Roar 2 and Brave Blade. See [the complete matrix](arcade-mac-validation.md).
+Impact profiles are separate checks. Eighting/Raizing ZN now has bounded
+Bloody Roar 2 / Brave Blade player coverage in `raizing-zn-mac.md`. See [the complete matrix](arcade-mac-validation.md).

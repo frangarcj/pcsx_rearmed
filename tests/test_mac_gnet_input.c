@@ -6,7 +6,7 @@
 #undef main
 #include <assert.h>
 static unsigned wheel=128, trigger=128, handle[2]={128,128};
-static int coin, start, fire;
+static int coin, start, fire, beast, beast2, service, raizing_mode;
 int gnet_test_analog(const char *name,unsigned raw)
 {
     if (!strcmp(name,"p1_wheel")) wheel=raw;
@@ -17,6 +17,10 @@ int gnet_test_analog(const char *name,unsigned raw)
 }
 static int digital(const char *name,int down)
 {
+    if (raizing_mode && name[0] == 'p') assert(!strchr(name,'_'));
+    if (!strcmp(name,"p1button4")) beast=down;
+    if (!strcmp(name,"p2button4")) beast2=down;
+    if (!strcmp(name,"service1")) service=down;
     if (!strcmp(name,"coin1")) coin=down;
     if ((!strcmp(name,"p1_start") || !strcmp(name,"p1start"))) start=down;
     if ((!strcmp(name,"p1_button1") || !strcmp(name,"p1button1"))) fire=down;
@@ -84,6 +88,17 @@ int main(void)
     memset(&e,0,sizeof(e));e.type=SDL_EVENT_WINDOW_FOCUS_LOST;
     assert(SDL_PushEvent(&e));poll_interactive_input();assert(!coin && !fire && !start);
     puts("FX1Z SDL input translation and focus release PASS");
+    board.family=106; interactive_focused=1; raizing_mode=1;
+    key(SDL_SCANCODE_5,1);key(SDL_SCANCODE_1,1);key(SDL_SCANCODE_A,1);
+    key(SDL_SCANCODE_SPACE,1);key(SDL_SCANCODE_V,1);key(SDL_SCANCODE_9,1);
+    assert(coin && fire && start && beast && beast2 && service);
+    release_interactive_input();assert(!coin && !fire && !start && !beast && !beast2 && !service);
+    assert(SDL_SetJoystickVirtualButton(joy,SDL_GAMEPAD_BUTTON_NORTH,true));
+    SDL_UpdateJoysticks();frame_counter++;poll_interactive_input();assert(beast);
+    interactive_replay=1;beast=0;key(SDL_SCANCODE_SPACE,1);assert(!beast);interactive_replay=0;
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_WINDOW_FOCUS_LOST;
+    assert(SDL_PushEvent(&e));poll_interactive_input();assert(!beast && !beast2);
+    puts("Raizing SDL exact input names, fourth buttons, service, gamepad, focus and replay PASS");
     SDL_CloseGamepad(interactive_pads[0]);interactive_pads[0]=NULL;
     SDL_CloseJoystick(joy);assert(SDL_DetachVirtualJoystick(id));
     SDL_DestroyWindow(w);SDL_Quit();

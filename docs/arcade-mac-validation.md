@@ -24,7 +24,7 @@ intermediate results. Physical Vita is outside this Mac pass.
 | Acclaim ZN-1 ROM/sound | NBA Jam Extreme (`nbajamex`) | Source adds SRAM/bank mapping and Acclaim RAX sound; media/adapter/runtime pending |
 | Acclaim ZN-1 disk | Judge Dredd (`jdredd`) | Source adds ATA HDD/IRQ10 and a separate VBlank handler; media/adapter/runtime pending |
 | Metro ZN storage variants | Bust a Move 2 (`bam2`, `bam2a`) | Source has HDD/CD configurations and marks both nonworking with imperfect sound. Complete native integration and game evidence remain pending |
-| Eighting/Raizing ZN | Bloody Roar 2 (`bldyror2`), Brave Blade (`brvblade`) | Additional public split archives downloaded and wrapper hashes checked; source chip audit, adapter and runtime pending |
+| Eighting/Raizing ZN | Bloody Roar 2 (`bldyror2`), Brave Blade (`brvblade`) | Both World sets source-audited; native interpreter/GL player combat/shooter gameplay with source MC68000/YMF271, live SPU/YMF audio, portrait rotation and zero device faults; `raizing-zn-mac.md` |
 | Konami System GV common map | Hyper Athlete (`hyperath`) | Authenticated BIOS/EEPROM/CD prepared. Interpreter/GL enters a P1 running event with 110/110 input events, nonzero SPU and no device faults; `konamigv-mac.md`. CDDA mixing and authentic DRC remain pending |
 | Konami System GV special maps | Trackball, shooting, flash and printer variants | Separate source peripherals; representative selection/runtime pending |
 | Konami System GQ | Crypt Killer (`cryptklr`) | ROM archive available; CHD and native board runtime pending |
@@ -51,8 +51,10 @@ from the arcade boards.
   pending; authentic ARM64 DRC still uses console serial MMIO handlers.
 - Common Tecmo TPS now passes Gallop Racer 2 player racing and live native sound.
   FX1Z now passes RayStorm/G-Darius Ver.2 with its ROM-backed Zoom daughterboard
-  and both VRAM configurations. Proceed to Raizing and the remaining source
-  families; TPS sound/link variants retain separate pending rows.
+  and both VRAM configurations. Raizing now passes Bloody Roar 2 combat and Brave Blade 1P shooting with its
+  MC68000/YMF271 and portrait presentation. Proceed to Video System/Visco
+  Aero Fighters Special and the remaining source families; TPS sound/link
+  variants retain separate pending rows.
 
 Local evidence is in `artifacts/boards-mac-20261014`; scratch/reference runs are
 under `/tmp/pcsx-boards-mac-20261014`. The user-linked Internet Archive collection

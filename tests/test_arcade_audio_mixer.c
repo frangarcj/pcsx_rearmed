@@ -43,7 +43,17 @@ int main(void)
         arcade_mix_reset(&mix); frames = 0; mode = 2;
         second(&mix,clock,1,-1);
     }
-    arcade_mix_reset(&mix);
+    /* Raizing has two exact 44.1 kHz streams: SPU/768 and YMF271/384.
+     * A ramp catches an accidental Zoom divisor and phase/interpolation drift. */
+    frames = mode = 0;
+    arcade_mix_init_rates(&mix,33868800,16934400,384,output,NULL);
+    for (unsigned i = 0; i < 44100; ++i) {
+        float ramp = (i % 256) / 1024.0f;
+        arcade_mix_push(&mix,0,.25f + ramp,.25f + ramp);
+        arcade_mix_push(&mix,1,-.125f - ramp,-.125f - ramp);
+    }
+    assert(frames == 44032 && mix.lane[0].inputs == mix.lane[1].inputs && !mix.error);
+    arcade_mix_reset(&mix); assert(mix.lane[1].divider == 384);
     arcade_mix_push(&mix,1,NAN,0); assert(mix.error);
     arcade_mix_reset(&mix);
     for (unsigned i = 0; i < 10000; ++i) arcade_mix_push(&mix,1,0,0);

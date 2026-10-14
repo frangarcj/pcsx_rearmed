@@ -1,4 +1,4 @@
-/* GPL-2.0-or-later. Native host wiring for source-derived Capcom/Tecmo Sony ZN boards. */
+/* GPL-2.0-or-later. Native host wiring for source-derived Capcom/Tecmo/Raizing Sony ZN boards. */
 #include "systemzn.h"
 #include "system10.h"
 #include "system11.h"
@@ -12,6 +12,8 @@
 #include "arcade/psx_sio.h"
 #include "arcade/qsound_hle.h"
 #include "arcade/pcm_wav.h"
+#include "arcade/raizing_sound.h"
+#include <math.h>
 #include "gpu_vram.h"
 #include <inttypes.h>
 #include <stdlib.h>
@@ -31,6 +33,7 @@ typedef struct TpsMediaCheck {
     unsigned region; uint32_t offset, length; unsigned group, stride, swap; uint32_t crc;
 } TpsMediaCheck;
 #include "arcade/tecmo_tps_profiles.inc"
+#include "arcade/raizing_zn_profiles.inc"
 
 static const ZnProfile profiles[] = {
 #include "arcade/capcom_zn_profiles.inc"
@@ -38,6 +41,10 @@ static const ZnProfile profiles[] = {
 
 typedef struct SystemZn {
     CapcomZn *capcom;
+    RaizingSound *raizing_sound;
+    int raizing;
+    void (*ymf_callback)(void *, float, float, uint64_t);
+    void *ymf_opaque;
     QSoundHLE *qsound;
     ZNMCU *mcu;
     zn_board_t common;
@@ -82,8 +89,8 @@ static uint32_t canonical_address(uint32_t address)
 static const ZnProfile *find_profile(const char *set)
 {
     size_t i;
-    const ZnProfile *list = board.tps ? tps_profiles : profiles;
-    size_t count = board.tps ? sizeof(tps_profiles) / sizeof(tps_profiles[0]) : sizeof(profiles) / sizeof(profiles[0]);
+    const ZnProfile *list = board.raizing ? raizing_profiles : board.tps ? tps_profiles : profiles;
+    size_t count = board.raizing ? sizeof(raizing_profiles) / sizeof(raizing_profiles[0]) : board.tps ? sizeof(tps_profiles) / sizeof(tps_profiles[0]) : sizeof(profiles) / sizeof(profiles[0]);
     for (i = 0; i < count; i++)
         if (!strcmp(list[i].set, set)) return &list[i];
     return NULL;
@@ -115,7 +122,7 @@ static int load_config(const char *directory, const ZnProfile **selected)
         if (i == 14 || (seen & (1u << i)) || !*equal || strlen(equal) >= sizeof(values[i])) goto bad;
         strcpy(values[i], equal); seen |= 1u << i;
     }
-    if (ferror(file) || seen != 0x3fff || strcmp(values[0], board.tps ? "pcsx-aow-tecmo-tps-v1" : "pcsx-aow-capcom-zn-v1") ||
+    if (ferror(file) || seen != 0x3fff || strcmp(values[0], board.raizing ? "pcsx-aow-raizing-zn-v1" : board.tps ? "pcsx-aow-tecmo-tps-v1" : "pcsx-aow-capcom-zn-v1") ||
         strcmp(values[13], "false")) goto bad;
     p = find_profile(values[1]);
     if (!p || strcmp(values[2], p->parent) || strcmp(values[3], p->bios_parent) ||
@@ -272,6 +279,26 @@ static void qsound_pcm(void *opaque, int16_t left, int16_t right, uint64_t frame
     }
 }
 
+static void raizing_pcm(void *opaque, const float outputs[4], uint64_t cycle)
+{
+    int16_t sample[4] = {0};
+    (void)opaque;
+    board.frames++;
+    /* Source only routes chip outputs 0/1 to the stereo speaker. Keep float
+     * values intact for the source mixer; standalone WAV uses final PCM scale. */
+    for (unsigned ch = 0; ch < 2; ++ch) {
+        float v = outputs[ch];
+        if (!isfinite(v)) { board.faults |= 2; return; }
+        if (v > 1) v = 1;
+        if (v < -1) v = -1;
+        sample[ch] = (int16_t)lrintf(v * 32767);
+        unsigned peak = sample[ch] < 0 ? -(int)sample[ch] : sample[ch];
+        if (peak > board.peak) board.peak = peak;
+    }
+    if (pcm_wav_append4(&board.wav, sample, 1)) board.faults |= 2;
+    if (board.ymf_callback) board.ymf_callback(board.ymf_opaque, outputs[0], outputs[1], cycle);
+}
+
 static void sio_bus_advance(psx_sio_t *sio, uint64_t cycle)
 {
     if (sio && psx_sio_advance_to_cycle(sio, cycle) != PSX_SIO_OK)
@@ -287,14 +314,16 @@ static uint32_t tps_crc_byte(uint32_t crc, uint8_t byte)
 
 static int validate_tps_media(void)
 {
-    size_t profile = (size_t)(board.profile - tps_profiles);
-    static const unsigned regions[] = {0, 1, 5, 6};
-    for (unsigned r = 0; r < 4; ++r) {
+    size_t profile = (size_t)(board.profile - (board.raizing ? raizing_profiles : tps_profiles));
+    const TpsMediaCheck *checks = board.raizing ? raizing_media[profile] : tps_media[profile];
+    size_t count = board.raizing ? raizing_media_count[profile] : tps_media_count[profile];
+    static const unsigned regions[] = {0, 1, 5, 6, 2, 3, 4};
+    for (unsigned r = 0; r < (board.raizing ? 7u : 4u); ++r) {
         unsigned region = regions[r];
         uint8_t *marked = calloc(board.sizes[region], 1);
         if (!marked) return -1;
-        for (size_t i = 0; i < tps_media_count[profile]; ++i) {
-            const TpsMediaCheck *c = &tps_media[profile][i];
+        for (size_t i = 0; i < count; ++i) {
+            const TpsMediaCheck *c = &checks[i];
             uint32_t crc = UINT32_MAX;
             if (c->region != region) continue;
             for (size_t j = 0; j < c->length; ++j) {
@@ -306,13 +335,13 @@ static int validate_tps_media(void)
                 crc = tps_crc_byte(crc, board.regions[region][dst]);
             }
             if ((crc ^ UINT32_MAX) != c->crc) {
-                fprintf(stderr, "Tecmo TPS: source ROM CRC mismatch region=%u offset=%x\n", region, c->offset);
+                fprintf(stderr, "Sony ZN: source ROM CRC mismatch region=%u offset=%x\n", region, c->offset);
                 free(marked); return -1;
             }
         }
         for (size_t j = 0; j < board.sizes[region]; ++j)
             if (!marked[j] && board.regions[region][j]) {
-                fprintf(stderr, "Tecmo TPS: source ROM padding mismatch at %zx\n", j);
+                fprintf(stderr, "Sony ZN: source ROM padding mismatch at %zx\n", j);
                 free(marked); return -1;
             }
         free(marked);
@@ -320,7 +349,7 @@ static int validate_tps_media(void)
     return 0;
 }
 
-static int load_board(const char *directory, int tps, int synthetic)
+static int load_board(const char *directory, int family, int synthetic)
 {
     QSoundHLEConfig qcfg;
     QSoundHLEStatus qstatus;
@@ -336,13 +365,22 @@ static int load_board(const char *directory, int tps, int synthetic)
         "qsound_samples.bin", "cat702_key0.bin", "cat702_key1.bin"};
     if (board.active || systemtaito_active() || system10_active() || system11_active() || system12_active() ||
         psxRegs.ptrs.psxM || !directory) return -1;
-    board.tps = tps;
+    board.tps = family == 1;
+    board.raizing = family == 2;
     board.synthetic = synthetic;
     if (load_config(directory, &board.profile)) { memset(&board, 0, sizeof(board)); return -1; }
     if (load_region(directory, files[0], 0, board.profile->bios_size) ||
         load_region(directory, files[1], 1, board.profile->banked_size) ||
         load_region(directory, files[5], 5, 8) || load_region(directory, files[6], 6, 8)) goto bad;
-    if (tps) {
+    if (board.raizing) {
+        if (load_region(directory, "eeprom_default.bin", 2, board.profile->country_size) ||
+            load_region(directory, "audiocpu.bin", 3, board.profile->audio_size) ||
+            load_region(directory, "ymf_samples.bin", 4, board.profile->qsound_size)) goto bad;
+        if (!synthetic && validate_tps_media()) goto bad;
+        RaizingSoundConfig cfg = {board.regions[3], board.regions[4], board.sizes[3],
+            board.sizes[4], &board, raizing_pcm};
+        if (raizing_sound_create(&cfg, &board.raizing_sound)) goto bad;
+    } else if (board.tps) {
         if (!synthetic && validate_tps_media()) goto bad;
     } else {
         if (load_region(directory, files[2], 2, board.profile->country_size) ||
@@ -408,6 +446,9 @@ static int load_board(const char *directory, int tps, int synthetic)
     memcpy(keys[0], board.regions[5], 8); memcpy(keys[1], board.regions[6], 8);
     common_config.cat702_keys = (const uint8_t (*)[8])keys;
     common_config.mcu = board.mcu;
+    if (board.raizing) {
+        common_config.eeprom = board.regions[2]; common_config.eeprom_size = board.sizes[2];
+    }
     memset(&common_callbacks, 0, sizeof(common_callbacks));
     common_callbacks.opaque = &board;
     common_callbacks.read_input = input_read;
@@ -434,6 +475,10 @@ bad:
 int systemzn_load(const char *directory) { return load_board(directory, 0, 0); }
 int systemzn_load_tps(const char *directory) { return load_board(directory, 1, 0); }
 int systemzn_test_load_tps(const char *directory) { return load_board(directory, 1, 1); }
+int systemzn_load_raizing(const char *directory) { return load_board(directory, 2, 0); }
+int systemzn_test_load_raizing(const char *directory) { return load_board(directory, 2, 1); }
+int systemzn_raizing_active(void) { return board.active && board.raizing; }
+unsigned systemzn_rotation(void) { return board.active && board.raizing && !strcmp(board.profile->set, "brvblade") ? 270 : 0; }
 int systemzn_tps_active(void) { return board.active && board.tps; }
 
 void systemzn_unload(void)
@@ -458,6 +503,7 @@ void systemzn_unload(void)
         }
     }
     pcm_wav_close(&board.wav);
+    raizing_sound_destroy(board.raizing_sound);
     capcom_zn_destroy(board.capcom);
     qsound_hle_destroy(board.qsound);
     zn_board_destroy(&board.common);
@@ -496,7 +542,7 @@ static void map_bankedroms(void)
     capcom_zn_status_t status;
     unsigned a;
     if (!board.active || !psxRegs.ptrs.memRLUT || !psxRegs.ptrs.memWLUT) return;
-    if (board.tps) {
+    if (board.tps || board.raizing) {
         size_t offset = (size_t)board.tps_bank * 0x800000;
         for (a = 0; a < 3; ++a) {
             if (board.tps_bank < 9 && offset <= board.sizes[1] && 0x800000 <= board.sizes[1] - offset)
@@ -535,6 +581,7 @@ void systemzn_mem_reset(void)
     memset(psxRegs.ptrs.psxM, 0, psxRamSize);
     memset(psxRegs.ptrs.psxP, 0xff, 0x10000);
     map_bankedroms();
+    if (board.raizing) return;
     map_window(0x1fb80000u, board.regions[2], board.sizes[2], 0);
     map_window(0x9fb80000u, board.regions[2], board.sizes[2], 0);
     map_window(0xbfb80000u, board.regions[2], board.sizes[2], 0);
@@ -545,10 +592,16 @@ void systemzn_reset(void)
     if (!board.active) return;
     /* MAME has no device_reset override for the shared ZN MCU, CAT702, AT28C16
      * or PSX SIO devices; preserve their pin/timer/storage state on soft reset. */
-    if (board.tps) board.tps_bank = 0;
+    board.faults = 0;
+    if (board.tps || board.raizing) board.tps_bank = 0;
     else capcom_zn_reset(board.capcom);
-    board.qsound_fraction = 0; board.sound_cycles = 0;
-    board.frames = 0; board.faults = 0;
+    if (board.raizing) {
+        if (raizing_sound_reset(board.raizing_sound)) board.faults |= 8;
+        RaizingSoundStatus status; raizing_sound_status(board.raizing_sound, &status);
+        board.sound_cycles = status.cpu_cycles;
+    }
+    board.qsound_fraction = 0; if (!board.raizing) board.sound_cycles = 0;
+    board.frames = 0;
     board.last_psx_cycle = psxRegs.cycle;
     map_bankedroms();
 }
@@ -565,7 +618,7 @@ int systemzn_sync(u32 psx_cycle)
         uint64_t numerator;
         sound_cycles = 0;
         if (!board.tps) {
-            numerator = (uint64_t)elapsed * CAPCOM_ZN_SOUND_CLOCK_HZ + board.qsound_fraction;
+            numerator = (uint64_t)elapsed * (board.raizing ? RAIZING_SOUND_CLOCK : CAPCOM_ZN_SOUND_CLOCK_HZ) + board.qsound_fraction;
             sound_cycles = numerator / PSXCLK;
             board.qsound_fraction = numerator % PSXCLK;
         }
@@ -575,14 +628,15 @@ int systemzn_sync(u32 psx_cycle)
         board.sio_cycles += numerator / PSXCLK;
         board.sio_fraction = numerator % PSXCLK;
         board.sound_cycles += sound_cycles;
-        if (!board.tps && sound_cycles && capcom_zn_run_sound_cycles(board.capcom, sound_cycles) < 0)
+        if (board.raizing && raizing_sound_sync(board.raizing_sound, board.sound_cycles)) board.faults |= 8u;
+        if (!board.tps && !board.raizing && sound_cycles && capcom_zn_run_sound_cycles(board.capcom, sound_cycles) < 0)
             board.faults |= 8u;
     }
     sio_bus_advance(board.sio[0], board.sio_cycles);
     sio_bus_advance(board.sio[1], board.sio_cycles);
     if (sync_peripherals_to_cycle(board.sio_cycles)) board.faults |= 1u;
-    if (!board.tps && qsound_hle_get_status(board.qsound, &status)) board.faults |= 2u;
-    if (!board.tps) {
+    if (!board.tps && !board.raizing && qsound_hle_get_status(board.qsound, &status)) board.faults |= 2u;
+    if (!board.tps && !board.raizing) {
         capcom_zn_status_t cap_status;
         capcom_zn_get_status(board.capcom, &cap_status);
         if (cap_status.faults) board.faults |= 8u;
@@ -634,7 +688,7 @@ int systemzn_read(u32 address, unsigned width, u32 *value)
     if (!board.active || !value) return 0;
     result = handle_sio_read(physical, width, value);
     if (result) { if (result < 0) { board.faults |= 4u; *value = UINT32_MAX; return 1; } return 1; }
-    if (board.tps && physical >= 0x1f000000 && physical < 0x1f800000) {
+    if ((board.tps || board.raizing) && physical >= 0x1f000000 && physical < 0x1f800000) {
         size_t offset = (size_t)board.tps_bank * 0x800000 + physical - 0x1f000000;
         *value = UINT32_MAX;
         if ((width != 1 && width != 2 && width != 4) || (physical & (width - 1)) ||
@@ -646,7 +700,7 @@ int systemzn_read(u32 address, unsigned width, u32 *value)
         }
         return 1;
     }
-    result = board.tps ? 0 : capcom_zn_main_read(board.capcom, physical, width, value);
+    result = board.tps || board.raizing ? 0 : capcom_zn_main_read(board.capcom, physical, width, value);
     if (result == CAPCOM_ZN_HANDLED) return 1;
     if (result < 0) { board.faults |= 8u; *value = UINT32_MAX; return 1; }
     if ((physical >= 0x1fa00000 && physical < 0x1fa40000) ||
@@ -673,7 +727,15 @@ int systemzn_write(u32 address, unsigned width, u32 value)
         map_bankedroms();
         return 1;
     }
-    result = board.tps ? 0 : capcom_zn_main_write(board.capcom, physical, width, value);
+    if (board.raizing && ((physical <= 0x1fb00000 && (uint64_t)physical + width > 0x1fb00000) ||
+        (physical <= 0x1fb00004 && (uint64_t)physical + width > 0x1fb00004))) {
+        if (systemzn_sync(psxRegs.cycle)) board.faults |= 8u;
+        if (physical <= 0x1fb00000 && (uint64_t)physical + width > 0x1fb00000) {
+            if (raizing_sound_command(board.raizing_sound, value >> ((0x1fb00000 - physical) * 8))) board.faults |= 8;
+        } else if (raizing_sound_irq(board.raizing_sound)) board.faults |= 8;
+        return 1;
+    }
+    result = board.tps || board.raizing ? 0 : capcom_zn_main_write(board.capcom, physical, width, value);
     if (result == CAPCOM_ZN_HANDLED) { if (physical == 0x1fb00000) map_bankedroms(); return 1; }
     if (result < 0) { board.faults |= 8u; return 1; }
     if ((physical >= 0x1fa00000 && physical < 0x1fa40000) ||
@@ -681,6 +743,11 @@ int systemzn_write(u32 address, unsigned width, u32 value)
         (physical >= 0x1faf0000 && physical < 0x1faf0800))
         if (systemzn_sync(psxRegs.cycle)) board.faults |= 1u;
     result = zn_board_write(&board.common, physical, width, value);
+    if (board.raizing && result == ZN_BOARD_HANDLED && physical == 0x1fa10300) {
+        board.tps_bank = board.common.znsecsel & 3; board.tps_bank_writes++;
+        if ((size_t)(board.tps_bank + 1) * 0x800000 > board.sizes[1]) board.faults |= 8;
+        map_bankedroms();
+    }
     return result == ZN_BOARD_HANDLED;
 }
 
@@ -722,6 +789,8 @@ static int input_supported(const char *name, int pressed)
                 if (player && !strcmp(profile, "strider2")) return -1;
                 return set_raw_bit(port, 0x40, pressed);
             }
+            if (!strcmp(profile, "bldyror2") && button == 3)
+                return set_raw_bit(4, player ? 0x20 : 0x10, pressed);
             if (!strcmp(profile, "capcom6b")) {
                 return set_raw_bit(player ? 5 : 4, 0x10u << (button - 3), pressed) |
                     set_kick(player, button - 3, pressed);
@@ -778,10 +847,12 @@ int systemzn_eeprom_export(unsigned char *image, size_t size)
 { return board.active ? zn_board_eeprom_export(&board.common, image, size) : -1; }
 void systemzn_set_audio_output(void (*callback)(void *, const int16_t *, unsigned), void *opaque)
 { board.audio_callback = callback; board.audio_opaque = opaque; board.audio_buffer_frames = 0; }
+void systemzn_set_ymf_audio_output(void (*callback)(void *, float, float, uint64_t), void *opaque)
+{ board.ymf_callback = callback; board.ymf_opaque = opaque; }
 int systemzn_open_audio(const char *path)
 {
     if (!board.active || board.tps || board.wav.file) return -1;
-    return pcm_wav_open(&board.wav, path, SYSTEMZN_QSOUND_RATE);
+    return pcm_wav_open(&board.wav, path, board.raizing ? 44100 : SYSTEMZN_QSOUND_RATE);
 }
 int systemzn_close_audio(void) { return pcm_wav_close(&board.wav); }
 
@@ -794,13 +865,25 @@ int systemzn_selftest(void)
         value != (board.profile->vram_size == 0x200000 ? 0x69 : 0x61)) return -1;
     if (systemzn_read(0x1f000000, 4, &value) != 1 ||
         value != *(uint32_t *)board.regions[1]) return -1;
-    if (!board.tps && (systemzn_read(0x1fb80000, 4, &value) != 1 || value != *(uint32_t *)board.regions[2])) return -1;
+    if (!board.tps && !board.raizing && (systemzn_read(0x1fb80000, 4, &value) != 1 || value != *(uint32_t *)board.regions[2])) return -1;
     if (systemzn_read(0x1fa00300, 1, &value) != 1) return -1;
     before = value;
     if (systemzn_set_input("coin1", 1) || systemzn_read(0x1fa00300, 1, &value) != 1 ||
         value != (before & ~0x10u)) return -1;
     systemzn_set_input("coin1", 0);
     if (systemzn_set_input("unknown-control", 1) == 0) return -1;
+    if (board.raizing) {
+        unsigned char nv[2080], roundtrip[2080];
+        if (systemzn_eeprom_export(nv, sizeof(nv)) || (board.synthetic && memcmp(nv, board.regions[2], 2048)) ||
+            systemzn_eeprom_import(nv, sizeof(nv)) || systemzn_eeprom_export(roundtrip, sizeof(roundtrip)) ||
+            memcmp(nv, roundtrip, sizeof(nv))) return -1;
+        if (!strcmp(board.profile->input, "bldyror2")) {
+            if (systemzn_set_input("p1button4", 1) || systemzn_read(0x1fa10000, 1, &value) != 1 || value != 0xef) return -1;
+            systemzn_set_input("p1button4", 0);
+            if (systemzn_set_input("p2button4", 1) || systemzn_read(0x1fa10000, 1, &value) != 1 || value != 0xdf) return -1;
+            systemzn_set_input("p2button4", 0);
+        } else if (systemzn_set_input("p1button4", 1) == 0) return -1;
+    }
     fprintf(stderr, "SystemZN selftest: PASS\n");
     return 0;
 }
@@ -812,6 +895,19 @@ void systemzn_report(FILE *out)
     uint16_t qreg78 = 0, qreg1 = 0, qreg2 = 0, qreg4 = 0, qreg5 = 0, qreg6 = 0;
     uint8_t sound_f010, sound_f020;
     if (!board.active || !out) return;
+    if (board.raizing) {
+        RaizingSoundStatus sound; raizing_sound_status(board.raizing_sound, &sound);
+        fprintf(out, "Raizing ZN: profile=%s model=COH1002E CPU=%u GPU=2 RAM=%u VRAM=%u rotation=%u bank=%u bank_writes=%" PRIu64 " faults=%u media=%s\n",
+            board.profile->set, board.profile->cpu_clock, board.profile->ram_size, board.profile->vram_size,
+            systemzn_rotation(), board.tps_bank, board.tps_bank_writes, board.faults | sound.faults,
+            board.synthetic ? "SYNTHETIC_FIXTURE" : "SOURCE_VERIFIED");
+        fprintf(out, "Raizing ZN: MC68000=12000000Hz cycles=%" PRIu64 " PC=%06x SR=%04x commands=%" PRIu64 " IRQ2_requests=%" PRIu64 " IRQ2_ack=%" PRIu64 " pending=%u IRQ2=%u\n",
+            sound.cpu_cycles, sound.pc, sound.sr, sound.commands, sound.irq_requests, sound.irq_acknowledgements, sound.pending, sound.irq2);
+        fprintf(out, "Raizing ZN: YMF271=16934400Hz rate=%u frames=%" PRIu64 " writes=%" PRIu64 " peak=%u diagnostics=%u faults=%u timer_events=%" PRIu64 "/%" PRIu64 "\n",
+            sound.ymf.sample_rate, sound.ymf.frames, sound.ymf_writes, board.peak, sound.ymf.diagnostics,
+            sound.ymf.faults, sound.ymf.timer_a_events, sound.ymf.timer_b_events);
+        return;
+    }
     if (board.tps) {
         fprintf(out, "Tecmo TPS: profile=%s model=COH1002M CPU=%u GPU=2 RAM=%u VRAM=%u bank=%u bank_writes=%" PRIu64 " faults=%u media=%s\n",
             board.profile->set, board.profile->cpu_clock, board.profile->ram_size,

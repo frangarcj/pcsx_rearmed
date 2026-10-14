@@ -10,6 +10,11 @@ int systemzn_load_tps(const char *directory);
 /* Explicit synthetic host test path, never used by the normal TPS loader. */
 int systemzn_test_load_tps(const char *directory);
 int systemzn_tps_active(void);
+int systemzn_load_raizing(const char *directory);
+int systemzn_test_load_raizing(const char *directory);
+int systemzn_raizing_active(void);
+unsigned systemzn_rotation(void);
+void systemzn_set_ymf_audio_output(void (*callback)(void *, float, float, uint64_t), void *opaque);
 void systemzn_unload(void);
 int systemzn_active(void);
 /* Pinned MAME main CPU input clock; zero when the board is inactive. */

@@ -1,0 +1,47 @@
+CXX ?= clang++
+PYTHON ?= python3
+BUILD ?= build/raizing-sound-tests
+GEN := $(BUILD)/generated
+INCLUDES := -I$(GEN) -Ilibpcsxcore/arcade -Ilibpcsxcore/arcade/m68000
+SOURCES := libpcsxcore/arcade/m68000.cpp $(GEN)/m68000-decode.cpp \
+           $(GEN)/m68000-sdf.cpp $(GEN)/m68000-sdp.cpp libpcsxcore/arcade/ymf271.cpp libpcsxcore/arcade/raizing_sound.cpp tests/raizing_sound_standalone.cpp
+COMMON := -std=c++20 -g -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable $(INCLUDES)
+SAN_COMMON := $(filter-out -g,$(COMMON))
+TARGET := $(BUILD)/test-raizing-sound
+SAN_TARGET := $(BUILD)/test-raizing-sound-sanitize
+
+.PHONY: test sanitize clean
+$(GEN)/m68000-sdf.cpp: libpcsxcore/arcade/m68000/m68000.lst libpcsxcore/arcade/m68000/m68000gen.py
+	@mkdir -p $(GEN)
+	$(PYTHON) libpcsxcore/arcade/m68000/m68000gen.py sdf $< $@
+
+$(GEN)/m68000-sdp.cpp: libpcsxcore/arcade/m68000/m68000.lst libpcsxcore/arcade/m68000/m68000gen.py
+	@mkdir -p $(GEN)
+	$(PYTHON) libpcsxcore/arcade/m68000/m68000gen.py sdp $< $@
+
+$(GEN)/m68000-decode.cpp: libpcsxcore/arcade/m68000/m68000.lst libpcsxcore/arcade/m68000/m68000gen.py
+	@mkdir -p $(GEN)
+	$(PYTHON) libpcsxcore/arcade/m68000/m68000gen.py decode $< $@
+
+$(GEN)/m68000-head.h: libpcsxcore/arcade/m68000/m68000.lst libpcsxcore/arcade/m68000/m68000gen.py
+	@mkdir -p $(GEN)
+	$(PYTHON) libpcsxcore/arcade/m68000/m68000gen.py header $< $@
+
+$(TARGET): $(SOURCES) libpcsxcore/arcade/m68000.h libpcsxcore/arcade/m68000/m68000_internal.h \
+           libpcsxcore/arcade/m68000/m68000_compat.h $(GEN)/m68000-head.h libpcsxcore/arcade/raizing_sound.h libpcsxcore/arcade/ymf271.h libpcsxcore/arcade/ymf271_internal.h
+	@mkdir -p $(BUILD)
+	$(CXX) $(COMMON) -O2 $(SOURCES) -o $@
+
+$(SAN_TARGET): $(SOURCES) libpcsxcore/arcade/m68000.h libpcsxcore/arcade/m68000/m68000_internal.h \
+               libpcsxcore/arcade/m68000/m68000_compat.h $(GEN)/m68000-head.h libpcsxcore/arcade/raizing_sound.h libpcsxcore/arcade/ymf271.h libpcsxcore/arcade/ymf271_internal.h
+	@mkdir -p $(BUILD)
+	$(CXX) $(SAN_COMMON) -O1 -fsanitize=address,undefined -fno-omit-frame-pointer $(SOURCES) -o $@
+
+test: $(TARGET)
+	$(TARGET)
+
+sanitize: $(SAN_TARGET)
+	$(SAN_TARGET)
+
+clean:
+	rm -rf $(BUILD)

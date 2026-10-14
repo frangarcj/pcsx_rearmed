@@ -1,16 +1,15 @@
-/* GPL-2.0-or-later. Linear resampling at exact clock/768 input rates. */
+/* GPL-2.0-or-later. Linear resampling at exact oscillator/divider input rates. */
 #include "arcade_audio_mixer.h"
 #include <math.h>
 #include <string.h>
 #include <limits.h>
-#define OUTPUT_TICKS (44100u * 768u)
 
 void arcade_mix_reset(ArcadeAudioMixer *mix)
 {
     for (unsigned i = 0; i < 2; ++i) {
-        unsigned clock = mix->lane[i].clock;
+        unsigned clock = mix->lane[i].clock, divider = mix->lane[i].divider;
         memset(&mix->lane[i], 0, sizeof(mix->lane[i]));
-        mix->lane[i].clock = clock;
+        mix->lane[i].clock = clock; mix->lane[i].divider = divider;
     }
     mix->error = 0;
 }
@@ -18,13 +17,22 @@ void arcade_mix_reset(ArcadeAudioMixer *mix)
 void arcade_mix_init(ArcadeAudioMixer *mix, unsigned spu_clock,
     void (*output)(void *, const int16_t *, unsigned), void *opaque)
 {
+    arcade_mix_init_rates(mix, spu_clock, 25000000, 768, output, opaque);
+}
+
+void arcade_mix_init_rates(ArcadeAudioMixer *mix, unsigned spu_clock,
+    unsigned daughter_clock, unsigned daughter_divider,
+    void (*output)(void *, const int16_t *, unsigned), void *opaque)
+{
     memset(mix, 0, sizeof(*mix));
     mix->lane[0].clock = spu_clock;
-    mix->lane[1].clock = 25000000;
+    mix->lane[0].divider = 768;
+    mix->lane[1].clock = daughter_clock;
+    mix->lane[1].divider = daughter_divider;
     mix->gain = 100;
     mix->output = output;
     mix->opaque = opaque;
-    if (!spu_clock || !output) mix->error = 1;
+    if (!spu_clock || !daughter_clock || !daughter_divider || daughter_divider > UINT32_MAX / 44100u || !output) mix->error = 1;
 }
 
 static void deliver(ArcadeAudioMixer *mix)
@@ -54,15 +62,16 @@ void arcade_mix_push(ArcadeAudioMixer *mix, unsigned source, float left, float r
 {
     if (source > 1 || mix->error) return;
     ArcadeMixLane *lane = &mix->lane[source];
+    const uint64_t output_ticks = (uint64_t)44100 * lane->divider;
     if (!isfinite(left) || !isfinite(right) || !lane->clock ||
-        lane->position > UINT64_MAX - OUTPUT_TICKS) { mix->error = 1; return; }
+        lane->position > UINT64_MAX - output_ticks) { mix->error = 1; return; }
     float current[2] = {left, right};
     if (!lane->inputs) memcpy(lane->previous, current, sizeof(current));
     lane->inputs++;
     lane->nonzero += left != 0 || right != 0;
     while (lane->next_output <= lane->position) {
         if (lane->count == ARCADE_MIX_RING) { mix->error = 1; return; }
-        float t = lane->position ? (float)(lane->next_output + OUTPUT_TICKS - lane->position) / OUTPUT_TICKS : 1.0f;
+        float t = lane->position ? (float)(lane->next_output + output_ticks - lane->position) / output_ticks : 1.0f;
         unsigned tail = (lane->head + lane->count) % ARCADE_MIX_RING;
         for (unsigned ch = 0; ch < 2; ++ch) {
             float value = lane->previous[ch] + t * (current[ch] - lane->previous[ch]);
@@ -75,5 +84,5 @@ void arcade_mix_push(ArcadeAudioMixer *mix, unsigned source, float left, float r
         deliver(mix);
     }
     memcpy(lane->previous, current, sizeof(current));
-    lane->position += OUTPUT_TICKS;
+    lane->position += output_ticks;
 }

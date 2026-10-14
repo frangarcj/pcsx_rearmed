@@ -86,9 +86,10 @@ SOURCES += libpcsxcore/system12.c libpcsxcore/system11.c libpcsxcore/system10.c 
   libpcsxcore/arcade/taito_fx1.c libpcsxcore/arcade/taito_sound_comm.c libpcsxcore/arcade/mb3773.c \
   libpcsxcore/arcade/mb89371.c libpcsxcore/arcade/i8251.c \
   libpcsxcore/arcade/eeprom93c46.c
-CFLAGS += -I$(BUILD)/gnet-generated -Ilibpcsxcore/arcade/tms57002
+CFLAGS += -I$(BUILD)/gnet-generated -Ilibpcsxcore/arcade/tms57002 -I$(BUILD)/m68000-generated -Ilibpcsxcore/arcade/m68000
 SOURCES += libpcsxcore/arcade/zsg2.c
-CXXSOURCES := libpcsxcore/arcade/gnet_zoom.cpp libpcsxcore/arcade/rf5c296.cpp \
+CXXSOURCES := libpcsxcore/arcade/ymf271.cpp libpcsxcore/arcade/raizing_sound.cpp libpcsxcore/arcade/m68000.cpp \
+ libpcsxcore/arcade/gnet_zoom.cpp libpcsxcore/arcade/rf5c296.cpp \
  libpcsxcore/arcade/gnet_pccard.cpp \
  libpcsxcore/arcade/ata_storage.cpp \
  libpcsxcore/arcade/ata_mame/atahle_port.cpp \
@@ -118,8 +119,12 @@ ifeq ($(SYSTEM12_TIMING),1)
 CFLAGS += -DPCSX_SYSTEM12_SOURCE_TIMING
 endif
 endif
+ifeq ($(BOARD),1)
+M68000_GENERATED := $(addprefix $(BUILD)/m68000-generated/,m68000-decode.cpp m68000-sdf.cpp m68000-sdp.cpp)
+M68000_OBJECTS := $(M68000_GENERATED:.cpp=.o)
+endif
 CXXSOURCES += $(PAUSE_CXXSOURCES)
-OBJECTS := $(addprefix $(BUILD)/,$(SOURCES:.c=.o) $(CXXSOURCES:.cpp=.o) $(ASM_SOURCES:.S=.o)) $(LIBCHDR_EXTRA_OBJECTS)
+OBJECTS := $(addprefix $(BUILD)/,$(SOURCES:.c=.o) $(CXXSOURCES:.cpp=.o) $(ASM_SOURCES:.S=.o)) $(LIBCHDR_EXTRA_OBJECTS) $(M68000_OBJECTS)
 GNET_TMS_HEADER := $(BUILD)/gnet-generated/tms57002.hxx
 $(GNET_TMS_HEADER): libpcsxcore/arcade/tms57002/tmsinstr.lst libpcsxcore/arcade/tms57002/tmsmake.py
 	@mkdir -p $(dir $@)
@@ -128,7 +133,22 @@ $(BUILD)/libpcsxcore/arcade/tms57002/tms57002_core.o \
 $(BUILD)/libpcsxcore/arcade/tms57002/tms57kdec.o \
 $(BUILD)/libpcsxcore/arcade/tms57002/tmsops.o: $(GNET_TMS_HEADER)
 
-.PHONY: all clean smoke board-test system11-test system10-test systemgv-test tecmo-tps-test taito-fx1z-test capcom-zn-test taito-fx1-test systemgnet-test gpu-type1-test devices-test FORCE
+ifeq ($(BOARD),1)
+$(BUILD)/m68000-generated/m68000-head.h: libpcsxcore/arcade/m68000/m68000.lst libpcsxcore/arcade/m68000/m68000gen.py
+	@mkdir -p $(dir $@)
+	python3 libpcsxcore/arcade/m68000/m68000gen.py header $< $@
+$(M68000_GENERATED): $(BUILD)/m68000-generated/m68000-%.cpp: libpcsxcore/arcade/m68000/m68000.lst libpcsxcore/arcade/m68000/m68000gen.py
+	@mkdir -p $(dir $@)
+	python3 libpcsxcore/arcade/m68000/m68000gen.py $* $< $@
+$(BUILD)/libpcsxcore/arcade/m68000.o $(M68000_OBJECTS): $(BUILD)/m68000-generated/m68000-head.h
+$(BUILD)/libpcsxcore/arcade/ymf271.o $(BUILD)/libpcsxcore/arcade/m68000.o $(M68000_OBJECTS): CXX_STANDARD = c++20
+$(M68000_OBJECTS): $(BUILD)/m68000-generated/%.o: $(BUILD)/m68000-generated/%.cpp $(BUILD)/compile-flags.txt
+	$(CXX) $(filter-out -std=gnu99,$(CFLAGS)) -std=c++20 -MMD -MP -c $< -o $@
+.SECONDARY: $(M68000_GENERATED)
+endif
+CXX_STANDARD = c++17
+
+.PHONY: all clean smoke board-test system11-test system10-test systemgv-test tecmo-tps-test raizing-zn-test taito-fx1z-test capcom-zn-test taito-fx1-test systemgnet-test gpu-type1-test devices-test FORCE
 all: $(TARGET)
 $(TARGET): $(OBJECTS) $(SHELF_LIB)
 	$(CXX) -arch arm64 -Wl,-dead_strip -o $@ $(OBJECTS) -lz -lm $(GPU_LIBS)
@@ -152,7 +172,7 @@ $(BUILD)/%.o: %.c $(BUILD)/revision.h $(BUILD)/compile-flags.txt
 $(BUILD)/libpcsxcore/arcade/h8.o: CFLAGS += $(H8_CFLAGS)
 $(BUILD)/%.o: %.cpp $(BUILD)/revision.h $(BUILD)/compile-flags.txt
 	@mkdir -p $(dir $@)
-	$(CXX) $(filter-out -std=gnu99,$(CFLAGS)) -std=c++17 -MMD -MP -c $< -o $@
+	$(CXX) $(filter-out -std=gnu99,$(CFLAGS)) -std=$(CXX_STANDARD) -MMD -MP -c $< -o $@
 $(BUILD)/%.o: %.S $(BUILD)/compile-flags.txt
 	@mkdir -p $(dir $@)
 	$(CC) $(filter-out -std=gnu99 -include stdio.h,$(CFLAGS)) -c $< -o $@
@@ -173,6 +193,9 @@ systemgv-test: $(TARGET)
 ifeq ($(DRC),1)
 	python3 tests/check_systemgv_harness.py --harness $(TARGET) --drc
 endif
+raizing-zn-test: $(TARGET)
+	python3 scripts/generate_raizing_zn_profiles.py --check
+	python3 tests/check_raizing_zn_harness.py --harness $(TARGET)
 tecmo-tps-test: $(TARGET)
 	python3 scripts/generate_tecmo_tps_profiles.py --check
 	python3 tests/check_tecmo_tps_harness.py --harness $(TARGET)
@@ -273,6 +296,8 @@ devices-test: $(BUILD)/test-nor-flash $(BUILD)/test-c352 $(BUILD)/test-serial $(
 	$(MAKE) -f tests/Makefile.mb89371 BUILD=$(BUILD)/mb89371-tests test
 	$(MAKE) -f tests/Makefile.nscsi-hd BUILD=$(BUILD)/nscsi-hd-tests test
 	$(MAKE) -f tests/Makefile.nscsi-cd BUILD=$(BUILD)/nscsi-cd-tests test
+	$(MAKE) -f tests/Makefile.raizing-sound BUILD=$(BUILD)/raizing-sound-tests CXX='$(CXX)' test
+	$(MAKE) -f tests/Makefile.ymf271 BUILD=$(BUILD)/ymf271-tests CXX='$(CXX)' test
 	$(MAKE) -f tests/Makefile.m68000 BUILD=$(BUILD)/m68000-tests CXX='$(CXX)' test
 	$(MAKE) -f tests/Makefile.tms57002 BUILD=$(BUILD)/tms57002-tests CXX='$(CXX)' test
 ifeq ($(HAVE_CHD),1)
