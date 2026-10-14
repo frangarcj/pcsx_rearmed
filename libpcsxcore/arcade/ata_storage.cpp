@@ -16,9 +16,9 @@
 struct ata_storage {
   virtual ~ata_storage() = default;
   virtual uint16_t command_r(uint32_t offset, uint16_t mem_mask,
-                             bool eight_bit) = 0;
+                             int eight_bit) = 0;
   virtual void command_w(uint32_t offset, uint16_t data, uint16_t mem_mask,
-                         bool eight_bit) = 0;
+                         int eight_bit) = 0;
   virtual uint16_t control_r(uint32_t offset, uint16_t mem_mask) = 0;
   virtual void control_w(uint32_t offset, uint16_t data, uint16_t mem_mask) = 0;
   virtual uint16_t dma_r() = 0;
@@ -138,16 +138,16 @@ public:
   }
 
   uint16_t command_r(uint32_t offset, uint16_t mem_mask,
-                     bool eight_bit) override {
+                     int eight_bit) override {
     OperationGuard guard(*this);
-    m_8bit_data_transfers = eight_bit;
+    if (eight_bit >= 0) m_8bit_data_transfers = eight_bit != 0;
     (void)mem_mask; // MAME's PC Card adapter converts this lane test to the flag.
     return ata_hle_device_base::command_r(offset);
   }
   void command_w(uint32_t offset, uint16_t data, uint16_t mem_mask,
-                 bool eight_bit) override {
+                 int eight_bit) override {
     OperationGuard guard(*this);
-    m_8bit_data_transfers = eight_bit;
+    if (eight_bit >= 0) m_8bit_data_transfers = eight_bit != 0;
     (void)mem_mask;
     ata_hle_device_base::command_w(offset, data);
   }
@@ -422,13 +422,13 @@ extern "C" uint64_t ata_storage_now(const ata_storage_t *ata) {
 }
 extern "C" uint16_t ata_storage_command_r(ata_storage_t *ata, uint32_t offset,
                                             uint16_t mask, int eight_bit) {
-  return ata ? ata->command_r(offset, mask, eight_bit != 0) : 0xffff;
+  return ata ? ata->command_r(offset, mask, eight_bit) : 0xffff;
 }
 extern "C" void ata_storage_command_w(ata_storage_t *ata, uint32_t offset,
                                         uint16_t data, uint16_t mask,
                                         int eight_bit) {
   if (ata)
-    ata->command_w(offset, data, mask, eight_bit != 0);
+    ata->command_w(offset, data, mask, eight_bit);
 }
 extern "C" uint16_t ata_storage_control_r(ata_storage_t *ata, uint32_t offset,
                                             uint16_t mask) {
