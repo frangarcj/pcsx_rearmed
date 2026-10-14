@@ -104,10 +104,10 @@ The game does not write flashes in these runs; source component/guest tests
 separately exercise Fujitsu commands and persistence of mutable flash data.
 
 * Final RAM SHA256: `792bd6a1677573696cb4d2c5567e15d282b7a7e203d60267e050a2c9a5ffd29c`.
-* Raw SPU WAV SHA256: `87e55a783ab117cd258826113148b3505319ec404e5fab81765e38f945bae1df`.
-* SPU: 5,525,776 stereo frames at 44.1 kHz, peak 10,606.
+* Raw SPU WAV SHA256: `ec0f32a92fd44384d92949c315b664a10c15349bd2351a87bdf8cad30389073f`.
+* SPU: 5,528,516 stereo frames at 44.1 kHz, peak 10,606.
 
-A separate 5000-frame interactive GL run consumes the 1102 events scheduled
+A separate pre-clock-fix 5000-frame interactive GL run consumes the 1102 events scheduled
 within its frame bound and shows an active PINKROCKER round. SDL receives
 3,682,938 stereo frames with source gain 1, peak 10,606 and no audio errors.
 The raw and SDL WAV files are byte-identical (SHA256
@@ -224,12 +224,11 @@ one byte at `92854` (BCD `25` versus `26`), consistent with source host-clock
 startup one second apart. The mismatch is preserved in the evidence rather
 than discarded to claim an identical RAM hash.
 
-The actual guest's ATAPI audio commands decode 2,322,708 stereo CDDA frames,
-2,268,288 nonzero frames and peak 32,639 in both runs. Those samples still need
-to be mixed with SPU at the source gain-1 speaker routes. Raw SPU output and CDDA
-decoding are explicitly reported separately; there is no complete speaker mix
-or live mixed-audio claim yet. The separate original-disc component is recorded
-in `atapi-cr589-port.md`. A longer provisional 11,000-frame replay returns to
+The initial guest integration decoded 2,322,708 stereo CDDA frames, 2,268,288
+nonzero frames and peak 32,639 in both runs while its speaker output still
+contained SPU only. That intermediate result is superseded by the complete
+source-clock speaker and live output checks below. The separate original-disc
+component is recorded in `atapi-cr589-port.md`. A longer provisional 11,000-frame replay returns to
 the warning/title flow and schedules its final release outside the bound
 (279/280 events); it is not substituted for the fully consumed 9600-frame player
 run. Full song completion, P2/operator checks and physical Vita remain open.
@@ -300,3 +299,13 @@ build/mac-harness-vitagl-like/pcsx-harness --system573 roms/prepared/ddr2m \
   --audio /path/to/raw-spu.wav --mixed-audio /path/to/speaker.wav \
   --interactive --capture-gl --output /path/to/player.ppm
 ```
+
+
+After the source-DMA clock correction, Hyperbbc's original GL/NEON 7500-frame
+P1 regression still shows PINKROCKER versus two COMPUTER players, consumes
+1902/1902 inputs and has zero faults. CPU cycles/blocks/PC and final RAM are
+unchanged; RAM SHA256 remains `792bd6a1677573696cb4d2c5567e15d282b7a7e203d60267e050a2c9a5ffd29c`.
+The current raw SPU captures are identical in both renderers, now with 5,528,516
+stereo frames (the 2740 previously skipped boot frames recovered), peak 10,606
+and SHA256 `ec0f32a92fd44384d92949c315b664a10c15349bd2351a87bdf8cad30389073f`.
+The earlier live Hyperbbc captures remain explicitly pre-clock-fix evidence.
