@@ -411,7 +411,7 @@ static void usage(const char *name)
     "[--board-bus-trace FILE] [--system12-edge-trace FILE] [--system12-trace-shared-writes | --system12-trace-shared-accesses] "
     "[--max-blocks N] [--icache] [--widescreen] [--borderless] [--gpu-thread] [--save-state-at FRAME FILE] [--load-state FILE] [--drc] [--interactive [--art-dir DIR] [--pause-at N [--pause-script STEPS] [--pause-shot FILE.ppm]]...] [--system12-vblank-sync-only] [--system12-source-step] [--frontend-loop]\n"
     "       %s (--gpu-type1-test | --gpu-type1-test-1m)\n", name, name);
-  fprintf(stderr,"       %s --disc IMAGE.cue --bios BIOS.bin [--frames N] [--inputs CSV] [--audio WAV] [--capture-gl] [--output PPM] (BOARD=1, bounded replay)\n",name);
+  fprintf(stderr,"       %s --disc IMAGE.cue --bios BIOS.bin [--frames N] [--inputs CSV] [--audio WAV] [--capture-gl] [--gl-1x] [--output PPM] (BOARD=1, bounded replay)\n",name);
 }
 
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
@@ -1191,6 +1191,7 @@ int main(int argc, char **argv)
 {
   const char *exe = NULL, *board = NULL, *output = "frame.ppm";
   const char *disc = NULL, *bios_path = NULL;
+  int gl_native_resolution = 0;
   const char *inputs_path = NULL, *audio_path = NULL, *nvram_path = NULL;
 #ifdef PCSX_SYSTEM12
   harness_input_event *input_events = NULL;
@@ -1270,6 +1271,7 @@ int main(int argc, char **argv)
     if (!strcmp(argv[i], "--exe") && i + 1 < argc) exe = argv[++i];
     else if (!strcmp(argv[i],"--disc") && i+1<argc) disc=argv[++i];
     else if (!strcmp(argv[i],"--bios") && i+1<argc) bios_path=argv[++i];
+    else if (!strcmp(argv[i],"--gl-1x")) gl_native_resolution=1;
     else if(!strcmp(argv[i],"--system-gv-tokimeki-fixture") && i+1<argc){board=argv[++i];board_family=102;gv_tok_fixture=1;}
     else if (!strcmp(argv[i], "--system-gv-simpbowl-fixture") && i+1<argc){board=argv[++i];board_family=102;gv_simp_fixture=1;}
     else if (!strcmp(argv[i], "--system-gv-fixture") && i + 1 < argc) {
@@ -1563,8 +1565,8 @@ int main(int argc, char **argv)
 #endif
   }
 #if !defined(GPU_VITA_CTR)
-  if (capture_gl) {
-    fprintf(stderr, "--capture-gl requires GPU=vitagl-like\n");
+  if (capture_gl || gl_native_resolution) {
+    fprintf(stderr, "--capture-gl/--gl-1x require GPU=vitagl-like\n");
     return 2;
   }
 #endif
@@ -1656,6 +1658,10 @@ int main(int argc, char **argv)
 #ifdef GPU_VITA_CTR
   {
     extern void VitaCtrNativeRenderer_SetAspectMode(int mode);
+    extern int pcsx_vita_gl_hd;
+    pcsx_vita_gl_hd = !gl_native_resolution;
+    fprintf(stderr,"High Octane resolution=%s GPU_worker=%d\n",
+      pcsx_vita_gl_hd ? "HD" : "1x",gpu_thread);
     if (widescreen) VitaCtrNativeRenderer_SetAspectMode(2);
   }
 #endif
