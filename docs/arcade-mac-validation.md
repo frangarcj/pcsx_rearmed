@@ -28,7 +28,7 @@ intermediate results. Physical Vita is outside this Mac pass.
 | Eighting/Raizing ZN | Bloody Roar 2 (`bldyror2`), Brave Blade (`brvblade`) | Both World sets source-audited; native interpreter/GL player combat/shooter gameplay with source MC68000/YMF271, live SPU/YMF audio, portrait rotation and zero device faults; `raizing-zn-mac.md` |
 | Konami System GV common map | Hyper Athlete (`hyperath`) | Authenticated BIOS/EEPROM/CD prepared. Interpreter/GL enters a P1 running event with 110/110 input events, nonzero SPU and no device faults; `konamigv-mac.md`. CDDA mixing and authentic DRC remain pending |
 | Konami System GV special maps | Trackball, shooting, flash and printer variants | Separate source peripherals; representative selection/runtime pending |
-| Konami System GQ | Crypt Killer (`cryptklr`) | ROM archive available; CHD and native board runtime pending |
+| Konami System GQ | Crypt Killer (`cryptklr`) | Original BIOS/sound/PCM ROMs, source EEPROM defaults and HDD CHD fully audited/prepared. GQ component guest sound/IRQ/SCSI READ/WRITE DMA passes; MAME reaches startup checks. Native PCSX/frontend integration and player validation remain pending; `konamigq-mac.md` |
 | Konami System 573 | ROM/flash and analog/digital sound generations | Source devices/components only; representative media, complete board and runtime pending |
 | Konami Twinkle | beatmania IIDX | BIOS archive available; game media, native PSX integration and runtime pending |
 
