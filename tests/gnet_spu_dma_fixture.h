@@ -33,13 +33,14 @@ static int harness_source_spu_dma_fixture(const char *name, u32 clock, u32 sourc
   SPU_readDMAMem((unsigned short *)after, 8, psxRegs.cycle);
   if (memcmp(after, psxRegs.ptrs.psxM + 0x4000, sizeof(after))) failed = 1;
   /* Read DMA is immediate in the source, with RAM masking at the edge. */
+  const u32 ram_edge = 0x80000000u + PSX_RAM_SIZE - 4;
   SPU_writeRegister(0x1f801da6, 0, psxRegs.cycle);
-  psxMemWrite32(&psxRegs, 0x1f8010c0, 0x803ffffc);
+  psxMemWrite32(&psxRegs, 0x1f8010c0, ram_edge);
   psxMemWrite32(&psxRegs, 0x1f8010c4, 0x00010002);
   psxHwWriteChcr4(0x01000200);
-  if (psxMemRead32(&psxRegs, 0x803ffffc) != 0x56781234 ||
+  if (psxMemRead32(&psxRegs, ram_edge) != 0x56781234 ||
       psxMemRead32(&psxRegs, 0x80000000) != 0xdef09abc ||
-      psxHu32(0x10c0) != 0x803ffffc || (psxHu32(0x10c8) & 0x01000000)) failed = 1;
+      psxHu32(0x10c0) != ram_edge || (psxHu32(0x10c8) & 0x01000000)) failed = 1;
   fprintf(stderr, "%s SPU DMA fixture: %s delayed_payload=1 ticks=24000 boundary_cycle=%u madr_retained=1 read_wrap=1\n", name, failed ? "FAIL" : "PASS", source_delay);
   return failed;
 }

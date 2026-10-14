@@ -21,7 +21,7 @@ intermediate results. Physical Vita is outside this Mac pass.
 | Tecmo TPS Z80 link | Gallop Racer 2 Link (`glpracr2l`) | Source-audited; interpreter GL/NEON local player race, 138/138 inputs, real extra Z80 and source-gain SPU audio pass. Source link ports are unmapped; cabinet transport remains unimplemented/unvalidated; `tecmo-tps-link-mac.md` |
 | Video System/Visco ZN-1 | Aero Fighters Special (`aerofgts`) | USA source-audited; native interpreter/GL 1P shooting, 112/112 inputs, portrait presentation, exact source-gain SPU/SDL capture and zero faults; `visco-zn-mac.md` |
 | Atlus ZN-1 | Heaven's Gate (`hvnsgate`) | Source-audited; native interpreter/GL Jin combat, 198/198 inputs, MC68000/YMZ280B IRQs, mixed SPU/YMZ audio and zero faults; `atlus-zn-mac.md` |
-| Time Warner/Atari ZN-1 | Primal Rage II (`primrag2`) | Source COH1000W uses 8 MiB RAM, VT83C461 HDD and DMA5, with a 600 ms watchdog; media/adapter/runtime pending |
+| Time Warner/Atari ZN-1 | Primal Rage II (`primrag2`) | Source-audited ROM/EEPROM/CHD; native interpreter GL/NEON Arik player combat, 82/82 inputs, VIA HDD/DMA5 into 8 MiB RAM, watchdog, source-gain SPU/SDL sound and zero faults; `primal-zn-mac.md` |
 | Acclaim ZN-1 ROM/sound | NBA Jam Extreme (`nbajamex`) | Source adds SRAM/bank mapping and Acclaim RAX sound; media/adapter/runtime pending |
 | Acclaim ZN-1 disk | Judge Dredd (`jdredd`) | Source adds ATA HDD/IRQ10 and a separate VBlank handler; media/adapter/runtime pending |
 | Metro ZN storage variants | Bust a Move 2 (`bam2`, `bam2a`) | Source has HDD/CD configurations and marks both nonworking with imperfect sound. Complete native integration and game evidence remain pending |
@@ -61,8 +61,10 @@ from the arcade boards.
   Z80, YMZ280B, dual FIFOs and live SPU/YMZ mix. The separate TPS
   Gallop Racer 2 Link configuration now passes local racing in GL/NEON with
   its original extra Z80 ROM. Its physical cabinet transport remains open:
-  source itself exposes no link devices/ports. Proceed to Primal Rage II's
-  HDD/DMA5/watchdog board and remaining families.
+  source itself exposes no link devices/ports. Primal Rage II now passes actual
+  Arik combat in GL/NEON with the original HDD, VIA/DMA5, 8 MiB RAM, six buttons
+  and live SPU audio. Its intentional watchdog reset also preserves upper RAM.
+  Proceed to Acclaim NBA Jam Extreme/Judge Dredd and remaining families.
 
 Local evidence is in `artifacts/boards-mac-20261014`; scratch/reference runs are
 under `/tmp/pcsx-boards-mac-20261014`. The user-linked Internet Archive collection

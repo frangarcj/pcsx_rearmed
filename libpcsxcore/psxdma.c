@@ -34,7 +34,13 @@
 
 void psxDma5(u32 madr, u32 bcr, u32 chcr)
 {
-	if (system10_active()) {
+    if (systemzn_primal_active()) {
+        if (systemzn_primal_dma5(madr,bcr,chcr)==0) {
+            psxHu32ref(0x10d8) &= SWAPu32(~0x11000000u);
+            DMA_INTERRUPT(5);
+        }
+    }
+    else if (system10_active()) {
 		if (!system10_dma5(madr, bcr, chcr)) {
 			psxHu32ref(0x10d8) &= SWAPu32(~0x11000000u);
 			DMA_INTERRUPT(5);
@@ -75,7 +81,7 @@ int psxSourceSpuDmaActive(void)
     if (systemgnet_active()) return 1;
 #endif
 #ifdef PCSX_SYSTEM12
-    if (systemtaito_active() || systemzn_tps_active() || systemzn_raizing_active() || systemzn_visco_active() || systemzn_atlus_active() || systemzn_cbaj_active()) return 1;
+    if (systemtaito_active() || systemzn_tps_active() || systemzn_raizing_active() || systemzn_visco_active() || systemzn_atlus_active() || systemzn_cbaj_active() || systemzn_primal_active()) return 1;
 #ifdef PCSX_SYSTEM_GV
     if (systemgv_active()) return 1;
 #endif

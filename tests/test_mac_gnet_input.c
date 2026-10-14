@@ -6,7 +6,7 @@
 #undef main
 #include <assert.h>
 static unsigned wheel=128, trigger=128, handle[2]={128,128};
-static int coin, start, fire, beast, beast2, service, raizing_mode;
+static int coin, start, fire, beast, beast2, service, raizing_mode, fifth, sixth;
 int gnet_test_analog(const char *name,unsigned raw)
 {
     if (!strcmp(name,"p1_wheel")) wheel=raw;
@@ -19,6 +19,8 @@ static int digital(const char *name,int down)
 {
     if (raizing_mode && name[0] == 'p') assert(!strchr(name,'_'));
     if (!strcmp(name,"p1button4")) beast=down;
+    if (!strcmp(name,"p1button5")) fifth=down;
+    if (!strcmp(name,"p1button6")) sixth=down;
     if (!strcmp(name,"p2button4")) beast2=down;
     if (!strcmp(name,"service1")) service=down;
     if (!strcmp(name,"coin1")) coin=down;
@@ -154,6 +156,15 @@ int main(void)
     }
     assert(cbaj_mix_frames==512 && !interactive_mix.error && !interactive_mix.clipped);
     puts("CBaj SDL keyboard/gamepad/focus and production SPU0.35/YMZ0.35 gain/rate routing PASS");
+    board.family=110;interactive_focused=1;
+    key(SDL_SCANCODE_F,1);key(SDL_SCANCODE_H,1);assert(fifth && sixth);
+    release_interactive_input();assert(!fifth && !sixth);
+    assert(SDL_SetJoystickVirtualButton(joy,SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,true));
+    assert(SDL_SetJoystickVirtualButton(joy,SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,true));
+    SDL_UpdateJoysticks();frame_counter++;poll_interactive_input();assert(fifth && sixth && fire && start);
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_WINDOW_FOCUS_LOST;
+    assert(SDL_PushEvent(&e));poll_interactive_input();assert(!fifth && !sixth && !fire && !start);
+    puts("Primal SDL six-button keyboard/gamepad shoulder mapping and focus release PASS");
     SDL_CloseGamepad(interactive_pads[0]);interactive_pads[0]=NULL;
     SDL_CloseJoystick(joy);assert(SDL_DetachVirtualJoystick(id));
     SDL_DestroyWindow(w);SDL_Quit();
