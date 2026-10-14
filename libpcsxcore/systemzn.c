@@ -19,6 +19,10 @@
 #include "arcade/primal_zn_bus.h"
 #include "arcade/nbajam_zn_bus.h"
 #include "arcade/jdredd_zn_bus.h"
+#include "arcade/metro_zn_bus.h"
+#ifdef HAVE_CHD
+#include "libchdr/chd.h"
+#endif
 #include "arcade/rax_sound.h"
 #include "arcade/chd_hd.h"
 #include <math.h>
@@ -49,6 +53,7 @@ typedef struct ZnFillCheck { unsigned region; uint32_t offset, length; uint8_t v
 #include "arcade/primal_zn_profiles.inc"
 #include "arcade/nbajam_zn_profiles.inc"
 #include "arcade/jdredd_zn_profiles.inc"
+#include "arcade/metro_zn_profiles.inc"
 
 static const ZnProfile profiles[] = {
 #include "arcade/capcom_zn_profiles.inc"
@@ -62,6 +67,11 @@ typedef struct SystemZn {
     CbajSound *cbaj_sound;
     TecmoLink *tecmo_link;
     int primal, nbajam, jdredd, memory_initialized;
+    int metro;uint8_t metro_dsw;
+    MetroZnBus metro_bus;
+#ifdef HAVE_CHD
+    chd_file *metro_media;
+#endif
     JdreddZnBus judge_bus;
     uint64_t judge_irq_edges;uint8_t judge_ata_irq;
     NbajamZnBus nba_bus;
@@ -122,8 +132,8 @@ static uint32_t canonical_address(uint32_t address)
 static const ZnProfile *find_profile(const char *set)
 {
     size_t i;
-    const ZnProfile *list = board.jdredd ? jdredd_profiles : board.nbajam ? nbajam_profiles : board.primal ? primal_profiles : board.cbaj ? cbaj_profiles : board.atlus ? atlus_profiles : board.visco ? visco_profiles : board.raizing ? raizing_profiles : board.tps ? tps_profiles : profiles;
-    size_t count = board.jdredd ? sizeof(jdredd_profiles)/sizeof(jdredd_profiles[0]) : board.nbajam ? sizeof(nbajam_profiles)/sizeof(nbajam_profiles[0]) : board.primal ? sizeof(primal_profiles) / sizeof(primal_profiles[0]) : board.cbaj ? sizeof(cbaj_profiles) / sizeof(cbaj_profiles[0]) : board.atlus ? sizeof(atlus_profiles) / sizeof(atlus_profiles[0]) : board.visco ? sizeof(visco_profiles) / sizeof(visco_profiles[0]) : board.raizing ? sizeof(raizing_profiles) / sizeof(raizing_profiles[0]) : board.tps ? sizeof(tps_profiles) / sizeof(tps_profiles[0]) : sizeof(profiles) / sizeof(profiles[0]);
+    const ZnProfile *list = board.metro ? metro_profiles : board.jdredd ? jdredd_profiles : board.nbajam ? nbajam_profiles : board.primal ? primal_profiles : board.cbaj ? cbaj_profiles : board.atlus ? atlus_profiles : board.visco ? visco_profiles : board.raizing ? raizing_profiles : board.tps ? tps_profiles : profiles;
+    size_t count = board.metro ? sizeof(metro_profiles)/sizeof(metro_profiles[0]) : board.jdredd ? sizeof(jdredd_profiles)/sizeof(jdredd_profiles[0]) : board.nbajam ? sizeof(nbajam_profiles)/sizeof(nbajam_profiles[0]) : board.primal ? sizeof(primal_profiles) / sizeof(primal_profiles[0]) : board.cbaj ? sizeof(cbaj_profiles) / sizeof(cbaj_profiles[0]) : board.atlus ? sizeof(atlus_profiles) / sizeof(atlus_profiles[0]) : board.visco ? sizeof(visco_profiles) / sizeof(visco_profiles[0]) : board.raizing ? sizeof(raizing_profiles) / sizeof(raizing_profiles[0]) : board.tps ? sizeof(tps_profiles) / sizeof(tps_profiles[0]) : sizeof(profiles) / sizeof(profiles[0]);
     for (i = 0; i < count; i++)
         if (!strcmp(list[i].set, set)) return &list[i];
     return NULL;
@@ -155,7 +165,7 @@ static int load_config(const char *directory, const ZnProfile **selected)
         if (i == 14 || (seen & (1u << i)) || !*equal || strlen(equal) >= sizeof(values[i])) goto bad;
         strcpy(values[i], equal); seen |= 1u << i;
     }
-    if (ferror(file) || seen != 0x3fff || strcmp(values[0], board.jdredd ? "pcsx-aow-jdredd-zn-v1" : board.nbajam ? "pcsx-aow-nbajam-zn-v1" : board.primal ? "pcsx-aow-primal-zn-v1" : board.cbaj ? "pcsx-aow-cbaj-tps-v1" : board.atlus ? "pcsx-aow-atlus-zn-v1" : board.visco ? "pcsx-aow-visco-zn-v1" : board.raizing ? "pcsx-aow-raizing-zn-v1" : board.tps ? "pcsx-aow-tecmo-tps-v1" : "pcsx-aow-capcom-zn-v1") ||
+    if (ferror(file) || seen != 0x3fff || strcmp(values[0], board.metro ? "pcsx-aow-metro-zn-v1" : board.jdredd ? "pcsx-aow-jdredd-zn-v1" : board.nbajam ? "pcsx-aow-nbajam-zn-v1" : board.primal ? "pcsx-aow-primal-zn-v1" : board.cbaj ? "pcsx-aow-cbaj-tps-v1" : board.atlus ? "pcsx-aow-atlus-zn-v1" : board.visco ? "pcsx-aow-visco-zn-v1" : board.raizing ? "pcsx-aow-raizing-zn-v1" : board.tps ? "pcsx-aow-tecmo-tps-v1" : "pcsx-aow-capcom-zn-v1") ||
         strcmp(values[13], "false")) goto bad;
     p = find_profile(values[1]);
     if (!p || strcmp(values[2], p->parent) || strcmp(values[3], p->bios_parent) ||
@@ -200,6 +210,7 @@ static int load_region(const char *directory, const char *name, unsigned index, 
 static uint8_t input_read(void *opaque, zn_board_input_t input)
 {
     (void)opaque;
+    if(board.metro && (input==ZN_INPUT_P1 || input==ZN_INPUT_P2))return board.inputs[input]|((board.metro_dsw&1)?0x40:0);
     if(board.jdredd && input==ZN_INPUT_SERVICE)return (board.inputs[input]&~8u)|(board.judge_bus.gun_mux?0:8);
     return input >= ZN_INPUT_P1 && input <= ZN_INPUT_P4 ? board.inputs[input] : 0xff;
 }
@@ -210,7 +221,7 @@ static uint32_t kick_read(void *opaque, unsigned player)
 }
 static uint8_t mcu_analog(void *opaque) { (void)opaque; return 0xff; }
 static uint16_t mcu_trackball(void *opaque) { (void)opaque; return 0; }
-static uint8_t mcu_dsw(void *opaque) { (void)opaque; return 0xff; }
+static uint8_t mcu_dsw(void *opaque) { (void)opaque; return board.metro?board.metro_dsw:0xff; }
 
 static uint64_t cycles_to_us(uint64_t cycles)
 {
@@ -354,9 +365,9 @@ static uint32_t tps_crc_byte(uint32_t crc, uint8_t byte)
 
 static int validate_tps_media(void)
 {
-    size_t profile = (size_t)(board.profile - (board.jdredd ? jdredd_profiles : board.nbajam ? nbajam_profiles : board.primal ? primal_profiles : board.cbaj ? cbaj_profiles : board.atlus ? atlus_profiles : board.visco ? visco_profiles : board.raizing ? raizing_profiles : tps_profiles));
-    const TpsMediaCheck *checks = board.jdredd ? jdredd_media[profile] : board.nbajam ? nbajam_media[profile] : board.primal ? primal_media[profile] : board.cbaj ? cbaj_media[profile] : board.atlus ? atlus_media[profile] : board.visco ? visco_media[profile] : board.raizing ? raizing_media[profile] : tps_media[profile];
-    size_t count = board.jdredd ? jdredd_media_count[profile] : board.nbajam ? nbajam_media_count[profile] : board.primal ? primal_media_count[profile] : board.cbaj ? cbaj_media_count[profile] : board.atlus ? atlus_media_count[profile] : board.visco ? visco_media_count[profile] : board.raizing ? raizing_media_count[profile] : tps_media_count[profile];
+    size_t profile = (size_t)(board.profile - (board.metro ? metro_profiles : board.jdredd ? jdredd_profiles : board.nbajam ? nbajam_profiles : board.primal ? primal_profiles : board.cbaj ? cbaj_profiles : board.atlus ? atlus_profiles : board.visco ? visco_profiles : board.raizing ? raizing_profiles : tps_profiles));
+    const TpsMediaCheck *checks = board.metro ? metro_media[profile] : board.jdredd ? jdredd_media[profile] : board.nbajam ? nbajam_media[profile] : board.primal ? primal_media[profile] : board.cbaj ? cbaj_media[profile] : board.atlus ? atlus_media[profile] : board.visco ? visco_media[profile] : board.raizing ? raizing_media[profile] : tps_media[profile];
+    size_t count = board.metro ? metro_media_count[profile] : board.jdredd ? jdredd_media_count[profile] : board.nbajam ? nbajam_media_count[profile] : board.primal ? primal_media_count[profile] : board.cbaj ? cbaj_media_count[profile] : board.atlus ? atlus_media_count[profile] : board.visco ? visco_media_count[profile] : board.raizing ? raizing_media_count[profile] : tps_media_count[profile];
     static const unsigned regions[] = {0, 1, 5, 6, 2, 3, 4, 7};
     for (unsigned r = 0; r < 8; ++r) {
         unsigned region = regions[r];
@@ -403,6 +414,20 @@ static int validate_tps_media(void)
 }
 
 #ifdef HAVE_CHD
+static int open_metro_media(const char *directory)
+{
+    int cd=!strcmp(board.profile->set,"bam2a");
+    const char *name=cd?"bam2cd.chd":"bam2.chd";
+    const char *expected=cd?"cdedc8f9eb67bed267c899d679f986bf1748bd00":"634d9a745a82c567fc4d7ce48e3570d88326c5f9";
+    char path[4096],digest[41];static const char hex[]="0123456789abcdef";
+    if(snprintf(path,sizeof(path),"%s/%s",directory,name)>=(int)sizeof(path))return -1;
+    if(chd_open(path,CHD_OPEN_READ,NULL,&board.metro_media)!=CHDERR_NONE)return -1;
+    const chd_header *h=chd_get_header(board.metro_media);if(!h)return -1;
+    for(unsigned i=0;i<20;i++){digest[2*i]=hex[h->sha1[i]>>4];digest[2*i+1]=hex[h->sha1[i]&15];}digest[40]=0;
+    if(strcmp(digest,expected))return -1;
+    fprintf(stderr,"Metro media: %s source SHA1 verified; H8 firmware NO_DUMP, ATA transport unimplemented\n",name);
+    return 0;
+}
 static int primal_disk_read(void *opaque, uint32_t lba, void *data)
 {
     (void)opaque; board.disk_reads++;
@@ -488,12 +513,21 @@ static int load_board(const char *directory, int family, int synthetic)
     board.primal = family == 6;
     board.nbajam = family == 7;
     board.jdredd = family == 8;
+    board.metro = family == 9;board.metro_dsw=0xfe;
     board.synthetic = synthetic;
     if (load_config(directory, &board.profile)) { memset(&board, 0, sizeof(board)); return -1; }
     if (load_region(directory, files[0], 0, board.profile->bios_size) ||
         load_region(directory, board.primal || board.jdredd ? "fixed.bin" : files[1], 1, board.profile->banked_size) ||
         load_region(directory, files[5], 5, 8) || load_region(directory, files[6], 6, 8)) goto bad;
-    if(board.jdredd){
+    if(board.metro){
+        if(!synthetic && validate_tps_media())goto bad;
+        if(metro_zn_bus_init(&board.metro_bus,board.regions[1],board.sizes[1]))goto bad;
+#ifdef HAVE_CHD
+        if(!synthetic && open_metro_media(directory))goto bad;
+#else
+        fprintf(stderr,"Metro ZN requires HAVE_CHD=1\n");goto bad;
+#endif
+    }else if(board.jdredd){
         if(!synthetic && validate_tps_media())goto bad;
 #ifdef HAVE_CHD
         if(open_primal_disk(directory))goto bad;
@@ -632,6 +666,28 @@ bad:
     return -1;
 }
 
+int systemzn_load_metro(const char *directory){return load_board(directory,9,0);}
+int systemzn_test_load_metro(const char *directory)
+{
+    static const uint32_t guest[]={
+        0x3c0a8000u, 0x3c08bf00u, 0x8d090000u, 0x00000000u, 0xad490100u, 0x3c08bf40u,
+        0x8d090000u, 0x00000000u, 0xad490104u, 0x3c08bfb0u, 0x2409000au, 0xa5090000u,
+        0x3c08bf40u, 0x8d090000u, 0x00000000u, 0xad490108u, 0x3c08bfb0u, 0x2409007fu,
+        0xa5090002u, 0x95090004u, 0x00000000u, 0xad49010cu, 0x2409001cu, 0xa5090002u,
+        0x95090004u, 0x00000000u, 0xad490110u, 0x24090000u, 0xa5090002u, 0x95090004u,
+        0x00000000u, 0xad490114u, 0x3c08bfa0u, 0x91090000u, 0x00000000u, 0xad490118u,
+        0x91090100u, 0x00000000u, 0xad49011cu, 0x91090300u, 0x00000000u, 0xad490120u,
+        0x3c094d45u, 0x35295452u, 0xad490124u, 0x1000ffffu, 0x00000000u,
+    };
+    if(load_board(directory,9,1))return -1;
+    memset(board.regions[0],0,board.sizes[0]);
+    for(unsigned i=0;i<sizeof(guest)/sizeof(guest[0]);i++){
+        uint32_t word=SWAPu32(guest[i]);memcpy(board.regions[0]+i*4,&word,4);
+    }
+    return 0;
+}
+int systemzn_metro_active(void){return board.active && board.metro;}
+int systemzn_metro_generic(void){return systemzn_metro_active() && (board.metro_dsw&1);}
 int systemzn_load(const char *directory) { return load_board(directory, 0, 0); }
 int systemzn_load_tps(const char *directory) { return load_board(directory, 1, 0); }
 int systemzn_test_load_tps(const char *directory) { return load_board(directory, 1, 1); }
@@ -695,6 +751,7 @@ void systemzn_unload(void)
     board.primal_bus=NULL;
     ata_storage_destroy(board.primal_ata);
 #ifdef HAVE_CHD
+    if(board.metro_media)chd_close(board.metro_media);
     if (board.primal_disk && arcade_chd_hd_flush(board.primal_disk)) fprintf(stderr,"Primal HDD overlay flush failed\n");
     arcade_chd_hd_close(board.primal_disk);
 #endif
@@ -741,6 +798,16 @@ static void map_bankedroms(void)
     capcom_zn_status_t status;
     unsigned a;
     if (!board.active || !psxRegs.ptrs.memRLUT || !psxRegs.ptrs.memWLUT) return;
+    if(board.metro){
+        for(a=0;a<3;a++)for(size_t off=0;off<0x800000;off+=SYSTEMZN_ROM_PAGE){
+            uint32_t addr=fixed_aliases[a]+off;unsigned idx=addr>>PSXM_SHIFT;
+            const uint8_t *rom=metro_zn_bus_rom_span(&board.metro_bus,0x1f000000+off,SYSTEMZN_ROM_PAGE);
+            psxRegs.ptrs.memRLUT[idx]=rom?(uintptr_t)rom-(uintptr_t)addr:INVALID_PTR_VAL;
+            psxRegs.ptrs.memWLUT[idx]=INVALID_PTR_VAL;
+        }
+        if(psxCpu && psxCpu->Clear)for(a=0;a<3;a++)psxCpu->Clear(bank_aliases[a],0x400000/4);
+        return;
+    }
     if(board.nbajam){
         for(a=0;a<3;a++)for(size_t off=0;off<0x800000;off+=SYSTEMZN_ROM_PAGE){
             uint32_t addr=fixed_aliases[a]+off;unsigned idx=addr>>PSXM_SHIFT;
@@ -806,11 +873,11 @@ void systemzn_mem_reset(void)
 {
     if (!board.active || !psxRegs.ptrs.psxM) return;
     memcpy(psxRegs.ptrs.psxR, board.regions[0], board.sizes[0]);
-    if ((!board.primal && !board.nbajam && !board.jdredd) || !board.memory_initialized) memset(psxRegs.ptrs.psxM, 0, psxRamSize);
+    if ((!board.primal && !board.nbajam && !board.jdredd && !board.metro) || !board.memory_initialized) memset(psxRegs.ptrs.psxM, 0, psxRamSize);
     board.memory_initialized=1;
     memset(psxRegs.ptrs.psxP, 0xff, 0x10000);
     map_bankedroms();
-    if (board.raizing || board.visco || board.atlus || board.cbaj || board.primal || board.nbajam || board.jdredd) return;
+    if (board.raizing || board.visco || board.atlus || board.cbaj || board.primal || board.nbajam || board.jdredd || board.metro) return;
     map_window(0x1fb80000u, board.regions[2], board.sizes[2], 0);
     map_window(0x9fb80000u, board.regions[2], board.sizes[2], 0);
     map_window(0xbfb80000u, board.regions[2], board.sizes[2], 0);
@@ -822,7 +889,7 @@ void systemzn_reset(void)
     /* MAME has no device_reset override for the shared ZN MCU, CAT702, AT28C16
      * or PSX SIO devices; preserve their pin/timer/storage state on soft reset. */
     board.faults = 0;
-    if (board.tps || board.raizing || board.visco || board.atlus || board.cbaj || board.primal || board.nbajam || board.jdredd) board.tps_bank = 0;
+    if (board.tps || board.raizing || board.visco || board.atlus || board.cbaj || board.primal || board.nbajam || board.jdredd || board.metro) board.tps_bank = 0;
     else capcom_zn_reset(board.capcom);
     if(board.nbajam){
         nbajam_zn_bus_reset(&board.nba_bus);
@@ -846,11 +913,12 @@ void systemzn_reset(void)
         if (tecmo_link_reset(board.tecmo_link)) board.faults |= 8;
         TecmoLinkStatus status; tecmo_link_status(board.tecmo_link, &status); board.sound_cycles = status.cycles;
     }
-    board.qsound_fraction = 0; if (!board.raizing && !board.atlus && !board.cbaj && !board.nbajam && !board.jdredd && !board.tecmo_link) board.sound_cycles = 0;
+    board.qsound_fraction = 0; if (!board.raizing && !board.atlus && !board.cbaj && !board.nbajam && !board.jdredd && !board.metro && !board.tecmo_link) board.sound_cycles = 0;
     board.frames = 0;
     board.last_psx_cycle = psxRegs.cycle;
     if (board.primal) primal_zn_bus_reset(board.primal_bus);
     if(board.jdredd)jdredd_zn_bus_reset(&board.judge_bus);
+    if(board.metro)metro_zn_bus_reset(&board.metro_bus);
     map_bankedroms();
 }
 
@@ -871,7 +939,7 @@ int systemzn_sync(u32 psx_cycle)
             else if (primal_zn_bus_sync(board.primal_bus,board.primal_ns)<0)board.faults|=8;
         }
         sound_cycles = 0;
-        if ((!board.tps && !board.visco && !board.primal && !board.jdredd) || board.tecmo_link) {
+        if ((!board.tps && !board.visco && !board.primal && !board.jdredd && !board.metro) || board.tecmo_link) {
             numerator = (uint64_t)elapsed * (board.nbajam ? RAX_SOUND_CLOCK : board.tecmo_link ? TECMO_LINK_CLOCK : board.cbaj ? CBAJ_SOUND_CLOCK : board.atlus ? ATLUS_SOUND_CLOCK : board.raizing ? RAIZING_SOUND_CLOCK : CAPCOM_ZN_SOUND_CLOCK_HZ) + board.qsound_fraction;
             sound_cycles = numerator / PSXCLK;
             board.qsound_fraction = numerator % PSXCLK;
@@ -887,14 +955,14 @@ int systemzn_sync(u32 psx_cycle)
         if (board.cbaj && cbaj_sound_sync(board.cbaj_sound, board.sound_cycles)) board.faults |= 8;
         if (board.atlus && atlus_sound_sync(board.atlus_sound, board.sound_cycles)) board.faults |= 8;
         if (board.raizing && raizing_sound_sync(board.raizing_sound, board.sound_cycles)) board.faults |= 8u;
-        if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && !board.nbajam && !board.jdredd && sound_cycles && capcom_zn_run_sound_cycles(board.capcom, sound_cycles) < 0)
+        if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && !board.nbajam && !board.jdredd && !board.metro && sound_cycles && capcom_zn_run_sound_cycles(board.capcom, sound_cycles) < 0)
             board.faults |= 8u;
     }
     sio_bus_advance(board.sio[0], board.sio_cycles);
     sio_bus_advance(board.sio[1], board.sio_cycles);
     if (sync_peripherals_to_cycle(board.sio_cycles)) board.faults |= 1u;
-    if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && !board.nbajam && !board.jdredd && qsound_hle_get_status(board.qsound, &status)) board.faults |= 2u;
-    if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && !board.nbajam && !board.jdredd) {
+    if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && !board.nbajam && !board.jdredd && !board.metro && qsound_hle_get_status(board.qsound, &status)) board.faults |= 2u;
+    if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && !board.nbajam && !board.jdredd && !board.metro) {
         capcom_zn_status_t cap_status;
         capcom_zn_get_status(board.capcom, &cap_status);
         if (cap_status.faults) board.faults |= 8u;
@@ -960,6 +1028,10 @@ int systemzn_read(u32 address, unsigned width, u32 *value)
     uint32_t physical = canonical_address(address);
     int result;
     if (!board.active || !value) return 0;
+    if(board.metro){
+        result=metro_zn_bus_read(&board.metro_bus,physical,width,value);
+        if(result){if(result<0){board.faults|=8;*value=UINT32_MAX;}return 1;}
+    }
     if(board.jdredd){
         if(systemzn_sync(psxRegs.cycle)<0)board.faults|=8;
         result=jdredd_zn_bus_read(&board.judge_bus,physical,width,value);
@@ -1026,7 +1098,7 @@ int systemzn_read(u32 address, unsigned width, u32 *value)
         }
         return 1;
     }
-    result = board.tps || board.raizing || board.visco || board.atlus || board.cbaj || board.primal || board.nbajam || board.jdredd ? 0 : capcom_zn_main_read(board.capcom, physical, width, value);
+    result = board.tps || board.raizing || board.visco || board.atlus || board.cbaj || board.primal || board.nbajam || board.jdredd || board.metro ? 0 : capcom_zn_main_read(board.capcom, physical, width, value);
     if (result == CAPCOM_ZN_HANDLED) return 1;
     if (result < 0) { board.faults |= 8u; *value = UINT32_MAX; return 1; }
     if ((physical >= 0x1fa00000 && physical < 0x1fa40000) ||
@@ -1042,6 +1114,10 @@ int systemzn_write(u32 address, unsigned width, u32 value)
     uint32_t physical = canonical_address(address);
     int result;
     if (!board.active) return 0;
+    if(board.metro){
+        result=metro_zn_bus_write(&board.metro_bus,physical,width,value);
+        if(result){if(result<0)board.faults|=8;if(physical<0x1fb00002)map_bankedroms();return 1;}
+    }
     if(board.jdredd){
         if(systemzn_sync(psxRegs.cycle)<0)board.faults|=8;
         result=jdredd_zn_bus_write(&board.judge_bus,physical,width,value);
@@ -1110,7 +1186,7 @@ int systemzn_write(u32 address, unsigned width, u32 value)
         } else if (raizing_sound_irq(board.raizing_sound)) board.faults |= 8;
         return 1;
     }
-    result = board.tps || board.raizing || board.visco || board.atlus || board.cbaj || board.primal || board.nbajam || board.jdredd ? 0 : capcom_zn_main_write(board.capcom, physical, width, value);
+    result = board.tps || board.raizing || board.visco || board.atlus || board.cbaj || board.primal || board.nbajam || board.jdredd || board.metro ? 0 : capcom_zn_main_write(board.capcom, physical, width, value);
     if (result == CAPCOM_ZN_HANDLED) { if (physical == 0x1fb00000) map_bankedroms(); return 1; }
     if (result < 0) { board.faults |= 8u; return 1; }
     if ((physical >= 0x1fa00000 && physical < 0x1fa40000) ||
@@ -1121,7 +1197,7 @@ int systemzn_write(u32 address, unsigned width, u32 value)
     result = zn_board_write(&board.common, physical, width, value);
     if (board.primal && result==ZN_BOARD_HANDLED && physical==0x1fa20000 &&
         !(old_coin&1) && (board.common.coin&1)) board.coin_count[0]++;
-    if ((board.visco || board.atlus || board.cbaj || board.tps || board.nbajam || board.jdredd) && result == ZN_BOARD_HANDLED && physical == 0x1fa20000) {
+    if ((board.visco || board.atlus || board.cbaj || board.tps || board.nbajam || board.jdredd || board.metro) && result == ZN_BOARD_HANDLED && physical == 0x1fa20000) {
         /* Visco/Tecmo omit lockouts; Atlus connects four. Preserve each
          * source counter's rising-edge input and player ordering. */
         for (unsigned i = 0; i < (board.visco ? 2u : 4u); ++i) {
@@ -1160,6 +1236,29 @@ static int set_kick(unsigned player, unsigned bit, int pressed)
 static int input_supported(const char *name, int pressed)
 {
     const char *profile = board.profile->input;
+    if(board.metro){
+        int generic=board.metro_dsw&1;
+        if(!strcmp(name,"cabinet_generic")){board.metro_dsw=(board.metro_dsw&~1u)|pressed;return 0;}
+        if(!strncmp(name,"p1",2) || !strncmp(name,"p2",2)){
+            unsigned p=name[1]-'1';const char *c=name+2;
+            const char *directions[]={"up","down","left","right"};
+            for(unsigned i=0;i<4;i++)if(!strcmp(c,directions[i]))return pressed && i==1 && !generic?-1:set_raw_bit(p,1u<<i,pressed);
+            if(!strcmp(c,"button1") || !strcmp(c,"rhythm"))return set_raw_bit(p,0x10,pressed);
+            if(!strcmp(c,"button2") || !strcmp(c,"jammar"))return set_raw_bit(p,0x20,pressed);
+            if(!strcmp(c,"pedal"))return pressed && generic?-1:set_raw_bit(p,0x02,pressed);
+            if(!strcmp(c,"start"))return generic?set_raw_bit(3,1u<<p,pressed):set_raw_bit(p,0x20,pressed);
+            return -1;
+        }
+        if((!generic || !pressed) && !strcmp(name,"p3up"))return set_raw_bit(0,0x40,pressed);
+        if((!generic || !pressed) && !strcmp(name,"p3down"))return set_raw_bit(1,0x40,pressed);
+        if((!generic || !pressed) && !strcmp(name,"p3enter"))return set_raw_bit(3,1,pressed);
+        if((!generic || !pressed) && !strcmp(name,"service2"))return set_raw_bit(3,2,pressed);
+        if(!strcmp(name,"coin1") || !strcmp(name,"coin2"))return set_raw_bit(3,0x10u<< (name[4]-'1'),pressed);
+        if(!strcmp(name,"test"))return set_raw_bit(2,1,pressed);
+        if(!strcmp(name,"service1"))return set_raw_bit(2,2,pressed);
+        if(!strcmp(name,"tilt"))return set_raw_bit(2,4,pressed);
+        return -1;
+    }
     if (board.tps && (!strcmp(name, "coin2") || strstr(name, "button3"))) return -1;
     if (board.visco && strstr(name, "button3")) return -1;
     if(board.jdredd){
@@ -1292,13 +1391,37 @@ int systemzn_selftest(void)
         value != (board.primal ? 0x6a : board.profile->vram_size == 0x200000 ? 0x69 : 0x61)) return -1;
     if (systemzn_read(0x1f000000, 4, &value) != 1 ||
         value != *(uint32_t *)board.regions[board.visco ? 2 : 1]) return -1;
-    if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && !board.nbajam && !board.jdredd && (systemzn_read(0x1fb80000, 4, &value) != 1 || value != *(uint32_t *)board.regions[2])) return -1;
+    if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && !board.nbajam && !board.jdredd && !board.metro && (systemzn_read(0x1fb80000, 4, &value) != 1 || value != *(uint32_t *)board.regions[2])) return -1;
     if (systemzn_read(0x1fa00300, 1, &value) != 1) return -1;
     before = value;
     if (systemzn_set_input("coin1", 1) || systemzn_read(0x1fa00300, 1, &value) != 1 ||
         value != (before & ~0x10u)) return -1;
     systemzn_set_input("coin1", 0);
     if (systemzn_set_input("unknown-control", 1) == 0) return -1;
+    if(board.metro){
+        uint8_t old_dsw=board.metro_dsw;uint16_t old_command=board.metro_bus.command;
+        unsigned old_bank=board.metro_bus.bank;
+        if(systemzn_set_input("cabinet_generic",0) || systemzn_set_input("p1start",1) ||
+           systemzn_read(0x1fa00000,1,&value)!=1 || value!=0xdf)return -1;
+        systemzn_set_input("p1start",0);
+        if(systemzn_set_input("p1down",1)!=-1 || systemzn_set_input("p1pedal",1) ||
+           systemzn_read(0x1fa00000,1,&value)!=1 || value!=0xfd)return -1;
+        systemzn_set_input("p1pedal",0);
+        if(systemzn_set_input("p3up",1) || systemzn_read(0x1fa00000,1,&value)!=1 || value!=0xbf)return -1;
+        systemzn_set_input("p3up",0);
+        if(systemzn_set_input("cabinet_generic",1) || systemzn_set_input("p1start",1) ||
+           systemzn_read(0x1fa00300,1,&value)!=1 || value!=0xfe)return -1;
+        systemzn_set_input("p1start",0);
+        if(systemzn_set_input("p1down",1) || systemzn_read(0x1fa00000,1,&value)!=1 || value!=0xfd)return -1;
+        systemzn_set_input("p1down",0);
+        if(systemzn_set_input("p3enter",1)!=-1 || systemzn_set_input("p1pedal",1)!=-1 ||
+           systemzn_set_input("p1button3",1)!=-1)return -1;
+        if(systemzn_write(0x1fb00000,2,10)!=1 || systemzn_read(0x1f400000,4,&value)!=1 ||
+           value!=*(uint32_t *)(board.regions[1]+0x2800000))return -1;
+        if(systemzn_write(0x1fb00002,2,0x7f)!=1 || systemzn_read(0x1fb00004,2,&value)!=1 || value!=1)return -1;
+        if(systemzn_write(0x1fb00002,2,0)!=1 || systemzn_read(0x1fb00004,2,&value)!=1 || value!=4)return -1;
+        systemzn_write(0x1fb00000,2,old_bank);systemzn_write(0x1fb00002,2,old_command);board.metro_dsw=old_dsw;
+    }
     if(board.jdredd){
         if(systemzn_set_input("p1left",1)==0 || systemzn_set_input("p1button3",1)==0 || systemzn_set_input("p3start",1)==0)return -1;
         if(systemzn_set_input("p1button1",1) || systemzn_read(0x1fa00200,1,&value)!=1 || value!=0xbf)return -1;
@@ -1370,6 +1493,11 @@ void systemzn_report(FILE *out)
     uint16_t qreg78 = 0, qreg1 = 0, qreg2 = 0, qreg4 = 0, qreg5 = 0, qreg6 = 0;
     uint8_t sound_f010, sound_f020;
     if (!board.active || !out) return;
+    if(board.metro){
+        MetroZnBus *b=&board.metro_bus;
+        fprintf(out,"Metro ZN: profile=%s RAM=4194304 VRAM=2097152 bank=%u command=%04x faults=%u media=%s H8=NO_DUMP ATA_transport=UNIMPLEMENTED disk_data_accesses=0 DSW=%02x\n",board.profile->set,b->bank,b->command,board.faults,board.synthetic?"SYNTHETIC_FIXTURE":"SOURCE_VERIFIED",board.metro_dsw);
+        fprintf(out,"Metro provisional MCU: bank_writes=%" PRIu64 " status_reads=%" PRIu64 " unpopulated_reads=%" PRIu64 " ports=%" PRIu64 "/%" PRIu64 ",%" PRIu64 "/%" PRIu64 ",%" PRIu64 "/%" PRIu64 ",%" PRIu64 "/%" PRIu64 "\n",b->bank_writes,b->provisional_status_reads,b->unpopulated_reads,b->reads[0],b->writes[0],b->reads[1],b->writes[1],b->reads[2],b->writes[2],b->reads[3],b->writes[3]);return;
+    }
     if(board.jdredd){
         JdreddZnBus *b=&board.judge_bus;
         fprintf(out,"Judge ZN: profile=jdredd model=COH1000A RAM=4194304 VRAM=2097152 faults=%u media=%s HDD_sectors=%u reads=%" PRIu64 " writes=%" PRIu64 " errors=%" PRIu64 " IRQ10_edges=%" PRIu64 " ATA_IRQ=%u\n",board.faults|b->faults,board.synthetic?"SYNTHETIC_FIXTURE":"SOURCE_VERIFIED",board.primal_disk_info.sector_count,board.disk_reads,board.disk_writes,board.disk_errors,board.judge_irq_edges,board.judge_ata_irq);

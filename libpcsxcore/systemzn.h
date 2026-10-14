@@ -6,6 +6,10 @@
 #include "psxcommon.h"
 
 int systemzn_load(const char *directory);
+int systemzn_load_metro(const char *directory);
+int systemzn_test_load_metro(const char *directory);
+int systemzn_metro_active(void);
+int systemzn_metro_generic(void);
 int systemzn_load_tps(const char *directory);
 /* Explicit synthetic host test path, never used by the normal TPS loader. */
 int systemzn_test_load_tps(const char *directory);

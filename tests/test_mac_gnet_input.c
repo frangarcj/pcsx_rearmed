@@ -3,6 +3,7 @@
 #define main harness_original_main
 #define systemgnet_set_analog gnet_test_analog
 #define systemzn_set_gun_position judge_test_gun
+#define systemzn_metro_generic metro_test_generic
 #define systemgq_set_gun_position gq_test_gun
 #define systemgv_has_guns gv_test_has_guns
 #define systemgv_set_gun_position gv_test_gun
@@ -19,6 +20,8 @@
 #undef main
 #include <assert.h>
 static int gv_gun_mode;static unsigned gv_gun_x[2],gv_gun_y[2];
+static int metro_generic, metro_pedal[2], metro_jammar[2], metro_start[2], metro_down[2], metro_enter;
+int metro_test_generic(void){return metro_generic;}
 int gv_test_has_guns(void){return gv_gun_mode && selected_board && selected_board->family==102;}
 int gv_test_gun(unsigned p,unsigned x,unsigned y){assert(p<2 && x<=0xffff && y<=0xffff);gv_gun_x[p]=x;gv_gun_y[p]=y;return 0;}
 static int gv_dx,gv_dy,gv_sensor_mode,gv_btc_mode,gv_p2dx,gv_p2dy;static unsigned gv_heart=31,gv_gsr,gv_pulses;
@@ -49,6 +52,16 @@ int gnet_test_analog(const char *name,unsigned raw)
 static int nba_coin[4],nba_start[4],nba_fourth[4];
 static int digital(const char *name,int down)
 {
+    if(selected_board && selected_board->family==114){
+        if(!strcmp(name,"p3enter"))metro_enter=down;
+        if(name[0]=='p' && (name[1]=='1' || name[1]=='2')){
+            unsigned p=name[1]-'1';
+            if(!strcmp(name+2,"pedal"))metro_pedal[p]=down;
+            if(!strcmp(name+2,"button2"))metro_jammar[p]=down;
+            if(!strcmp(name+2,"start"))metro_start[p]=down;
+            if(!strcmp(name+2,"down"))metro_down[p]=down;
+        }
+    }
     if(selected_board && selected_board->family==111){
         if(!strncmp(name,"coin",4) && name[4]>='1' && name[4]<='4')nba_coin[name[4]-'1']=down;
         if(name[0]=='p' && name[1]>='1' && name[1]<='4'){
@@ -252,6 +265,29 @@ int main(void)
     }
     assert(nba_mix_frames==1024 && !interactive_mix.error && !interactive_mix.clipped);
     puts("NBA SDL four-player coins/start/buttons, four mapped gamepads, focus release and production SPU0.35/RAX1 timed stereo routing PASS");
+    board.family=114;interactive_focused=1;metro_generic=0;
+    release_interactive_input();
+    for(unsigned b=0;b<SDL_GAMEPAD_BUTTON_COUNT;b++)assert(SDL_SetJoystickVirtualButton(joy,b,false));
+    SDL_UpdateJoysticks();frame_counter++;poll_interactive_input();
+    key(SDL_SCANCODE_DOWN,1);key(SDL_SCANCODE_K,1);
+    assert(metro_pedal[0] && metro_pedal[1] && !metro_down[0] && !metro_down[1]);
+    key(SDL_SCANCODE_1,1);key(SDL_SCANCODE_S,1);key(SDL_SCANCODE_1,0);assert(metro_jammar[0]);
+    key(SDL_SCANCODE_S,0);assert(!metro_jammar[0]);
+    assert(SDL_SetJoystickVirtualButton(joy,SDL_GAMEPAD_BUTTON_START,true));
+    SDL_UpdateJoysticks();frame_counter++;poll_interactive_input();assert(metro_jammar[0]);
+    key(SDL_SCANCODE_S,1);
+    assert(SDL_SetJoystickVirtualButton(joy,SDL_GAMEPAD_BUTTON_START,false));
+    SDL_UpdateJoysticks();frame_counter++;poll_interactive_input();assert(metro_jammar[0]);
+    key(SDL_SCANCODE_RETURN,1);assert(metro_enter);
+    memset(&e,0,sizeof(e));e.type=SDL_EVENT_WINDOW_FOCUS_LOST;
+    assert(SDL_PushEvent(&e));poll_interactive_input();
+    assert(!metro_pedal[0] && !metro_pedal[1] && !metro_jammar[0] && !metro_enter);
+    metro_generic=1;interactive_focused=1;
+    key(SDL_SCANCODE_DOWN,1);key(SDL_SCANCODE_1,1);key(SDL_SCANCODE_S,1);
+    assert(metro_down[0] && metro_start[0] && metro_jammar[0] && !metro_pedal[0]);
+    key(SDL_SCANCODE_1,0);assert(!metro_start[0] && metro_jammar[0]);
+    release_interactive_input();assert(!metro_down[0] && !metro_jammar[0]);
+    puts("Metro SDL dedicated pedal/operator input, Start/Jammar keyboard and gamepad alias merging, generic separate Start and focus release PASS");
     board.family=112;interactive_focused=1;
     assert(SDL_SetJoystickVirtualAxis(joy,SDL_GAMEPAD_AXIS_LEFTX,0));assert(SDL_SetJoystickVirtualAxis(joy,SDL_GAMEPAD_AXIS_LEFTY,0));
     SDL_UpdateJoysticks();frame_counter++;poll_interactive_input();

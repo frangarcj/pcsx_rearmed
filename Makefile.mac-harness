@@ -87,7 +87,7 @@ SOURCES += libpcsxcore/system12.c libpcsxcore/system11.c libpcsxcore/system10.c 
   libpcsxcore/arcade/mb89371.c libpcsxcore/arcade/i8251.c \
   libpcsxcore/arcade/eeprom93c46.c
 CFLAGS += -I$(BUILD)/gnet-generated -Ilibpcsxcore/arcade/tms57002 -I$(BUILD)/m68000-generated -Ilibpcsxcore/arcade/m68000
-SOURCES += libpcsxcore/arcade/zsg2.c libpcsxcore/arcade/fifo7200.c libpcsxcore/arcade/tecmo_link.c libpcsxcore/arcade/vt83c461.c libpcsxcore/arcade/primal_zn_bus.c libpcsxcore/arcade/nbajam_zn_bus.c libpcsxcore/arcade/jdredd_zn_bus.c
+SOURCES += libpcsxcore/arcade/zsg2.c libpcsxcore/arcade/fifo7200.c libpcsxcore/arcade/tecmo_link.c libpcsxcore/arcade/vt83c461.c libpcsxcore/arcade/primal_zn_bus.c libpcsxcore/arcade/nbajam_zn_bus.c libpcsxcore/arcade/jdredd_zn_bus.c libpcsxcore/arcade/metro_zn_bus.c
 CXXSOURCES := libpcsxcore/arcade/adsp2181.cpp libpcsxcore/arcade/rax_sound.cpp libpcsxcore/arcade/cbaj_sound.cpp libpcsxcore/arcade/ymz280b.cpp libpcsxcore/arcade/atlus_sound.cpp libpcsxcore/arcade/ymf271.cpp libpcsxcore/arcade/raizing_sound.cpp libpcsxcore/arcade/m68000.cpp \
  libpcsxcore/arcade/gnet_zoom.cpp libpcsxcore/arcade/rf5c296.cpp \
  libpcsxcore/arcade/gnet_pccard.cpp \
@@ -150,6 +150,11 @@ CXX_STANDARD = c++17
 
 .PHONY: all clean smoke board-test system11-test system10-test systemgv-test tecmo-tps-test raizing-zn-test visco-zn-test atlus-zn-test cbaj-tps-test taito-fx1z-test capcom-zn-test taito-fx1-test systemgnet-test gpu-type1-test devices-test FORCE
 .PHONY: jdredd-zn-test
+.PHONY: metro-zn-test
+metro-zn-test: $(TARGET)
+	python3 scripts/generate_metro_zn_profiles.py --check
+	$(MAKE) -f tests/Makefile.metro-zn-bus test
+	python3 tests/check_metro_zn_harness.py --harness $(TARGET)
 jdredd-zn-test: $(TARGET)
 	python3 scripts/generate_jdredd_zn_profiles.py --check
 	python3 tests/check_jdredd_zn_harness.py --harness $(TARGET)
