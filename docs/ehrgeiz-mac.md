@@ -171,19 +171,34 @@ both pads released, then shuts VitaGL down cleanly. VPK SHA256 is
 `609c7fe8be3604dfa7432212f5c80930cb093954f49aa754e2cf2ab961422dc2`;
 host SHA256 is `18b9bf5b232747a238e7b6d7a5d4ad8d390a93aefacc06a57d5215b09b4af87f`.
 All 1078 forwarded protected accesses have matched recoveries; none remains
-unresolved. The host screenshots show player combat, but HUD/background parts
-are absent. The 960x544 guest PPM is completely black, and the audio capture
-statistics show peak/nonzero zero despite 2719500 delivered stereo frames.
+unresolved. The host screenshots show player combat. A later HD replay at
+4300 frames shows the complete arena and HUD; the earlier picture with absent
+elements was taken before that gameplay scene was fully presented. The
+960x544 guest PPM is completely black. The first audio statistics incorrectly
+show zero because sample counting was gated by an arcade report path, while
+console replays had no such path. That diagnostic bug has been corrected;
+those earlier zero statistics are not evidence of silent game audio.
+
+After correcting the sample-count gate, the rebuilt console VPK completes a
+4300-frame HD replay with 240/240 inputs, clean shutdown and nonzero delivered
+audio: 3160500 stereo frames at 44100 Hz, peak 32768, 2695199 nonzero samples,
+zero SDL delivery errors. The presented host pictures show actual player
+combat with complete HUD and arena. The guest PPM remains black, so the
+automated readback-based `visual_pass` stays false. Execution, presentation
+screenshots, delivered audio and PPM readback have distinct evidence.
 
 This is **not a passing Vita validation**. `result.json` deliberately reports
 `passed=false` even though the replay and shutdown protocol completed. It does
 not reproduce the reported whole-system crash; neither does it establish
-correct graphics/sound or a physical Vita fix. HD and 1x must be compared using
+correct readback or a physical Vita fix. HD and 1x must be compared using
 the actual pictures. A second run of the identical VPK/profile with `--gl-1x`
 also reaches 3700 frames and 240/240 inputs, with zero unresolved protected
-accesses and a clean shutdown. It has the same silent-audio statistics and
-identical black PPM hash; its host screenshots also show missing scene
-elements. Disabling HD does not resolve these Vita3K fidelity failures.
+accesses and a clean shutdown. It has the same initially invalid audio statistics and
+identical black PPM hash. Its later host screenshot shows a complete arena
+and HUD. The initially reviewed HD host picture is earlier in the fight;
+that picture alone cannot attribute the absent elements to HD. The later HD
+4300-frame run also completes 240/240 inputs with a clean shutdown and zero
+unresolved accesses. Disabling HD does not resolve the black readback.
 Evidence is retained in ignored
 `artifacts/boards-mac-20261014/ehrgeiz/issue8-vita3k`; the isolated host/media
 and intermediate files are under `/tmp/pcsx-ehrgeiz-vita3k-20261014`.
