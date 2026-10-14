@@ -17,6 +17,7 @@
 #include "../libpcsxcore/psxinterpreter.h"
 #include "../libpcsxcore/gte.h"
 #include "../libpcsxcore/misc.h"
+#include "../libpcsxcore/cdrom-async.h"
 #include "../libpcsxcore/psxcounters.h"
 #include "../libpcsxcore/spu.h"
 #include "../libpcsxcore/gpu.h"
@@ -260,7 +261,7 @@ static int close_spu_audio(void)
   if (out_current) out_current->feed = spu_original_feed;
   spu_original_feed = NULL;
   fprintf(stderr, "%s SPU: rate=%u frames=%" PRIu64 " peak=%u WAV_bytes=%" PRIu64 "\n",
-    selected_board && selected_board->family == 102 ? "KonamiGV" :
+    !selected_board ? "PlayStation" : selected_board->family == 102 ? "KonamiGV" :
     selected_board && selected_board->family == 104 ? "TecmoTPS" :
     selected_board && selected_board->family == 112 ? "JudgeZN" : selected_board && selected_board->family == 111 ? "NBAJamZN" : selected_board && selected_board->family == 110 ? "PrimalZN" : selected_board && selected_board->family == 107 ? "ViscoZN" : "System10",
     spu_wav.rate, spu_wav.bytes / 4, spu_audio_peak, spu_wav.bytes);
@@ -410,6 +411,7 @@ static void usage(const char *name)
     "[--board-bus-trace FILE] [--system12-edge-trace FILE] [--system12-trace-shared-writes | --system12-trace-shared-accesses] "
     "[--max-blocks N] [--icache] [--widescreen] [--borderless] [--gpu-thread] [--save-state-at FRAME FILE] [--load-state FILE] [--drc] [--interactive [--art-dir DIR] [--pause-at N [--pause-script STEPS] [--pause-shot FILE.ppm]]...] [--system12-vblank-sync-only] [--system12-source-step] [--frontend-loop]\n"
     "       %s (--gpu-type1-test | --gpu-type1-test-1m)\n", name, name);
+  fprintf(stderr,"       %s --disc IMAGE.cue --bios BIOS.bin [--frames N] [--inputs CSV] [--audio WAV] [--capture-gl] [--output PPM] (BOARD=1, bounded replay)\n",name);
 }
 
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
@@ -1046,8 +1048,29 @@ static unsigned input_analog_max(const char *name)
   return 0;
 }
 
+/* Digital PlayStation pad bits, passed through the normal SIO controller. */
+static int console_input(const char *name, int pressed)
+{
+  static const struct { const char *name; unsigned bit; } keys[] = {
+    {"select",0}, {"start",3}, {"up",4}, {"right",5}, {"down",6},
+    {"left",7}, {"l2",8}, {"r2",9}, {"l1",10}, {"r1",11},
+    {"triangle",12}, {"circle",13}, {"cross",14}, {"square",15}
+  };
+  if (!name || name[0]!='p' || (name[1]!='1' && name[1]!='2') ||
+      (pressed!=0 && pressed!=1)) return -1;
+  for (unsigned i=0;i<sizeof(keys)/sizeof(keys[0]);i++) {
+    if (strcmp(name+2,keys[i].name)) continue;
+    unsigned short mask=1u<<keys[i].bit;
+    if(pressed) in_keystate[name[1]-'1']|=mask;
+    else in_keystate[name[1]-'1']&=~mask;
+    return 0;
+  }
+  return -1;
+}
+
 static int input_control_known(const char *name)
 {
+  if (!selected_board) return console_input(name,0)==0;
 #ifdef PCSX_SYSTEM_GNET
   if (selected_board && selected_board->family == 103 && !strcmp(name, "jp1")) return 1;
 #endif
@@ -1131,6 +1154,11 @@ static int apply_input_events(const harness_input_event *events, size_t count,
                               size_t *next, uint64_t frame)
 {
   while (*next < count && events[*next].frame <= frame) {
+    if (!selected_board) {
+      if(console_input(events[*next].control,events[*next].pressed))return -1;
+      (*next)++;
+      continue;
+    }
     int error =
 #ifdef PCSX_SYSTEM_GV
       selected_board->family==102 && input_analog_max(events[*next].control)
@@ -1162,6 +1190,7 @@ static int apply_input_events(const harness_input_event *events, size_t count,
 int main(int argc, char **argv)
 {
   const char *exe = NULL, *board = NULL, *output = "frame.ppm";
+  const char *disc = NULL, *bios_path = NULL;
   const char *inputs_path = NULL, *audio_path = NULL, *nvram_path = NULL;
 #ifdef PCSX_SYSTEM12
   harness_input_event *input_events = NULL;
@@ -1239,6 +1268,8 @@ int main(int argc, char **argv)
   (void)board_load_result;
   for (i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--exe") && i + 1 < argc) exe = argv[++i];
+    else if (!strcmp(argv[i],"--disc") && i+1<argc) disc=argv[++i];
+    else if (!strcmp(argv[i],"--bios") && i+1<argc) bios_path=argv[++i];
     else if(!strcmp(argv[i],"--system-gv-tokimeki-fixture") && i+1<argc){board=argv[++i];board_family=102;gv_tok_fixture=1;}
     else if (!strcmp(argv[i], "--system-gv-simpbowl-fixture") && i+1<argc){board=argv[++i];board_family=102;gv_simp_fixture=1;}
     else if (!strcmp(argv[i], "--system-gv-fixture") && i + 1 < argc) {
@@ -1486,9 +1517,12 @@ int main(int argc, char **argv)
    * GPU/SPU preflight that --board-test otherwise injects into fixture RAM. */
   if(nba_fixture && reset_at_cycle)board_test=0;
 #endif
-  if ((!exe && !board && !gpu_type1_test) || (exe && board) ||
+  if ((disc && (!bios_path || exe || board || gpu_type1_test || interactive || verify)) ||
+      (bios_path && !disc) ||
+      (!exe && !board && !disc && !gpu_type1_test) || (exe && board) ||
       (gpu_type1_test && (exe || board || verify || trace_path)) || (board_test && !board) ||
-      ((inputs_path || audio_path || audio_test_fixture || nvram_path) && !board) ||
+      ((inputs_path || audio_path) && !board && !disc) ||
+      ((audio_test_fixture || nvram_path) && !board) ||
       (snapshot_path && !board) ||
       (bus_trace_path && (!board || board_family != 12)) ||
       (edge_trace_path && (!board || board_family != 12 || board_test)) ||
@@ -1633,6 +1667,33 @@ int main(int argc, char **argv)
   strcpy(Config.Gpu, "builtin_gpu"); strcpy(Config.Spu, "builtin_spu");
   strcpy(Config.Bios[0], "HLE"); strcpy(Config.Bios[1], "HLE");
   strcpy(Config.Bios[2], "HLE");
+  if(disc) {
+#ifndef PCSX_SYSTEM12
+    fprintf(stderr,"--disc currently requires BOARD=1 for pad replay and PCM capture\n");return 2;
+#else
+    char resolved[4096];
+    if(!realpath(bios_path,resolved)){perror(bios_path);return 1;}
+    FILE *bf=fopen(resolved,"rb");
+    if(!bf){perror(resolved);return 1;}
+    int valid=!fseek(bf,0,SEEK_END) && ftell(bf)==0x80000;
+    fclose(bf);
+    if(!valid){fprintf(stderr,"--bios requires a 512 KiB PSX BIOS\n");return 1;}
+    char *base=strrchr(resolved,'/');
+    if(!base || strlen(base+1)>=sizeof(Config.Bios[0]))return 1;
+    *base++=0;
+    if(strlen(resolved)>=sizeof(Config.BiosDir))return 1;
+    strcpy(Config.BiosDir,resolved);
+    for(unsigned bi=0;bi<3;bi++)strcpy(Config.Bios[bi],base);
+    Config.PsxAuto=1;
+    SetIsoFile(disc);
+    const char *outputs[]={output,audio_path,ram_path,vram_path,trace_path,save_state_path};
+    for(unsigned oi=0;oi<sizeof(outputs)/sizeof(outputs[0]);oi++) {
+      if(outputs[oi] && (!strcmp(outputs[oi],disc) || !strcmp(outputs[oi],bios_path))) {
+        fprintf(stderr,"disc/BIOS and outputs must use separate paths\n");return 2;
+      }
+    }
+#endif
+  }
   spu_config.iUseThread = 0;
 #ifdef PCSX_SYSTEM12
   if (board) {
@@ -1701,7 +1762,7 @@ int main(int argc, char **argv)
     return 1;
   }
   if (inputs_path && load_input_events(inputs_path, &input_events, &input_event_count)) {
-    selected_board->unload(); return 2;
+    if(selected_board)selected_board->unload(); return 2;
   }
 #else
   if (board) { fprintf(stderr, "Rebuild with BOARD=1 for arcade boards.\n"); return 2; }
@@ -1727,6 +1788,10 @@ int main(int argc, char **argv)
   SPU_registerCallback(SPUirq);
   SPU_registerScheduleCb(SPUschedule);
   if (SPU_open() || GPU_open(NULL, NULL, NULL)) return 1;
+  if(disc && (cdra_open()<0 || CheckCdrom()<0)) {
+    fprintf(stderr,"cannot open/identify PlayStation disc: %s\n",disc);
+    GPU_close();SPU_close();psxShutdown();ReleasePlugins();return 1;
+  }
 #ifdef PCSX_SYSTEM_GNET
   if (gnet_jp1 >= 0 && systemgnet_set_input("jp1",gnet_jp1)) return 1;
 #endif
@@ -1762,6 +1827,12 @@ int main(int argc, char **argv)
   if(printer_dir){fprintf(stderr,"--printer-dir requires BOARD=1 and HAVE_CHD=1\n");return 2;}
 #endif
   psxReset();
+  if(disc && (Config.HLE || LoadCdromMainExe(NULL))) {
+    fprintf(stderr,"PlayStation disc/real BIOS boot failed\n");
+    cdra_close();GPU_close();SPU_close();psxShutdown();ReleasePlugins();return 1;
+  }
+  if(disc)fprintf(stderr,"PlayStation disc: id=%s label=%s region=%s BIOS=%s HLE=%d\n",
+      CdromId,CdromLabel,Config.PsxType==PSX_TYPE_PAL?"PAL":"NTSC",bios_path,Config.HLE);
 #ifdef PCSX_SYSTEM12
   if (gpu_type1_test) {
     extern int harness_gpu_type1_selftest(void);
@@ -1967,11 +2038,11 @@ int main(int argc, char **argv)
   }
 #ifdef PCSX_SYSTEM12
   if (board && audio_test_fixture) system12_audio_test_fixture();
-  if (board && audio_path && selected_board->open_audio(audio_path)) {
+  if (audio_path && (board ? selected_board->open_audio(audio_path) : open_spu_audio(audio_path))) {
     fprintf(stderr, "cannot open WAV output: %s\n", audio_path);
     result = 1;
   }
-  if (board && !result && apply_input_events(input_events, input_event_count,
+  if ((board || disc) && !result && apply_input_events(input_events, input_event_count,
       &next_input_event, 0)) result = 1;
 #endif
 #ifdef PCSX_SYSTEM12
@@ -2055,7 +2126,7 @@ int main(int argc, char **argv)
     }
 #endif
 #ifdef PCSX_SYSTEM12
-    if (board && apply_input_events(input_events, input_event_count,
+    if ((board || disc) && apply_input_events(input_events, input_event_count,
         &next_input_event, frame_counter - start_frame)) { result = 1; break; }
 #endif
     if (trace && cycles >= trace_start && trace_count < trace_blocks) {
@@ -2200,7 +2271,7 @@ int main(int argc, char **argv)
     result = 1;
   }
 #ifdef PCSX_SYSTEM12
-  if (board && audio_path && selected_board->close_audio()) {
+  if (audio_path && (board ? selected_board->close_audio() : close_spu_audio())) {
     fprintf(stderr, "failed to finalize WAV output: %s\n", audio_path);
     result = 1;
   }
@@ -2267,9 +2338,10 @@ int main(int argc, char **argv)
     frame_counter - start_frame, cycles, blocks, psxRegs.pc,
     flips, end.tv_sec - begin.tv_sec + (end.tv_nsec - begin.tv_nsec) * 1e-9, output);
 #ifdef PCSX_SYSTEM12
-  if (inputs_path) fprintf(stderr, "Arcade inputs: consumed=%zu/%zu\n", next_input_event, input_event_count);
+  if (inputs_path) fprintf(stderr, "%s inputs: consumed=%zu/%zu\n",disc?"PlayStation":"Arcade", next_input_event, input_event_count);
   if (board) selected_board->report(stderr);
 #endif
+  if(disc)cdra_close();
   GPU_close(); SPU_close(); psxShutdown(); ReleasePlugins();
 #ifdef PCSX_SYSTEM12
   if (board) selected_board->unload();

@@ -82,6 +82,20 @@ static void key(SDL_Scancode code,int down)
 }
 int main(void)
 {
+    selected_board=NULL;
+    assert(console_input("p1cross",1)==0 && in_keystate[0]==0x4000);
+    assert(console_input("p1start",1)==0 && in_keystate[0]==0x4008);
+    assert(console_input("p2circle",1)==0 && in_keystate[1]==0x2000);
+    assert(console_input("p1cross",0)==0 && in_keystate[0]==8);
+    assert(console_input("p1button1",1)<0 && console_input("coin1",1)<0);
+    assert(console_input("p3cross",1)<0 && console_input("p1cross",2)<0);
+    harness_input_event pad_events[]={{0,"p1start",0},{1,"p2circle",0},{2,"p1square",1}};
+    size_t pad_next=0;
+    assert(!apply_input_events(pad_events,3,&pad_next,1) && pad_next==2);
+    assert(!in_keystate[0] && !in_keystate[1]);
+    assert(!apply_input_events(pad_events,3,&pad_next,2) && in_keystate[0]==0x8000);
+    memset(in_keystate,0,sizeof(in_keystate));
+    puts("Console replay uses PlayStation SIO pad bits and rejects arcade controls PASS");
     HarnessBoard board={0};board.family=103;board.set_input=digital;selected_board=&board;
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,"1");
     assert(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_GAMEPAD));
