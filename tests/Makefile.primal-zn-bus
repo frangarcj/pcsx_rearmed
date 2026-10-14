@@ -1,0 +1,32 @@
+CXX ?= c++
+CC ?= cc
+BUILD ?= build/primal-zn-bus-tests
+ARCADE := libpcsxcore/arcade
+ATA_PORT := $(ARCADE)/ata_mame
+INCLUDES := -I$(ARCADE) -I$(ATA_PORT)
+COMMON := -std=c++20 -Wall -Wextra -Werror $(INCLUDES)
+SOURCES := $(ARCADE)/ata_storage.cpp $(ATA_PORT)/atahle_port.cpp $(ATA_PORT)/atastorage_port.cpp $(ARCADE)/gnet_pccard.cpp $(ARCADE)/rf5c296.cpp tests/primal_zn_bus_standalone.cpp
+HEADERS := $(ARCADE)/primal_zn_bus.h  $(ARCADE)/vt83c461.h $(ARCADE)/ata_storage.h $(ATA_PORT)/ata_mame_compat.h
+SAN := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
+.PHONY: test sanitize
+$(BUILD)/via.o: $(ARCADE)/vt83c461.c $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CC) -std=c99 -Wall -Wextra -Werror $(INCLUDES) -O2 -c $< -o $@
+$(BUILD)/via-san.o: $(ARCADE)/vt83c461.c $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CC) -std=c99 -Wall -Wextra -Werror $(INCLUDES) $(SAN) -c $< -o $@
+$(BUILD)/test-primal-zn-bus: $(SOURCES) $(HEADERS) $(BUILD)/via.o $(BUILD)/bus.o
+	$(CXX) $(COMMON) -O2 $(SOURCES) $(BUILD)/via.o $(BUILD)/bus.o -o $@
+$(BUILD)/test-primal-zn-bus-sanitize: $(SOURCES) $(HEADERS) $(BUILD)/via-san.o $(BUILD)/bus-san.o
+	$(CXX) $(COMMON) $(SAN) $(SOURCES) $(BUILD)/via-san.o $(BUILD)/bus-san.o -o $@
+test: $(BUILD)/test-primal-zn-bus
+	$<
+sanitize: $(BUILD)/test-primal-zn-bus-sanitize
+	ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $<
+
+$(BUILD)/bus.o: $(ARCADE)/primal_zn_bus.c $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CC) -std=c99 -Wall -Wextra -Werror $(INCLUDES) -O2 -c $< -o $@
+$(BUILD)/bus-san.o: $(ARCADE)/primal_zn_bus.c $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CC) -std=c99 -Wall -Wextra -Werror $(INCLUDES) $(SAN) -c $< -o $@
