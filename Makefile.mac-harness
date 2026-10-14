@@ -201,7 +201,10 @@ systemgv-test: $(TARGET)
 ifeq ($(DRC),1)
 	python3 tests/check_systemgv_harness.py --harness $(TARGET) --drc
 endif
-.PHONY: systemgq-test simpbowl-test tokimeki-test
+.PHONY: systemgq-test simpbowl-test tokimeki-test kdeadeye-test
+kdeadeye-test: $(TARGET)
+	$(MAKE) -f tests/Makefile.kdeadeye test
+	python3 tests/check_kdeadeye_harness.py --harness $(TARGET)
 tokimeki-test: $(TARGET)
 	python3 tests/check_tokimeki_harness.py --harness $(TARGET)
 simpbowl-test: $(TARGET)
