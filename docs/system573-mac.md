@@ -13,7 +13,70 @@ The full family validation still requires three distinct configurations:
 | --- | --- | --- |
 | Hyper Bishi Bashi Champ EAA (`hyperbbc`) | Base board, eight onboard flashes, timekeeper, cassette Y lamp outputs and three-player buttons | Native interpreter GL/NEON P1 minigame, live source-gain SPU/SDL audio and complete flash/NVRAM persistence verified; full P2/P3 gameplay/operator checks pending |
 | Dance Dance Revolution 2nd Mix (`ddr2m`) | Analog daughterboard, CD-ROM, cassette X, dance input multiplexing | Original cassette/CD verified; source CR-589 transport and DDR analog multiplexor integrated. Native GL/NEON cold flash initialization completes and all eight programmed chips match MAME byte for byte. Native warm GL/NEON 1st Stage/PERFECT, 92/92 inputs and original nonzero SPU/CDDA decoding pass. Source gain-1 SPU/CDDA mix passes headless GL/NEON and live SDL. Full song/P2/operator coverage remains separate |
-| Percussion Freaks 4th Mix KAA (`pcnfrk4mk`) | Digital daughterboard, CD-ROM, cassette ZI/serial ID, instrument inputs and multi-session unit | Source working representative selected; ID/CD carry source BAD_DUMP annotations. Media preparation, ZS01 security, digital sound devices and native runtime pending |
+| Percussion Freaks 4th Mix KAA (`pcnfrk4mk`) | Digital daughterboard, CD-ROM, cassette ZI/serial ID, instrument inputs and multi-session unit | Seven original game/device chips audited, retaining source BAD_DUMP serial/CD status. ZS01 encrypted pin protocol passes optimized/ASan tests and original-cassette readback; native cassette wiring, original CD, FPGA/MAS3507D sound and game runtime remain pending |
+
+## Digital KAA media and cassette component
+
+On 2026-10-15 the original `pcnfrk4mk` game and daughterboard ROMs pass a
+reproducible source-pinned audit. The complete configuration includes more
+than the game ZIP: the digital I/O board requires its own eight-byte serial,
+and the multi-session unit declares a flash and timekeeper. MAME `-listroms
+pcnfrk4mk` independently lists these device ROMs.
+
+| Chip | Bytes | Source CRC32 | Source status |
+| --- | ---: | --- | --- |
+| Standard BIOS `700a01.22g` | 524288 | `11812ef8` | Good |
+| H8 response `h8a01.bin` | 64 | `131e0359` | Good; separate H8 firmware remains NO_DUMP |
+| ZS01 `gka25kaa.u1` | 140 | `2b0efc90` | Good |
+| Cassette serial `gka25kaa.u6` | 8 | `ce84419e` | BAD_DUMP |
+| Digital I/O `digital-id.bin` | 8 | `2b977f4d` | Good |
+| Multi-session `flash.20t` | 524288 | `b70c65b0` | Good |
+| Multi-session `m48t58y.6t` | 8192 | `609ef020` | Good |
+
+The auditor also checks source SHA1 for every chip. The historical parent
+archive stores the cassette serial as `gea25aaa.u6`; it is accepted only
+because its eight bytes match the current KAA serial's size, CRC and SHA1
+exactly. Both the declared and actual member names remain in the audit.
+The old parent ZIP's 2 MiB flash dumps are not part of the pinned KAA set
+and are never used to supply an installed game.
+
+Public split archives `k573_dio.zip` (158 bytes, archive SHA1
+`9695831910742a7d6e3b17f5e3f811320e8b4125`) and `k573msu.zip` (136526 bytes,
+archive SHA1 `f026619781ba414e581c2e3c152a4ef053dc57a5`) supply the three
+device chips. Original archive URLs, hashes and audit/test output are recorded
+under ignored `artifacts/boards-mac-20261015/system573/pcnfrk4mk`.
+
+```sh
+python3 scripts/audit_system573_digital_media.py --mame-source ../mamedev \
+  --rompath roms --roms-only --output-dir roms/audited/pcnfrk4mk
+python3 -m unittest discover -s tests -p test_system573_digital_media.py
+```
+
+This explicit ROM-only mode produces audited chip files and `audit.json`,
+with `complete_media_verified=false`, `native_profile_available=false` and
+`board_execution_verified=false`. It creates no native `board.ini`. Without
+`--roms-only`, the audit requires the original KAA CD `a25kaa02.chd`, source
+SHA1 `6c9084773c6964e794bd096822da4413aa7305ef`, matching CD metadata and a full
+`chdman verify`. Missing CD, a CD from DDR, corrupt serial bytes and unreviewed
+game/BIOS profiles are rejected in tests. The original KAA CD has not yet been
+acquired: queried modern archive entries mark it private, while inspected
+public older archives do not contain that image. No other-region disc or
+extracted executable substitutes for it. BAD_DUMP annotations remain explicit.
+
+The standalone [ZS01 component](konami-zs01.md) now passes encrypted pin
+commands, CRC/retry erasure, data/configuration writes, key replacement,
+persistence and serial reads with an independent host codec, both optimized
+and under ASan/UBSan. The original audited KAA cassette/serial also pass reset,
+all fourteen data pages, configuration and serial readback. Existing X76F041,
+X76F100 and DS2401 tests still pass. This does not prove game acceptance of
+the cassette: native ZI bus wiring and execution remain pending.
+
+The pinned multi-session device declares its ROMs but has an empty
+`device_start`, no configured processor and no runtime address map. Auditing
+its original media does not establish emulation of a working external
+multi-session box. The digital I/O FPGA/MAS3507D audio path, instrument inputs,
+native cold installation and player validation still need integration and
+actual game evidence. This row remains open in the overall Mac matrix.
 
 ## Hyper Bishi Bashi media
 
