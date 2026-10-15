@@ -75,5 +75,18 @@ int main(void){
     assert(system573_audio_spu_route(a,1,0)==-1);
     system573_audio_init(a);assert(system573_audio_spu_route(a,NAN,0)==-1);
     assert(system573_audio_spu_route(a,.75f,2)==-1);
-    free(a);puts("System573/GV timestamped source routes, float cancellation, saturation, source deferral and history rejection PASS");return 0;
+    /* Twinkle keeps SPU/CD/RF channels direct and RF wide until the final
+     * sum. A lagging RF event must retain the actual pending SPU sample. */
+    system573_audio_init(a);used=0;assert(!system573_audio_spu_route(a,.75f,0));assert(!system573_audio_enable_digital(a));system573_audio_set_sink(a,sink,NULL);
+    int16_t twinkle[6]={1,-1,20000,-20000,32767,-32768};
+    assert(!system573_audio_spu(a,0,twinkle,3));
+    assert(!system573_audio_cd(a,0,0,0));assert(!system573_audio_cd(a,1,20000,-20000));assert(!system573_audio_cd(a,2,0,0));
+    assert(!system573_audio_flush(a) && !used);
+    assert(!system573_audio_digital(a,0,-.75f/32768.0f,.75f/32768.0f));
+    assert(!system573_audio_digital(a,1,-40000.0f/32768.0f,40000.0f/32768.0f));assert(!system573_audio_flush(a));
+    assert(used==2 && a->spu_next-a->next==1 && !a->faults && !a->clipped);
+    assert(output[0][0]==0 && output[0][1]==0 && output[1][0]==-5000 && output[1][1]==5000);
+    assert(!system573_audio_digital(a,2,1.0f,-1.0f));assert(!system573_audio_flush(a));
+    assert(used==3 && output[2][0]==32767 && output[2][1]==-32768 && a->clipped==2);
+    free(a);puts("System573/GV/Twinkle timestamped source routes, float cancellation, saturation, source deferral and history rejection PASS");return 0;
 }

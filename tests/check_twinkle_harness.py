@@ -8,6 +8,8 @@ import subprocess
 import sys
 import tempfile
 import zlib
+import wave
+import re
 
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'scripts'))
 from prepare_twinkle_board import configuration
@@ -86,7 +88,13 @@ def main():
         shutil.copyfile(root/'gc985a01.chd',root/'gc985a04.chd')
         (root/'hd.bin').write_bytes(bytes(512*32))
         subprocess.run(['chdman','createhd','-i',str(root/'hd.bin'),'-o',str(root/'985hdda01.chd'),'-chs','1,1,32','-ss','512','-c','none'],check=True,capture_output=True)
-        r=run(extra=('--nvram',str(state)));out=r.stdout+r.stderr;assert not r.returncode,out
+        r=run(extra=('--nvram',str(state),'--audio',str(root/'spu.wav'),'--mixed-audio',str(root/'speaker.wav')));out=r.stdout+r.stderr;assert not r.returncode,out
+        with wave.open(str(root/'speaker.wav'),'rb') as wav:
+            assert wav.getframerate()==44100 and wav.getnchannels()==2 and wav.getsampwidth()==2
+            assert 2000<wav.getnframes()<2500 and set(wav.readframes(wav.getnframes()))=={0}
+        speaker=re.search(r'Twinkle speaker:.*frames=(\d+).*pending_SPU=(\d+) faults=(\d+)',out)
+        assert speaker and int(speaker[1])>2000 and int(speaker[2])<=8 and int(speaker[3])==0,out
+        assert 'SystemTwinkle SPU: rate=44100' in out and 'SPU_gain=0.75 SPU_channels=direct CDDA_gain=1 RF_gain=1' in out,out
         data=(root/'ram.bin').read_bytes();actual=struct.unpack_from('<16I',data,0x100)
         expected=(0x1234,0x56,0,0,0xc7,0,0x80,0xfe,45,123,10,0xbffe,0x0005004e,0x18,0x200,0x54474f4b)
         assert actual==expected,(actual,expected,out)

@@ -14,6 +14,11 @@ int systemtwinkle_active(void);
 void systemtwinkle_mem_reset(void);
 void systemtwinkle_reset(void);
 int systemtwinkle_sync(uint32_t);
+/* Attach after load and before execution. Sink callbacks must not reenter
+ * the board; source channels/gains remain separate until final saturation. */
+void systemtwinkle_set_audio_output(void (*)(void *,const int16_t *,unsigned),void *);
+int systemtwinkle_audio_spu_output(const int16_t *,unsigned,uint32_t);
+int systemtwinkle_audio_flush_output(void);
 int systemtwinkle_read(uint32_t,unsigned,uint32_t *);
 int systemtwinkle_write(uint32_t,unsigned,uint32_t,uint32_t);
 int systemtwinkle_dma5(uint32_t,uint32_t,uint32_t);

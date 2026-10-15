@@ -231,18 +231,27 @@ static PcmWav cd_speaker_wav;
 static void (*cd_headless_feed)(void *,int);
 static int cd_speaker_error;
 static int cd_speaker_flush(void){
+#ifdef PCSX_SYSTEM_TWINKLE
+  if(selected_board->family==116)return systemtwinkle_audio_flush_output();
+#endif
 #ifdef PCSX_SYSTEM_GV
   if(selected_board->family==102)return systemgv_audio_flush_output();
 #endif
   return system573_audio_flush_output();
 }
 static void cd_speaker_sink(void (*sink)(void *,const int16_t *,unsigned),void *opaque){
+#ifdef PCSX_SYSTEM_TWINKLE
+  if(selected_board->family==116){systemtwinkle_set_audio_output(sink,opaque);return;}
+#endif
 #ifdef PCSX_SYSTEM_GV
   if(selected_board->family==102){systemgv_set_audio_output(sink,opaque);return;}
 #endif
   system573_set_audio_output(sink,opaque);
 }
 static int cd_speaker_spu(const int16_t *pcm,unsigned frames,u32 cycle){
+#ifdef PCSX_SYSTEM_TWINKLE
+  if(selected_board->family==116)return systemtwinkle_audio_spu_output(pcm,frames,cycle);
+#endif
 #ifdef PCSX_SYSTEM_GV
   if(selected_board->family==102)return systemgv_audio_spu_output(pcm,frames,cycle);
 #endif
@@ -261,7 +270,7 @@ static void harness_cd_speaker_pcm(void *opaque,const int16_t *samples,unsigned 
   }
 }
 static int open_cd_speaker_audio(const char *path){
-  if((selected_board->family!=102 && !system573_has_cd()) || !out_current || pcm_wav_open(&cd_speaker_wav,path,44100))return -1;
+  if((selected_board->family!=102 && selected_board->family!=116 && !system573_has_cd()) || !out_current || pcm_wav_open(&cd_speaker_wav,path,44100))return -1;
   cd_headless_feed=out_current->feed;out_current->feed=harness_cd_spu_pcm;
   cd_speaker_sink(harness_cd_speaker_pcm,NULL);return 0;
 }
@@ -288,7 +297,7 @@ static PcmWav spu_wav;
 static void (*spu_original_feed)(void *, int);
 static unsigned spu_audio_peak;
 static int source_spu_speaker_board(void)
-{ return selected_board && (selected_board->family == 102 || selected_board->family == 104 || selected_board->family == 107 || selected_board->family == 110 || selected_board->family == 111 || selected_board->family == 112 || selected_board->family == 115 || selected_board->family == 114); }
+{ return selected_board && (selected_board->family == 102 || selected_board->family == 104 || selected_board->family == 107 || selected_board->family == 110 || selected_board->family == 111 || selected_board->family == 112 || selected_board->family == 115 || selected_board->family == 114 || selected_board->family == 116); }
 static void capture_spu_pcm(void *data, int bytes)
 {
   const int16_t *samples = data;
@@ -328,7 +337,7 @@ static int close_spu_audio(void)
   fprintf(stderr, "%s SPU: rate=%u frames=%" PRIu64 " peak=%u WAV_bytes=%" PRIu64 "\n",
     !selected_board ? "PlayStation" : selected_board->family == 102 ? "KonamiGV" :
     selected_board && selected_board->family == 104 ? "TecmoTPS" :
-    selected_board && selected_board->family == 115 ? "System573" : selected_board && selected_board->family == 114 ? "MetroZN" : selected_board && selected_board->family == 112 ? "JudgeZN" : selected_board && selected_board->family == 111 ? "NBAJamZN" : selected_board && selected_board->family == 110 ? "PrimalZN" : selected_board && selected_board->family == 107 ? "ViscoZN" : "System10",
+    selected_board && selected_board->family == 116 ? "SystemTwinkle" : selected_board && selected_board->family == 115 ? "System573" : selected_board && selected_board->family == 114 ? "MetroZN" : selected_board && selected_board->family == 112 ? "JudgeZN" : selected_board && selected_board->family == 111 ? "NBAJamZN" : selected_board && selected_board->family == 110 ? "PrimalZN" : selected_board && selected_board->family == 107 ? "ViscoZN" : "System10",
     spu_wav.rate, spu_wav.bytes / 4, spu_audio_peak, spu_wav.bytes);
   return pcm_wav_close(&spu_wav);
 }
@@ -1668,7 +1677,7 @@ int main(int argc, char **argv)
     fprintf(stderr,"--gnet-jp1 requires an authentic G-Net profile\n"); return 2;
   }
 #ifdef PCSX_SYSTEM12
-  if (mixed_audio_path && ((!interactive && board_family!=115 && board_family!=102) || (board_family != 102 && board_family != 103 && board_family != 104 && board_family != 105 && board_family != 106 && board_family != 107 && board_family != 108 && board_family != 109 && board_family != 110 && board_family != 111 && board_family != 112 && board_family != 113 && board_family != 114 && board_family != 115) ||
+  if (mixed_audio_path && ((!interactive && board_family!=115 && board_family!=102 && board_family!=116) || (board_family != 102 && board_family != 103 && board_family != 104 && board_family != 105 && board_family != 106 && board_family != 107 && board_family != 108 && board_family != 109 && board_family != 110 && board_family != 111 && board_family != 112 && board_family != 113 && board_family != 114 && board_family != 115 && board_family != 116) ||
       !strcmp(mixed_audio_path, output) ||
       (audio_path && !strcmp(mixed_audio_path, audio_path)) ||
       (nvram_path && !strcmp(mixed_audio_path, nvram_path)) ||

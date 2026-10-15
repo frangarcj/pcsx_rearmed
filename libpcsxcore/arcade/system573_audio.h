@@ -1,5 +1,5 @@
 /* GPL-2.0-or-later. PSX speaker routes at a shared 44.1 kHz output epoch.
- * Digital float input is already resampled by its CPU/DAC clock bridge. */
+ * The optional float lane receives preclocked digital or RF PCM input. */
 #ifndef PCSX_SYSTEM573_AUDIO_H
 #define PCSX_SYSTEM573_AUDIO_H
 #include <stdint.h>
@@ -19,6 +19,7 @@ typedef struct System573Audio {
 } System573Audio;
 void system573_audio_init(System573Audio *a);
 /* Shared host mixer: GV uses source SPU gain 0.75 with swapped channels.
+ * Twinkle uses 0.75 without swapping plus CDDA and its float RF lane.
  * Configure before source data; gain remains float until the final sum. */
 int system573_audio_spu_route(System573Audio *a,float gain,unsigned swap);
 void system573_audio_set_sink(System573Audio *a,system573_audio_sink_t sink,void *opaque);

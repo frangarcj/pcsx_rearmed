@@ -6,7 +6,8 @@ machine/input `twinklei`, parent BIOS `gq863`. Pinned MAME
 `MACHINE_IMPERFECT_SOUND`, without the first style's `MACHINE_NOT_WORKING`.
 This row remains open: the native interpreter now initializes original backup
 RAM, reaches the title and runs the tutorial/attract sequence on GL and NEON.
-Complete speaker output and player validation remain pending. Original native
+Timestamped speaker output and a successful timed P1 note are verified; live
+controls, presentation and full-song validation remain pending. Original native
 execution, component vectors and the independent MAME reference are tracked
 separately.
 
@@ -190,8 +191,92 @@ reads 68,473 HDD sectors and transfers 17,383,424 ATA words to sample RAM.
 RF5C400 produces 4,865,093 source frames, including 1,031,121 nonzero frames
 with peak 20,874. Serial, sound CPU, disk reads, NCR, target and RTC report zero
 faults. These counters and visible captures establish original boot, backup
-persistence and tutorial/attract progress; the complete SPU/CD/RF speaker mix
-and player-scored notes are still unverified.
+persistence and tutorial/attract progress. Speaker output and the successful
+timed-note probe are verified separately below.
+
+## Native speaker WAV
+
+`--mixed-audio FILE.wav` now records the source speaker routes at 44.1 kHz:
+SPU gain 0.75 with direct channels, program-CD CDDA gain 1, and RF5C400 direct
+outputs 0/1 at gain 1. Effects outputs 2/3 remain unrouted as in the pinned
+board. The existing shared timestamped mixer retains wide RF values as float
+until the final SPU/CD/RF sum and signed-16 saturation. No independent RF
+clipping, volume normalization, channel swapping or resampling is added.
+
+The RF callback checks each completed 384-chip-cycle frame and its exact
+sample index. Its input joins continuous CD DAC samples and the SPU's
+768-main-cycle sample cadence. Output waits for all three sources; an SPU
+sample rounded into the future remains pending. Source CPU/RF clock phases
+and real CD/media failures are preserved, with clock/history errors stopping
+explicitly. Raw `--audio` capture can run alongside the speaker WAV.
+
+Both original 6,600-frame warm runs produce exactly 4,865,093 speaker frames,
+1,031,121 nonzero frames and peak 20,874 without clipping or audio faults.
+The actual recorded segment is mono within the two-channel format, matching
+this original RF output; the unit vectors separately exercise distinct left
+and right routes. SPU and CDDA are silent in this run; the RF board supplies
+the sound. One future SPU frame remains pending and is absent from the
+speaker file. GL/NEON WAVs are byte-identical, SHA256
+`c7b26f704537dda9d19ae50c4a913599f961c6f4f11211884b713537a20e0b73`.
+Raw SPU WAVs are also identical, SHA256
+`633684828cd3e33d08289160ec8678102415f96da6d81527dd03c07d4eb45d7d`.
+RAM, VRAM and NVRAM remain byte-identical to the warm run before adding audio.
+
+The generated MIPS regression now captures both raw and mixed WAVs and checks
+all three source clocks, actual frame counts, final one-frame lookahead and
+error-free silent fixture output on GL and NEON. Shared O2/ASan/UBSan route
+vectors check direct SPU gain 0.75, fractional cancellation against RF,
+unsaturated RF values above signed-16 range, source deferral and final clipping.
+GV's shared SCSI/SPU harness regression and the HAVE_CHD=0 rejection pass.
+
+A separate original player sequence inserts two coins, presses Start and
+selects the first song, reaching `1st Stage / PIANO AMBIENT / 5.1.1`.
+A 7,800-frame input stress run produces game `POOR` judgements but does not
+establish a successful note hit or positive score. It crosses the 32-bit CPU
+cycle wrap at 4,415,736,005 total cycles without changing the audio epoch.
+GL/NEON state and speaker WAVs remain identical. RF peak 54,578 is retained
+until final mixing; 6,968 channel values saturate at the source output limit,
+with zero clock/device/audio faults. The speaker hash is
+`57f4beb3015e34543a794e3ca36e2adbfc02660aa4345bd7da58b53843c9557c`.
+A following measured timing probe resolves that gate for a P1 note. The same
+falling key-7 note moves from y=77 at frame 7,800 to y=97 at frame 7,820.
+A real key-7 press at frame 7,883, released at 7,885, produces a visibly
+positive score of **1,204** by frame 7,896 on both renderers. Main RAM
+`8017e1a8` changes from zero in the stress capture to 1,204, independently
+corroborating the on-screen score. No guest code, chart, score or NVRAM is
+patched; only ordinary coin, Start, key and turntable input events are sent.
+This is a timed-note acceptance check, not a full-song clear or a judgement
+accuracy benchmark.
+
+The 7,896-frame GL and NEON runs again match exactly:
+
+| Timed-note artifact | SHA256 |
+| --- | --- |
+| 4 MiB main RAM | `acc4674fe4b47adfa9441f8dd16d72b23636924ca5db3d3e7fb082db9c38cd58` |
+| VRAM dump | `27a5cb08e7f40e6ae59caee94f46569dede0fd7a90ae29ad2e0d286de10ed751` |
+| NVRAM | `3b5de8428f79c2b91e2e13f67b53343fc9407a8ac01a4c46ce35caa8c2a551b2` |
+| Speaker WAV | `870dd2476be9d1b3cc08c7114782362737b4f20d3c25cec7b443c184ddb51d77` |
+
+`tests/check_twinkle_original_harness.py` generates the exact 6,687 ordered
+input events, runs the normal original-media loader on GL and NEON with
+separate copies of a valid native NVRAM seed, and checks score, source identity,
+cycle wrap, device/audio faults, PCM format/signal and all four equal artifacts.
+It requires the original local media; generated fixtures never satisfy it.
+Use a new output directory:
+
+```sh
+python3 tests/check_twinkle_original_harness.py \
+  --neon build/mac-harness/pcsx-harness \
+  --gl build/mac-harness-vitagl-like/pcsx-harness \
+  --profile roms/prepared/bmiidx2 --nvram-seed /path/to/native-initialized.nv \
+  --evidence-dir /tmp/iidx2-original-replay
+python3 tests/check_twinkle_original_harness.py \
+  --evidence-dir artifacts/boards-mac-20261015/twinkle/bmiidx2/player --verify-only
+```
+
+The recorded original runs pass the verifier; both positive-score captures
+have been visually inspected. `--verify-only` reads already captured evidence
+without launching either emulator.
 
 Generated MIPS tests separately check upper 4 MiB RAM, mapped/unmapped byte
 lanes, mailbox, RTC paging, button/turntable/volume values, Sony SIO register
@@ -203,8 +288,8 @@ vectors pass on GL/NEON; the HAVE_CHD=0 build rejects the profile. Existing
 GV SCSI/DMA and the normal MIPS/GPU smoke regression also pass. Shared SPU
 DMA timing/large-payload acceptance also runs with this board selected.
 
-Remaining native work is complete SPU/CD/RF speaker mixing, scored player
-notes and songs, interactive cabinet controls/presentation and watchdog reset
+Remaining native work is a full-song clear/result, additional player/mode
+coverage, live SDL audio/interactive cabinet controls/presentation and watchdog reset
 sequencing. DVD video decoding is absent in the pinned JVC reference too; the
 control protocol follows that source and is tracked separately from video.
 Unused floppy/parallel controller implementation remains explicit unsupported

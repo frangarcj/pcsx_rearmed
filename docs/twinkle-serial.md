@@ -61,4 +61,5 @@ The trace's `final.csv` belongs beside the transaction file. Ignored evidence
 is under `artifacts/boards-mac-20261015/twinkle/bmiidx2/serial/source`. The
 [native Mac report](twinkle-mac.md) separately verifies original title, backup
 initialization, no-input warm restart and visible tutorial on GL and NEON.
-Speaker mixing and player-scored song validation remain open.
+Speaker WAV and a timed P1 note are verified in that report; live controls
+and a full-song clear/result remain open.

@@ -16,6 +16,7 @@ extern "C" {
 #include "systemgq.h"
 #include "system573.h"
 #include "gpu_vram.h"
+#include "arcade/system573_audio.h"
 }
 #include "arcade/twinkle_board.h"
 #include "arcade/rtc65271.h"
@@ -66,6 +67,7 @@ struct Board {
     uint64_t rf_frames=0,rf_nonzero=0,hdd_reads=0,hdd_failures=0,watchdog_kicks=0;
     uint64_t watchdog_due=40642560; // Source LTC1232 timeout: 1.2 s at PSXCLK.
     unsigned rf_peak=0;
+    System573Audio audio{};
 } b;
 std::vector<uint8_t> bytes(const std::string &path){std::ifstream f(path,std::ios::binary);if(!f)return {};return {(std::istreambuf_iterator<char>(f)),{}};}
 bool sha(const std::vector<uint8_t> &data,const char *expected){
@@ -120,9 +122,14 @@ bool scsi_to(uint64_t target){
 }
 int hdd_read(void *,uint32_t lba,void *out){b.hdd_reads++;int ok=!arcade_chd_hd_read(b.hdd,lba,static_cast<uint8_t *>(out),512);b.hdd_failures+=!ok;return ok;}
 int hdd_write(void *,uint32_t,const void *){return 0;}
-void rf_sample(void *,const int32_t *v,uint64_t){
+void rf_sample(void *,const int32_t *v,uint64_t cycle){
+    if(cycle%384 || !cycle || cycle/384-1!=b.rf_frames){fault("RF DAC clock discontinuity");return;}
+    if(system573_audio_digital(&b.audio,b.rf_frames,float(v[0])/32768.0f,float(v[1])/32768.0f))fault("RF speaker clock/history failure");
     b.rf_frames++;b.rf_nonzero+=v[0]!=0 || v[1]!=0;
     for(unsigned i=0;i<2;i++){uint64_t a=v[i]<0?-int64_t(v[i]):v[i];if(a>b.rf_peak)b.rf_peak=unsigned(std::min(a,uint64_t(UINT32_MAX)));}
+}
+void cd_sample(void *,int16_t left,int16_t right,uint64_t index,int){
+    if(system573_audio_cd(&b.audio,index,left,right))fault("CDDA speaker clock/history failure");
 }
 Rtc65271Config rtc_config(const uint8_t *nv=nullptr){Rtc65271Config c{};c.date=b.date;c.nvram=nv;c.nvram_size=nv?RTC65271_NVRAM_BYTES:0;return c;}
 int load(const char *directory,bool fixture){
@@ -148,6 +155,9 @@ int load(const char *directory,bool fixture){
                      !chd_cd_verify_sha1(b.video,"4306417f61eb1ea92894d288cdb7c385eb4610f2") ||std::memcmp(hd.sha1,expected,20)))){
         std::fprintf(stderr,"SystemTwinkle: original program/video/HDD identity or metadata mismatch\n");systemtwinkle_unload();return -1;
     }
+    system573_audio_init(&b.audio);
+    if(system573_audio_spu_route(&b.audio,.75f,0) || system573_audio_enable_digital(&b.audio) ||
+       !chd_cd_set_clocked_pcm_sink(b.cd,cd_sample,nullptr)){systemtwinkle_unload();return -1;}
     b.eeprom=std::make_unique<M24c02>(b.security);
     b.serial=std::make_unique<TwinkleSerial>();
     b.wave.resize(TwinkleBoard::WAVE_RAM_BYTES/2);ata_storage_config_t ata{};
@@ -277,6 +287,23 @@ extern "C" int systemtwinkle_sync(uint32_t cycle){
     if(rtc65271_advance_to(b.rtc,ns) || !scsi_to(ns)){fault("device clock failure");return -1;}
     return b.faults?-1:0;
 }
+extern "C" void systemtwinkle_set_audio_output(void (*sink)(void *,const int16_t *,unsigned),void *opaque){
+    system573_audio_set_sink(&b.audio,sink,opaque);
+}
+extern "C" int systemtwinkle_audio_spu_output(const int16_t *stereo,unsigned frames,uint32_t end_cycle){
+    if(!b.active || !b.audio.sink || !frames)return 0;
+    if(systemtwinkle_sync(psxRegs.cycle))return -1;
+    int64_t end=int64_t(b.cycles)+int32_t(end_cycle-b.last_cycle);
+    if(end<0 || uint64_t(end)<uint64_t(frames)*768){fault("SPU speaker epoch underflow");return -1;}
+    uint64_t first=(uint64_t(end)-uint64_t(frames)*768)/768;
+    if(system573_audio_spu(&b.audio,first,stereo,frames)){fault("SPU speaker clock/history failure");return -1;}
+    return 0;
+}
+extern "C" int systemtwinkle_audio_flush_output(void){
+    if(!b.active)return 0;
+    if(systemtwinkle_sync(psxRegs.cycle) || system573_audio_flush(&b.audio)){fault("speaker flush failure");return -1;}
+    return 0;
+}
 extern "C" int systemtwinkle_read(uint32_t a,unsigned w,uint32_t *v){return access(a,w,v,0,false);}
 extern "C" int systemtwinkle_write(uint32_t a,unsigned w,uint32_t v,uint32_t m){return access(a,w,&v,m,true);}
 extern "C" int systemtwinkle_dma5(uint32_t address,uint32_t count,uint32_t control){
@@ -337,6 +364,8 @@ extern "C" void systemtwinkle_report(FILE *out){
     std::fprintf(out,"Twinkle serial: reads=%llu writes=%llu tx_line_updates=%llu rx_line_updates=%llu commands=%llu response_bytes=%llu UART2=%02x/%02x divisor=%u FIFO=%02x powered=%d chapter=%u playback=%u faults=%u\n",
         (unsigned long long)serial.reads,(unsigned long long)serial.writes,(unsigned long long)serial.uart_tx_updates,(unsigned long long)serial.uart_rx_updates,(unsigned long long)serial.dvd_commands,(unsigned long long)serial.dvd_response_bytes,serial.uart_lcr[1],serial.uart_lsr[1],serial.uart_divisor[1],serial.uart_fcr[1],serial.powered,serial.chapter,serial.playback,serial.faults);
     std::fprintf(out,"SystemTwinkle: profile=bmiidx2 media=%s CPU=CXD8530CQ RAM=4194304 VRAM=2097152 PC=%08x cycles=%llu faults=%u MMIO=%llu/%llu\n",b.fixture?"SYNTHETIC_FIXTURE":"SOURCE_SHA_VERIFIED",psxRegs.pc,(unsigned long long)b.cycles,b.faults,(unsigned long long)b.reads,(unsigned long long)b.writes);
+    std::fprintf(out,"Twinkle speaker: rate=44100 SPU_gain=0.75 SPU_channels=direct CDDA_gain=1 RF_gain=1 RF_effects=unrouted frames=%llu SPU_inputs=%llu SPU_nonzero=%llu CDDA_clock=%llu CDDA_nonzero=%llu RF_clock=%llu RF_nonzero=%llu clipped=%llu peak=%u pending_SPU=%llu faults=%u\n",
+        (unsigned long long)b.audio.frames,(unsigned long long)b.audio.spu_inputs,(unsigned long long)b.audio.spu_nonzero,(unsigned long long)b.audio.cd_inputs,(unsigned long long)b.audio.cd_nonzero,(unsigned long long)b.audio.digital_inputs,(unsigned long long)b.audio.digital_nonzero,(unsigned long long)b.audio.clipped,b.audio.peak,(unsigned long long)(b.audio.spu_next>b.audio.next?b.audio.spu_next-b.audio.next:0),b.audio.faults);
     std::fprintf(out,"Twinkle sound: PC=%06x cycles=%llu bus_error=%d HDD_reads=%llu failures=%llu ATA=%02x DMA_words=%llu RF_frames=%llu nonzero=%llu peak=%u\n",b.sound->cpu_pc(),(unsigned long long)b.sound->cpu_cycles(),b.sound->cpu_bus_error(),(unsigned long long)b.hdd_reads,(unsigned long long)b.hdd_failures,b.sound->ata_status(),(unsigned long long)b.sound->ata_dma_words(),(unsigned long long)b.rf_frames,(unsigned long long)b.rf_nonzero,b.rf_peak);
     std::fprintf(out,"Twinkle SCSI: requests=%llu bytes=%llu pending=%llu NCR_faults=%u target_faults=%u RTC_faults=%u RTC_page=%u watchdog_kicks=%llu\n",(unsigned long long)b.dma_requests,(unsigned long long)b.dma_bytes,(unsigned long long)b.dma_remaining,n.faults,c.target.faults,r.faults,r.xram_page,(unsigned long long)b.watchdog_kicks);
 }

@@ -23,7 +23,7 @@ def prepare(source, rompath, output):
     payloads, report = media.audit(source, rompath)
     report.update(format='pcsx-aow-twinkle-v1', profile=configuration(), native_profile_available=True,
                   board_execution_verified=False,
-                  native_runtime_stage='interpreter/RAM/GPU/sound/RTC/SCSI/UART/JVC control; video decode, complete speaker mixing and player validation remain open')
+                  native_runtime_stage='interpreter/RAM/GPU/sound/RTC/SCSI/UART/JVC control; clocked SPU/CD/RF speaker WAV connected; video decode, live controls and full-song validation remain open')
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='twinkle-prepare-', dir=output.parent) as temp:
         root = Path(temp)
