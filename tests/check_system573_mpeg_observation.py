@@ -126,14 +126,68 @@ def verify(root, manifest):
     return result
 
 
+def verify_pad_reads(root):
+    """Check navigation isolation and actual source pad polls, without rerunning."""
+    baseline = rows(root/'mame-mpeg-observed/score.csv')
+    control_root, observed_root = root/'mame-menu-control', root/'mame-pad-reads'
+    for path in (control_root, observed_root):
+        source_log(path/'run.log')
+        log = (path/'run.log').read_text()
+        assert sum(line.startswith('BOOT_CANCELLED\t1\t') for line in log.splitlines()) == 4
+    control = rows(control_root/'score.csv')
+    observed = rows(observed_root/'score.csv')
+    assert len(baseline) == len(control) == len(observed)
+    changed_start_rows = 0
+    for before, after, watched in zip(baseline, control, observed):
+        assert after == watched, 'passive read tap must preserve frame observations'
+        # Cancellation accounts for future scheduled retries immediately;
+        # the original replay consumes those rows later at their old times.
+        applied, cancelled = int(after['boot_rows']), int(after['cancelled_boot_rows'])
+        assert applied <= int(before['boot_rows']) <= applied+cancelled
+        for key in before:
+            if key not in ('boot_rows', 's573_pad_bits'):
+                assert before[key] == after[key], key
+        if before['s573_pad_bits'] != after['s573_pad_bits']:
+            assert int(before['s573_pad_bits'], 16) ^ int(after['s573_pad_bits'], 16) == 0x8000
+            changed_start_rows += 1
+        if int(after['ram_803493f8'], 16):
+            assert int(after['s573_pad_bits'], 16) & 0x8000, 'Start held during song'
+    final = observed[-1]
+    assert (int(final['boot_rows']), int(final['cancelled_boot_rows']), int(final['pad_rows'])) == (15, 4, 1476)
+    assert int(final['ram_80349538'], 16) == 25950
+    polls = rows(observed_root/'reads.csv')
+    assert 0 < len(polls) <= 100000
+    assert f'PAD_READS\t{len(polls)}' in (observed_root/'run.log').read_text()
+    for poll in polls:
+        assert int(poll['address'], 16) == 0x1f400008
+        assert 1 <= int(poll['song_tick']) <= 1042
+        assert int(poll['data'], 16) & 0x8000, 'actual pad poll observes Start held'
+    metadata = json.loads((observed_root/'observation.json').read_text())
+    for name, recorded in metadata['files'].items():
+        assert hashlib.sha256((observed_root/name).read_bytes()).hexdigest() == recorded['sha256']
+    return {'applied_navigation_rows': 15, 'cancelled_redundant_start_rows': 4,
+            'unchanged_pad_transitions': 1476, 'changed_start_snapshot_rows': changed_start_rows,
+            'reference_score_with_and_without_redundant_start': 25950,
+            'passive_tap_preserves_all_frame_observations': True,
+            'actual_pad_reads': len(polls),
+            'actual_read_pc_counts': dict(Counter(poll['pc'] for poll in polls)),
+            'actual_read_mask_counts': dict(Counter(poll['mask'] for poll in polls)),
+            'native_actual_pad_reads_observed': False, 'judgement_equivalence': 'OPEN'}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--evidence-dir', required=True, type=Path)
     parser.add_argument('--cleanup-manifest', type=Path)
+    parser.add_argument('--pad-reads', action='store_true',
+                        help='also inspect isolated navigation and passive MAME pad polls')
     args = parser.parse_args()
     root = args.evidence_dir.resolve()
     manifest = args.cleanup_manifest or root.parents[2]/'disk-cleanup-20261015.jsonl'
-    print(json.dumps(verify(root, manifest), indent=2))
+    result = verify(root, manifest)
+    if args.pad_reads:
+        result['pad_reads'] = verify_pad_reads(root)
+    print(json.dumps(result, indent=2))
     print('Retained MPEG observations verified; judgement equivalence remains OPEN')
 
 

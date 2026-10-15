@@ -53,6 +53,10 @@ from the arcade boards.
   DDR speaker output now passes headless/live checks. The original digital KAA
   installation also matches all eight MAME flash chips, ZS01 and CR-589 update
   buffer; bounded scored drums/live sound pass, with judgement alignment open.
+  A separate digital reference cancels four late menu Start edges without
+  changing its 25,950-point score. Its passive pad-read tap records 2,082
+  original reads with unchanged frame observations; native poll comparison
+  remains open.
 - Printers: Technodrive responds at its JVS printer endpoint but has no
   validated complete ticket. Tokimeki Seal Version produces its original
   operator test page in virtual paper output. Original Plus now generates its

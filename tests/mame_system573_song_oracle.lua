@@ -4,6 +4,9 @@ local machine = manager.machine
 assert(machine.system.name == "pcnfrk4mk", "requires original PF4 KAA")
 local input_path = assert(os.getenv("PCSX_PF4_INPUTS"), "missing PCSX_PF4_INPUTS")
 local trace_path = assert(os.getenv("PCSX_PF4_TRACE"), "missing PCSX_PF4_TRACE")
+-- Native menu retries can arrive after MAME has already started its song.
+-- Optional control: stop navigation there, without changing any pad events.
+local stop_boot_at_song = os.getenv("PCSX_PF4_STOP_BOOT_AT_SONG") == "1"
 local function field(tag, mask)
     for _, value in pairs(machine.ioport.ports[tag].fields) do
         if value.mask == mask then return value end
@@ -77,16 +80,56 @@ local end_item=item(fpga,"mp3_end_addr")
 local current_item=item(fpga,"mp3_cur_addr")
 local fpga_item=item(fpga,"fpga_status")
 local mpeg_item=item(fpga,"mpeg_status")
+local read_trace_path = os.getenv("PCSX_PF4_READ_TRACE")
+local read_trace, read_tap, read_count
+if read_trace_path then
+    assert(read_trace_path ~= trace_path and read_trace_path ~= input_path,
+           "read trace requires a separate path")
+    read_trace = assert(io.open(read_trace_path, "w"))
+    read_count = 0
+    local state = machine.devices[":maincpu"].state
+    local pc = assert(state.PC or state.GENPC or state.CURPC, "missing CPU PC")
+    read_trace:write("time,pc,address,data,mask,song_tick,score,latched_samples,mpeg_frames\n")
+    read_tap = memory:install_read_tap(0x1f400008, 0x1f40000b, "pf4_original_pad_reads",
+        function(address, data, mask)
+            local tick = memory:read_u32(0x803493f8)
+            if machine.time:as_double() >= 180 and tick > 0 and tick <= 1042 then
+                read_count = read_count+1
+                assert(read_count <= 100000, "pad-read trace bound exceeded")
+                read_trace:write(string.format("%.12f,%08x,%08x,%08x,%08x,%d,%d,%d,%d\n",
+                    machine.time:as_double(), pc.value, address, data, mask, tick,
+                    memory:read_u32(0x80349538), counter_item:read(0), frame_item:read(0)%65536))
+            end
+            -- Returning nothing preserves the source's original read value.
+        end)
+end
 local trace = assert(io.open(trace_path, "w"))
 trace:write("time,frame,boot_rows,pad_rows")
 for _, address in ipairs(addresses) do
     trace:write(string.format(",ram_%08x", address))
 end
-trace:write(",s573_mpeg_frames,s573_latched_samples,s573_start,s573_end,s573_current,s573_pad_bits,s573_fpga,s573_mpeg_state\n")
-emu.register_stop(function() trace:close() end)
-local nextboot, nextpad = 1, 1
+trace:write(",s573_mpeg_frames,s573_latched_samples,s573_start,s573_end,s573_current,s573_pad_bits,s573_fpga,s573_mpeg_state,cancelled_boot_rows\n")
+emu.register_stop(function()
+    trace:close()
+    if read_trace then
+        read_tap:remove()
+        read_trace:close()
+        print("PAD_READS", read_count)
+    end
+end)
+local nextboot, nextpad, cancelled_boot = 1, 1, 0
 emu.register_frame_done(function()
     local time = machine.time:as_double()
+    local tick = memory:read_u32(0x803493f8)
+    if stop_boot_at_song and time >= 180 and tick > 0 and nextboot <= #boot then
+        while nextboot <= #boot do
+            local event = boot[nextboot]
+            assert(event[2] == "p1start", "only redundant Start retries may be cancelled")
+            print("BOOT_CANCELLED", tick, event[1], event[2], event[3])
+            nextboot, cancelled_boot = nextboot+1, cancelled_boot+1
+        end
+        controls.p1start:set_value(0)
+    end
     -- The old cold-boot conversion is used only for boot/menu navigation.
     local frame = math.floor(time*14400/(8152128004/33868800))
     while nextboot <= #boot and boot[nextboot][1] <= frame do
@@ -95,18 +138,17 @@ emu.register_frame_done(function()
         nextboot = nextboot+1
     end
     if time < 180 then return end
-    local tick = memory:read_u32(0x803493f8)
     while tick > 0 and nextpad <= #pads and pads[nextpad][1] <= tick do
         local event = pads[nextpad]
         controls[event[2]]:set_value(event[3])
         print("SONG_INPUT", tick, event[1], event[2], event[3])
         nextpad = nextpad+1
     end
-    trace:write(string.format("%.9f,%d,%d,%d",time,frame,nextboot-1,nextpad-1))
+    trace:write(string.format("%.9f,%d,%d,%d",time,frame,nextboot-1-cancelled_boot,nextpad-1))
     for _, address in ipairs(addresses) do
         trace:write(string.format(",%08x",memory:read_u32(address)))
     end
-    trace:write(string.format(",%d,%d,%08x,%08x,%08x,%04x,%04x,%04x\n",frame_item:read(0)%65536,counter_item:read(0),start_item:read(0),end_item:read(0),current_item:read(0),machine.ioport.ports[":IN2"]:read(),fpga_item:read(0),mpeg_item:read(0)))
+    trace:write(string.format(",%d,%d,%08x,%08x,%08x,%04x,%04x,%04x,%d\n",frame_item:read(0)%65536,counter_item:read(0),start_item:read(0),end_item:read(0),current_item:read(0),machine.ioport.ports[":IN2"]:read(),fpga_item:read(0),mpeg_item:read(0),cancelled_boot))
     if tick >= 1042 then
         assert(nextboot == #boot+1 and nextpad == #pads+1, "unconsumed replay")
         machine.video:snapshot()

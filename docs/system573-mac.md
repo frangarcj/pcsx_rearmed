@@ -455,6 +455,55 @@ explicitly says `fresh_audio_verification=false` and
 `judgement_equivalence=OPEN`. The earlier raw-artifact verifiers require their
 removed captures and must not be rerun merely to recreate those files.
 
+## Isolated navigation and original-game pad reads
+
+The retained song-tick reference has an extra navigation confound: four late
+Start edges intended as native menu retries arrive after MAME has entered its
+song. Forty reference snapshot rows therefore hold Start during gameplay;
+the native snapshots have it released. This must be isolated before using
+the reference as an input-poll oracle.
+
+`PCSX_PF4_STOP_BOOT_AT_SONG=1` adds a control to
+`tests/mame_system573_song_oracle.lua`: once the original song tick becomes
+positive in the established gameplay observation window (after 180 seconds),
+release Start and cancel only the remaining Start retries. Other navigation
+events cannot be cancelled, and all 1,476 pad transitions remain unchanged.
+The time gate prevents treating the boot RAM test's temporary contents as a
+running song. Cancellations are logged separately from applied inputs.
+
+The fresh independent MAME control applies 15 navigation rows and explicitly
+cancels four. It still scores **25,950** at tick 1,042. All 2,672 callback
+observations have the same times, score/chart RAM and MPEG state as the old
+reference. Only the navigation counts and forty Start-bit observations change.
+Thus the unwanted Start pulses do not explain native's 1,150-point result.
+
+Optional `PCSX_PF4_READ_TRACE=/absolute/path/reads.csv` installs a pure MAME
+read tap on `1f400008..1f40000b`. It returns no replacement value, reads no
+additional device registers and observes only song ticks 1 through 1,042 in
+the same gameplay window. It records the original returned data/mask, CPU PC,
+song tick, score and already-latched MPEG status; it is bounded to 100,000
+rows. The separate observation completes with **2,082 real reads**, exactly
+two per recorded tick 1 through 1,041, all 16-bit reads (`0000ffff`) from
+PC `8001876c`. Start is released in every read. Its complete callback CSV is
+identical to the navigation control, and its score remains 25,950.
+
+Evidence is under `mame-menu-control/` and `mame-pad-reads/` in the original
+KAA evidence directory. Both runs use independently installed MAME state,
+preserve the native install, and request no WAVs or memory dumps. The read
+CSV is about 144 KiB. The retained checker verifies the isolation and passive
+tap invariants:
+
+```sh
+python3 scripts/check_validation_storage.py --reserve-mib 1
+python3 tests/check_system573_mpeg_observation.py \
+  --evidence-dir artifacts/boards-mac-20261015/system573/pcnfrk4mk --pad-reads
+```
+
+Native pad MMIO reads at the corresponding instruction have not yet been
+recorded. Actual input-poll/MPEG-phase alignment and judgement equivalence
+therefore remain open; these reference observations do not establish a
+native timing fix.
+
 ## Hyper Bishi Bashi media
 
 Source is pinned MAME `deb2f54fe7300e7a192690318beb860159bfd52a`,
