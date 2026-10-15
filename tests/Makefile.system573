@@ -32,10 +32,14 @@ $(BUILD)/zi-bus: $(BUILD)/zi-bus-test.o $(BUILD)/flash-c.o $(BUILD)/nor.o $(BUIL
 $(BUILD)/audio: tests/test_system573_audio.c libpcsxcore/arcade/system573_audio.c libpcsxcore/arcade/system573_audio.h
 	@mkdir -p $(BUILD)
 	$(CC) -std=c99 $(OPT) -Wall -Wextra -Werror tests/test_system573_audio.c libpcsxcore/arcade/system573_audio.c -o $@
-test: $(BUILD)/peripherals $(BUILD)/flash $(BUILD)/audio $(BUILD)/zi-bus
+$(BUILD)/mas: tests/test_mas3507d.cpp libpcsxcore/arcade/mas3507d.cpp libpcsxcore/arcade/mas3507d.h libpcsxcore/arcade/mas3507d_mame/mas_methods.inc libpcsxcore/arcade/mas3507d_mame/minimp3.h
+	@mkdir -p $(BUILD)
+	$(CXX) -std=c++17 $(OPT) -Wall -Wextra -Werror tests/test_mas3507d.cpp libpcsxcore/arcade/mas3507d.cpp -o $@
+test: $(BUILD)/peripherals $(BUILD)/flash $(BUILD)/audio $(BUILD)/zi-bus $(BUILD)/mas
 	$(BUILD)/peripherals
 	$(BUILD)/flash
 	$(BUILD)/audio
 	$(BUILD)/zi-bus
+	$(BUILD)/mas
 sanitize:
 	$(MAKE) -f tests/Makefile.system573 BUILD=$(BUILD)/sanitize OPT='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' test

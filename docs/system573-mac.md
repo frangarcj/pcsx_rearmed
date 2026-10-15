@@ -81,6 +81,15 @@ multi-session box. The digital I/O FPGA/MAS3507D audio path, instrument inputs,
 native cold installation and player validation still need integration and
 actual game evidence. This row remains open in the overall Mac matrix.
 
+The standalone [MAS3507D decoder/I2C port](mas3507d-port.md) now retains the
+actual pinned MAME methods and identical minimp3 decoder. Explicit synthetic
+44.1 kHz stereo and 22.05 kHz mono MPEG streams decode with verified frequencies,
+frame-sync/counter agreement, deterministic restart, mute and independent
+channel gain. Optimized/ASan/UBSan checks pass with identical baseline PCM
+hashes. Empty/invalid input produces no successful frame sync; callbacks cannot
+reenter mutation. This is not yet connected to the FPGA's encrypted RAM/timers
+or native speaker output, and does not provide original game music evidence.
+
 ## Hyper Bishi Bashi media
 
 Source is pinned MAME `deb2f54fe7300e7a192690318beb860159bfd52a`,
