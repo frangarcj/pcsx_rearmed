@@ -245,7 +245,8 @@ def _disk_file(disk: dict[str, Any], set_name: str, rompath: Path,
 
 def _payloads(profile: dict[str, Any], regions: dict[str, bytes],
               rompath: Path, archive: Path | None,
-              chdman: str | None) -> tuple[dict[str, bytes], dict[str, Any]]:
+              chdman: str | None,
+              disk_links: dict[str, Path] | None = None) -> tuple[dict[str, bytes], dict[str, Any]]:
     expected = {row["tag"]: row["size"] for row in profile.get("rom_regions", [])}
     if set(regions) != set(expected):
         raise KonamiGVPreparationError(
@@ -268,9 +269,13 @@ def _payloads(profile: dict[str, Any], regions: dict[str, bytes],
     for disk in profile.get("disk_media", []):
         source, temporary = _disk_file(disk, profile["set"], rompath, archive)
         try:
+            if disk_links is not None and temporary:
+                raise KonamiGVPreparationError("--link-chd requires a standalone original CHD, not a temporary archive extraction")
             report = _verify_chd(source, disk, chdman)
             filename = f"{disk['name']}.chd"
             payloads[filename] = source.read_bytes()
+            if disk_links is not None:
+                disk_links[filename] = source.resolve()
             disk_reports.append({**disk, "package_file": filename, "validation": report,
                                 "local_sha256": hashlib.sha256(payloads[filename]).hexdigest()})
         finally:
@@ -287,7 +292,8 @@ def _digest(data: bytes) -> tuple[str, str]:
 def package_regions(set_name: str, profile: dict[str, Any], regions: dict[str, bytes],
                     output_dir: Path, source_metadata: dict[str, Any],
                     disk_payloads: dict[str, bytes] | None = None,
-                    disk_reports: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                    disk_reports: list[dict[str, Any]] | None = None,
+                    disk_links: dict[str, Path] | None = None) -> dict[str, Any]:
     _validate_profile_shape(profile)
     canonical = next((row for row in load_registry()["profiles"] if row["set"] == set_name), None)
     if canonical is None or profile != canonical:
@@ -302,7 +308,15 @@ def package_regions(set_name: str, profile: dict[str, Any], regions: dict[str, b
     payloads = {REGION_FILES[tag]: data for tag, data in regions.items()}
     disk_payloads = disk_payloads or {}
     disk_reports = disk_reports or []
+    disk_links = disk_links or {}
     expected_disks = {f"{disk['name']}.chd": disk for disk in profile["disk_media"]}
+    if not set(disk_links).issubset(expected_disks):
+        raise KonamiGVPreparationError("only declared CHDs may be linked")
+    for name, source in disk_links.items():
+        if source.resolve().is_relative_to(output_dir.resolve()):
+            raise KonamiGVPreparationError("linked CHD must be outside the prepared output directory")
+        if not source.is_file() or source.read_bytes() != disk_payloads.get(name):
+            raise KonamiGVPreparationError("linked CHD differs from the verified payload")
     if any(not isinstance(report, dict) for report in disk_reports):
         raise KonamiGVPreparationError("System GV CHD report is malformed")
     if (set(disk_payloads) != {d.get("package_file") for d in disk_reports} or
@@ -358,6 +372,9 @@ def package_regions(set_name: str, profile: dict[str, Any], regions: dict[str, b
     for name, data in payloads.items():
         crc, sha = _digest(data)
         manifest["regions"][name] = {"size": len(data), "crc32": crc, "sha1": sha}
+    if disk_links:
+        manifest["disk_storage"] = {name: {"mode": "symlink", "source": str(path.resolve())}
+                                    for name, path in disk_links.items()}
 
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="prepare-system-gv-", dir=output_dir.parent) as temp:
@@ -366,7 +383,11 @@ def package_regions(set_name: str, profile: dict[str, Any], regions: dict[str, b
         if output_dir.exists():
             if not output_dir.is_dir():
                 raise KonamiGVPreparationError("output path exists and is not a directory")
-            shutil.copytree(output_dir, stage, dirs_exist_ok=True)
+            # A linked image is about to be revalidated/replaced. Do not
+            # materialize its old target while copying unrelated user files.
+            shutil.copytree(output_dir, stage, dirs_exist_ok=True,
+                            ignore=lambda directory, names: set(disk_links) & set(names)
+                            if Path(directory) == output_dir else set())
             old_manifest = stage / "manifest.json"
             if old_manifest.exists() and not old_manifest.is_file():
                 raise KonamiGVPreparationError("existing output manifest is not a regular file")
@@ -375,7 +396,10 @@ def package_regions(set_name: str, profile: dict[str, Any], regions: dict[str, b
                 for name in old_owned_files:
                     (stage / name).unlink(missing_ok=True)
         for name, data in payloads.items():
-            (stage / name).write_bytes(data)
+            if name in disk_links:
+                (stage / name).symlink_to(disk_links[name].resolve())
+            else:
+                (stage / name).write_bytes(data)
         (stage / "board.ini").write_text(board_ini, encoding="utf-8")
         (stage / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         backup = Path(temp) / "previous"
@@ -393,7 +417,7 @@ def package_regions(set_name: str, profile: dict[str, Any], regions: dict[str, b
 
 def prepare(set_name: str, source: Path, rompath: Path, output_dir: Path,
             archive: Path | None = None, profiles_path: Path = boards.DEFAULT_OUTPUT,
-            chdman: str | None = None) -> dict[str, Any]:
+            chdman: str | None = None, link_chd: bool = False) -> dict[str, Any]:
     registry = load_registry(profiles_path)
     if _source_commit(source) != registry["mame_source_commit"]:
         raise KonamiGVPreparationError("MAME checkout differs from the pinned registry")
@@ -409,12 +433,13 @@ def prepare(set_name: str, source: Path, rompath: Path, output_dir: Path,
     if fresh != registry:
         raise KonamiGVPreparationError("registry differs from pinned source/listxml facts")
     regions, source_metadata = _load_regions(set_name, source, rompath, archive)
-    payloads, chd_metadata = _payloads(profile, regions, rompath, archive, chdman)
+    disk_links = {} if link_chd else None
+    payloads, chd_metadata = _payloads(profile, regions, rompath, archive, chdman, disk_links)
     disk_names = {f"{d['name']}.chd" for d in profile["disk_media"]}
     disk_payloads = {name: payloads.pop(name) for name in disk_names}
     return package_regions(set_name, profile, regions, output_dir,
                            source_metadata | chd_metadata, disk_payloads,
-                           chd_metadata["disks"])
+                           chd_metadata["disks"], disk_links)
 
 
 def main(argv: Iterable[str] | None = None) -> int:
@@ -425,11 +450,13 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser.add_argument("--archive", type=Path, help="optional local ZIP containing ROM or CHD files")
     parser.add_argument("--profiles", type=Path, default=boards.DEFAULT_OUTPUT)
     parser.add_argument("--chdman", help="path to chdman (defaults to PATH lookup)")
+    parser.add_argument("--link-chd", action="store_true",
+                        help="reference the audited standalone original CD instead of copying it")
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/system-gv"))
     args = parser.parse_args(argv)
     try:
         manifest = prepare(args.set_name, args.mame_source, args.rompath,
-                           args.output_dir, args.archive, args.profiles, args.chdman)
+                           args.output_dir, args.archive, args.profiles, args.chdman, args.link_chd)
     except (KonamiGVPreparationError, boards.KonamiGVProfileError,
             mame.PreparationError, OSError) as exc:
         print(f"prepare_konamigv_board: {exc}", file=sys.stderr)

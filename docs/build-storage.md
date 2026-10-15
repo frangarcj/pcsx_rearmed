@@ -72,5 +72,10 @@ For future work:
   their intermediates automatically.
 - Avoid copying ROMs, previous `build/` trees or accumulated `artifacts/` into
   source snapshots. Store exact inputs once and reference them by hashes.
+- System GV preparation can use `--link-chd` to reference an audited standalone
+  original disc. Full CHD/source checks still run; the prepared manifest records
+  the external path, which must remain available. Repreparing a linked profile
+  does not copy its old disc into the staging directory. Temporary extracted
+  archive members and links into the output package are rejected.
 - All `build/` outputs are ignored by Git; commits contain source and reproducible
   tests, with local validation evidence kept separately.

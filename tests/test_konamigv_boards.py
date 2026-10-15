@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -107,7 +108,7 @@ class KonamiGVPackagingTest(unittest.TestCase):
         registry = prep.load_registry()
         cls.profiles = {row["set"]: row for row in registry["profiles"]}
 
-    def _package_fixture(self, set_name: str, out: Path) -> dict:
+    def _package_fixture(self, set_name: str, out: Path, link: Path | None = None) -> dict:
         profile = self.profiles[set_name]
         regions = {row["tag"]: bytes([i + 1]) * row["size"]
                    for i, row in enumerate(profile["rom_regions"])}
@@ -122,7 +123,59 @@ class KonamiGVPackagingTest(unittest.TestCase):
                                             {"number": 2, "type": "AUDIO"}]}}
         source = {"rom_set": set_name, "parent_chain": [set_name, "konamigv"]}
         return prep.package_regions(set_name, profile, regions, out, source,
-                                    {disk_file: disk_bytes}, [report])
+                                    {disk_file: disk_bytes}, [report],
+                                    {disk_file: link} if link is not None else None)
+
+    def test_linked_cd_survives_reprepare_without_copying_or_mutating_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root/'original.chd'
+            payload = b'synthetic validated CHD fixture'
+            source.write_bytes(payload)
+            out = root/'package'
+            first = self._package_fixture('tmoshsp', out, source)
+            image = out/'756jab01.chd'
+            self.assertTrue(image.is_symlink())
+            self.assertEqual(source.resolve(), image.resolve())
+            self.assertEqual(payload, image.read_bytes())
+            (out/'keep.me').write_text('unrelated')
+            second = self._package_fixture('tmoshsp', out, source)
+            self.assertEqual(first, second)
+            self.assertTrue(image.is_symlink())
+            self.assertEqual(payload, source.read_bytes())
+            self.assertEqual('unrelated', (out/'keep.me').read_text())
+            self.assertEqual('symlink', second['disk_storage']['756jab01.chd']['mode'])
+
+    def test_link_rejects_changed_or_package_owned_source_without_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            out = root/'package'
+            out.mkdir()
+            sentinel = out/'keep.me'
+            sentinel.write_text('preserve')
+            bad = root/'wrong.chd'
+            bad.write_bytes(b'wrong original')
+            with self.assertRaisesRegex(prep.KonamiGVPreparationError, 'differs'):
+                self._package_fixture('tmoshsp', out, bad)
+            owned = out/'original.chd'
+            owned.write_bytes(b'synthetic validated CHD fixture')
+            with self.assertRaisesRegex(prep.KonamiGVPreparationError, 'outside'):
+                self._package_fixture('tmoshsp', out, owned)
+            self.assertEqual('preserve', sentinel.read_text())
+            self.assertEqual(b'wrong original', bad.read_bytes())
+
+    def test_linked_cd_rejects_temporary_archive_extraction(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp)/'temporary.chd'
+            source.write_bytes(b'temporary archive member')
+            profile = self.profiles['tmoshsp']
+            regions = {row['tag']: bytes(row['size']) for row in profile['rom_regions']}
+            with patch.object(prep, '_disk_file', return_value=(source, True)), \
+                    patch.object(prep, '_verify_chd') as verify:
+                with self.assertRaisesRegex(prep.KonamiGVPreparationError, 'standalone original'):
+                    prep._payloads(profile, regions, Path(temp), None, None, {})
+                verify.assert_not_called()
+            self.assertFalse(source.exists())
 
     def test_transactional_package_preserves_unrelated_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
