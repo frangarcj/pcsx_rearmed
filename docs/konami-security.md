@@ -5,6 +5,10 @@ X76F041, X76F100 and DS2401 pin protocols through a standalone C interface.
 It provides reusable devices for System 573 cassette variants and other
 boards; no complete System 573 boot is claimed.
 
+The separate [ZS01 component](konami-zs01.md) now provides the encrypted PIC
+protocol required by cassette ZI. Original-media board/runtime evidence is
+tracked in [System 573 Mac validation](system573-mac.md).
+
 ## Secure SerialFlash
 
 `konami_secure_flash_create` requires the chip type and a complete caller
@@ -83,8 +87,9 @@ page commit/persistence, sector and array boundaries, configuration access,
 password replacement, program-only protection, retry lockout and mass erase.
 DS2401 tests cover exact reset/presence/read windows, both ROM commands,
 CRC validation, all 64 bits, unsupported commands and rejected time rewinds.
-The complete suite passes ASan/UBSan. No authentic System 573 cassette image
-was supplied for a game boot or cassette acceptance test in this task.
+The complete suite passes ASan/UBSan. These original X76/DS2401 component tests
+use synthetic images; later original-cassette board evidence is recorded in
+`system573-mac.md`, separately from component protocol checks.
 
 The port retains MAME's X76 limitations: password verification/write latency
 is immediate, SDA output updates on the modeled rising edge despite upstream
