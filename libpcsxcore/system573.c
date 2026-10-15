@@ -19,6 +19,7 @@
 #include "arcade/psx_sio.h"
 #include "arcade/system573_audio.h"
 #include "arcade/system573_digital.h"
+#include "arcade/system573_digital_clock.h"
 #ifdef HAVE_CHD
 #include "arcade/atapi_cr589.h"
 #include "arcade/chd_cd.h"
@@ -36,6 +37,7 @@ static struct {
     uint8_t *media[11],*fetch,*cassette_image;
     uint8_t *cassette_serial,*digital_id,*msu_flash,*msu_rtc;
     System573Digital *digital;
+    System573DigitalClock digital_clock;
     uint8_t drum_outputs[10];
 #ifdef HAVE_CHD
     ChdCd *cd;AtapiCr589 *drive;
@@ -97,6 +99,10 @@ static void drum_output(void *opaque,unsigned line,int level){
     case 13:case 21:board.drum_outputs[8]=level;break;
     case 14:case 22:board.drum_outputs[9]=level;break;
     }
+}
+static int digital_pcm(void *opaque,uint64_t index,float left,float right){
+    (void)opaque;
+    if(system573_audio_digital(&board.audio,index,left,right)){board.fault=1;return -1;}return 0;
 }
 static int digital_bus(u32 a,unsigned w,u32 *v,int write){
     if(!board.digital || a<0x1f640000 || a>=0x1f640100)return 0;
@@ -237,6 +243,7 @@ static int load_board(const char *dir,int synthetic){
     if(profile==2){
         if(system573_flash_init_zi(&board.bus,chips,board.media[10],board.media[1],board.cassette_image,140,board.cassette_serial,8,&local))goto bad;
         board.digital=system573_digital_create(board.digital_id,8,0,drum_output,NULL);if(!board.digital)goto bad;
+        if(system573_audio_enable_digital(&board.audio) || system573_digital_clock_init(&board.digital_clock,board.digital,digital_pcm,NULL))goto bad;
     }else if(system573_flash_init_cassette(&board.bus,chips,board.media[10],board.media[1],profile?board.cassette_image:factory,profile?KONAMI_X76F041:KONAMI_X76F100,&local))goto bad;
     psx_sio_callbacks_t cb={0};cb.irq=sio_irq;
     for(unsigned p=0;p<2;p++){cb.opaque=(void *)(uintptr_t)p;if(psx_sio_create(p?PSX_SIO1:PSX_SIO0,&cb,&board.sio[p]))goto bad;}
@@ -244,7 +251,7 @@ static int load_board(const char *dir,int synthetic){
     board.fetch=malloc(0x400000);if(!board.fetch || gpu_set_model(2) || gpu_set_vram_height(1024))goto bad;
     board.old_ram=psxRamSize;board.old_rom=psxRomSize;psxRamSize=0x400000;psxRomSize=0x80000;
     Config.HLE=FALSE;board.active=1;board.synthetic=synthetic;
-    if(profile==2)fprintf(stderr,"System573 pcnfrk4mk: %s; ZI/digital I/O/drum controls; MSU declared ROMs audited, source device has no execution map; native digital audio clock/mix pending\n",synthetic?"generated MIPS fixture, empty drive, not original game evidence":"seven original chip CRCs and original CD SHA matched; serial/CD retain source BAD_DUMP");
+    if(profile==2)fprintf(stderr,"System573 pcnfrk4mk: %s; ZI/digital I/O/drum controls; MSU declared ROMs audited, source device has no execution map; CPU-clocked SPU/CDDA/digital speaker routes gain=1\n",synthetic?"generated MIPS fixture, empty drive, not original game evidence":"seven original chip CRCs and original CD SHA matched; serial/CD retain source BAD_DUMP");
     else if(profile)fprintf(stderr,"System573 ddr2m: original BIOS/H8 response/cassette CRCs matched; original CD SHA matched; cassette/CD retain source BAD_DUMP status; flash/RTC source defaults\n");
     else fprintf(stderr,"System573 hyperbbc: %s; cassette Y source factory default (no EEPROM dump), no CD-ROM\n",synthetic?"generated MIPS fixture, not original ROM evidence":"eleven source ROM CRCs matched; H8 response dump");
     return 0;
@@ -258,7 +265,6 @@ int system573_has_cd(void){return board.active && board.cd_profile;}
 int system573_has_digital(void){return board.active && board.digital!=NULL;}
 unsigned system573_players(void){return board.cd_profile==2?1:board.cd_profile==1?2:3;}
 void system573_set_audio_output(void (*sink)(void *,const int16_t *,unsigned),void *opaque){
-    if(board.digital && sink){fprintf(stderr,"System573 digital speaker clock/mix not integrated yet\n");board.fault=1;return;}
     system573_audio_set_sink(&board.audio,sink,opaque);
 }
 int system573_audio_spu_output(const int16_t *stereo,unsigned frames,u32 end_cycle){
@@ -306,7 +312,15 @@ int system573_sync(u32 cycle){
     uint32_t delta=cycle-board.last_cycle;board.last_cycle=cycle;board.cycles+=delta;
     uint64_t numerator=(uint64_t)delta*1000000+board.fraction;uint64_t elapsed=numerator/PSXCLK;board.fraction=numerator%PSXCLK;board.us+=elapsed;
     system573_flash_advance_us(&board.bus,elapsed);
-    if(board.digital && system573_digital_advance_to(board.digital,board.us*1000+board.fraction*1000/PSXCLK))board.fault=1;
+    if(board.digital && system573_digital_clock_advance(&board.digital_clock,board.cycles))board.fault=1;
+#ifdef HAVE_CHD
+    if(board.digital && !board.cd){
+        /* Explicit empty-tray fixture: the physical CD DAC remains silent.
+         * This advances only its clock, never decoded-medium counters. */
+        while(board.audio.cd_next<board.cycles/768)
+            if(system573_audio_cd(&board.audio,board.audio.cd_next,0,0)){board.fault=1;break;}
+    }
+#endif
     for(unsigned p=0;p<2;p++)if(psx_sio_advance_to_cycle(board.sio[p],board.cycles))board.fault=1;
 #ifdef HAVE_CHD
     if(board.drive){
@@ -505,12 +519,13 @@ void system573_report(FILE *out){
     if(!board.active || !out)return;
     fprintf(out,"System573: profile=%s RAM=4194304 VRAM=2097152 bank=%u control=%04x security=%04x faults=%u media=%s H8_response=%s H8_firmware=NO_DUMP cassette_seed=%s CDROM=%s NVRAM=%s\n",board.digital?"pcnfrk4mk":board.cd_profile?"ddr2m":"hyperbbc",board.bus.control&63,board.bus.control,board.bus.security,board.fault|board.bus.faults,board.synthetic?"SYNTHETIC_FIXTURE":"SOURCE_CRC_VERIFIED",board.synthetic?"GENERATED":"SOURCE_DUMP",board.digital?board.synthetic?"SYNTHETIC_FIXTURE":"SOURCE_DUMP":board.cd_profile?"SOURCE_BAD_DUMP":"SOURCE_FACTORY_DEFAULT",board.synthetic==2?"EMPTY_FIXTURE_DRIVE":board.cd_profile?"SOURCE_BAD_DUMP":"ABSENT",board.nvram_loaded?"RESTORED":"SOURCE_SEED");
     if(board.digital){System573DigitalStatus s;system573_digital_get_status(board.digital,&s);
-        fprintf(out,"System573 digital: RAM=33554432 RAM_ptr=%08x/%08x FPGA=%04x MPEG=%04x frames=%u byte_count=%"PRIu64" faults=%u native_audio_clock=PENDING speaker_mix=PENDING drums=%u%u%u%u%u%u%u%u%u%u\n",s.ram_read_address,s.ram_write_address,s.fpga_control,s.mpeg_status,s.frame_counter,s.bytes_sent,s.faults,board.drum_outputs[0],board.drum_outputs[1],board.drum_outputs[2],board.drum_outputs[3],board.drum_outputs[4],board.drum_outputs[5],board.drum_outputs[6],board.drum_outputs[7],board.drum_outputs[8],board.drum_outputs[9]);}
+        fprintf(out,"System573 digital: RAM=33554432 RAM_ptr=%08x/%08x FPGA=%04x MPEG=%04x frames=%u byte_count=%"PRIu64" faults=%u input_rate=%u clock_inputs=%"PRIu64" output_44100=%"PRIu64" nonzero=%"PRIu64" rate_changes=%u clock_faults=%u drums=%u%u%u%u%u%u%u%u%u%u\n",s.ram_read_address,s.ram_write_address,s.fpga_control,s.mpeg_status,s.frame_counter,s.bytes_sent,s.faults,board.digital_clock.rate,board.digital_clock.inputs,board.digital_clock.outputs,board.digital_clock.nonzero,board.digital_clock.rate_changes,board.digital_clock.faults,board.drum_outputs[0],board.drum_outputs[1],board.drum_outputs[2],board.drum_outputs[3],board.drum_outputs[4],board.drum_outputs[5],board.drum_outputs[6],board.drum_outputs[7],board.drum_outputs[8],board.drum_outputs[9]);}
 #ifdef HAVE_CHD
     if(board.drive){AtapiCr589Status st;atapi_cr589_get_status(board.drive,&st);
         fprintf(out,"System573 CD: packets=%"PRIu64" sectors=%"PRIu64" status=%02x command=%02x faults=%u DMA_transfers=%"PRIu64" DMA_words=%"PRIu64" stage_edges=%"PRIu64"\n",st.packets,st.sectors,st.status,st.packet_command,st.faults,board.dma_transfers,board.dma_words,board.bus.stage_edges);
         fprintf(out,"System573 CDDA: decoded_frames=%"PRIu64" nonzero_frames=%"PRIu64" peak=%u\n",board.cdda_frames,board.cdda_nonzero,board.cdda_peak);
         fprintf(out,"System573 speaker: rate=44100 SPU_gain=1 CDDA_gain=1 frames=%"PRIu64" SPU_inputs=%"PRIu64" SPU_nonzero=%"PRIu64" CDDA_clock=%"PRIu64" CDDA_nonzero=%"PRIu64" clipped=%"PRIu64" peak=%u pending_SPU=%"PRIu64" faults=%u\n",board.audio.frames,board.audio.spu_inputs,board.audio.spu_nonzero,board.audio.cd_inputs,board.audio.cd_nonzero,board.audio.clipped,board.audio.peak,board.audio.started?board.audio.spu_next-board.audio.next:0,board.audio.faults);
+        if(board.digital)fprintf(out,"System573 digital speaker: gain=1 inputs=%"PRIu64" nonzero=%"PRIu64" next=%"PRIu64"\n",board.audio.digital_inputs,board.audio.digital_nonzero,board.audio.digital_next);
     }
 #endif
     fprintf(out,"System573 devices: flash_reads=%"PRIu64" flash_writes=%"PRIu64" H8_edges=%"PRIu64" rtc_reads=%"PRIu64" rtc_writes=%"PRIu64" rtc_ticks=%"PRIu64" JVS_empty_packets=%"PRIu64" empty_ATA_reads=%"PRIu64" MMIO=%"PRIu64"/%"PRIu64"\n",board.bus.flash_reads,board.bus.flash_writes,board.bus.h8_edges,board.bus.rtc_reads,board.bus.rtc_writes,board.bus.rtc.ticks,board.bus.jvs_packets,board.bus.empty_ata_reads,board.reads,board.writes);

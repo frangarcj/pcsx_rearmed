@@ -7,13 +7,41 @@ import subprocess
 import sys
 import tempfile
 import zlib
+import hashlib
+import re
+import shutil
+import wave
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from prepare_system573_digital_board import configuration
 
 
-def guest():
+def encrypted_words(data):
+    a,b,c=0xc3d2,0xab89,0xe7
+    def permute(v,positions):
+        out=0
+        for bit in positions: out=(out<<1)|((v>>bit)&1)
+        return out
+    result=[]
+    padded=data+bytes(3)
+    for i in range(0,len(data)+2,2):
+        key=permute(a^b,[15,13,14,12,11,10,9,7,8,6,5,4,3,1,2,0])
+        value=(padded[i]<<8)|padded[i+1]
+        value^=permute(c,[7,0,6,1,5,2,4,3,3,4,2,5,1,6,0,7])
+        value^=key&0x5555
+        for pair in range(8):
+            shift=pair*2
+            if key&(2<<shift):
+                low=(value>>shift)&1; high=(value>>(shift+1))&1
+                value=(value&~(3<<shift))|(low<<(shift+1))|(high<<shift)
+        result.append(value)
+        if ((a>>14)^(a>>15))&1: b=((b<<1)|(b>>15))&65535
+        a=(a&0x8000)|((a<<1)&0x7ffe)|((a>>14)&1);c=(c+1)&255
+    return result
+
+
+def guest(mpeg=None):
     words = []
     def li(reg, value):
         words.extend([0x3c000000 | reg << 16 | (value >> 16),
@@ -49,6 +77,14 @@ def guest():
     for value, address in [(0xaa, 0xbf000aaa), (0x55, 0xbf000554), (0xa0, 0xbf000aaa), (0, 0xbf000200)]:
         store(value, address, 1)
     store(0x5046344b, 0x80000124)
+    if mpeg:
+        data=encrypted_words(mpeg)
+        store(0,0xbf6400b0,2);store(0x1000,0xbf6400b2,2)
+        for word in data: store(word,0xbf6400b4,2)
+        end=0x1000+len(data)*2
+        for address,value in [(0xa0,0),(0xa2,0x1000),(0xa4,end>>16),(0xa6,end&65535),
+                              (0xa8,0xc3d2),(0xea,0xab89),(0xec,0xe7),(0xae,0xe000)]:
+            store(value,0xbf640000+address,2)
     words.extend([0x1000ffff, 0])
     return struct.pack('<' + 'I' * len(words), *words)
 
@@ -59,12 +95,18 @@ def main():
     p.add_argument('--reject-cd', action='store_true')
     p.add_argument('--original-media', type=Path, help='optional audited original seven-chip directory')
     p.add_argument('--wrong-cd', type=Path, help='optional actual other-game CHD for identity rejection')
+    p.add_argument('--mpeg', type=Path, help='explicit synthetic MPEG fixture, encrypted and loaded by MIPS')
+    p.add_argument('--evidence-dir', type=Path)
+    p.add_argument('--live', action='store_true', help='bounded SDL test of the explicitly synthetic digital fixture')
     args = p.parse_args(); binary = args.harness.resolve()
+    if args.live and not args.mpeg: p.error('--live requires an explicit synthetic --mpeg fixture')
     with tempfile.TemporaryDirectory(prefix='pcsx-system573-digital-fixture-') as temp:
         root = Path(temp)
         ini = ''.join(f'{k}={v}\n' for k,v in configuration().items())
         (root / 'board.ini').write_text(ini)
-        program = guest(); (root / 'main.bin').write_bytes(program + bytes(524288 - len(program)))
+        program = guest(args.mpeg.read_bytes() if args.mpeg else None)
+        assert len(program)<=524288, 'synthetic MPEG fixture does not fit generated BIOS'
+        (root / 'main.bin').write_bytes(program + bytes(524288 - len(program)))
         (root / 'h8_response.bin').write_bytes(bytes(range(64)))
         cassette = bytes.fromhex('5a530001ed68504bc644483e') + bytes(128)
         assert len(cassette) == 140
@@ -78,9 +120,11 @@ def main():
             for frame,pressed in [(0,1),(1,0)] for name in controls))
         state = root / 'state.nv'
         def run(selector='--system573-digital-fixture', extra=()):
-            return subprocess.run([str(binary), selector, str(root), '--frames', '2', '--board-test',
+            audio=['--mixed-audio',str(root/'speaker.wav')] if args.mpeg else []
+            if args.live: audio.append('--interactive')
+            return subprocess.run([str(binary), selector, str(root), '--frames', '120' if args.mpeg else '2', '--board-test',
                 '--inputs', str(root / 'inputs.csv'), '--nvram', str(state), '--dump-ram', str(root / 'ram.bin'),
-                '--output', str(root / 'out.ppm'), *extra], capture_output=True, text=True, timeout=30)
+                '--output', str(root / 'out.ppm'), *audio,*extra], capture_output=True, text=True, timeout=30)
         result = run(); output = result.stdout + result.stderr
         if args.reject_cd:
             assert result.returncode and 'requires HAVE_CHD' in output, output
@@ -97,6 +141,24 @@ def main():
         for token in ['digital drum/select/input selftest PASS', 'media=SYNTHETIC_FIXTURE',
                       'CDROM=EMPTY_FIXTURE_DRIVE', 'consumed=20/20', 'faults=0', 'drums=1111000000']:
             assert token in output, (token, output)
+        cold_audio=None
+        if args.mpeg:
+            assert int(re.search(r'System573 digital:.*? frames=(\d+)',output)[1])>3,output
+            assert 'clock_faults=0' in output,output
+            pending=int(re.search(r'pending_SPU=(\d+) faults=0',output)[1])
+            assert pending<=8,output # Real resampler lookahead/even-pair SPU tail, never fabricated future PCM.
+            cold_audio=(root/'speaker.wav').read_bytes()
+            with wave.open(str(root/'speaker.wav'),'rb') as wav:
+                assert wav.getframerate()==44100 and wav.getnchannels()==2 and wav.getsampwidth()==2
+                values=struct.unpack('<'+'h'*(wav.getnframes()*2),wav.readframes(wav.getnframes()))
+                assert max(map(abs,values))>2000
+                if args.live:
+                    live=re.search(r'Interactive System573 speaker: frames=(\d+) nonzero=(\d+) peak=(\d+) error=(\d+)',output)
+                    assert live and int(live[1])==wav.getnframes() and int(live[2])>0 and int(live[3])>2000 and int(live[4])==0,output
+            if args.evidence_dir:
+                args.evidence_dir.mkdir(parents=True,exist_ok=True)
+                shutil.copyfile(root/'speaker.wav',args.evidence_dir/'speaker-cold.wav')
+                (args.evidence_dir/'cold.log').write_text(output)
         snapshot = state.read_bytes()
         assert len(snapshot) == 32 + 0x1000000 + 8192 + 140 + 65536
         assert snapshot[:16] == b'S573NV3\0PF4KAA\0\0'
@@ -112,6 +174,14 @@ def main():
         assert not warm.returncode and 'NVRAM=RESTORED' in warm.stderr, warm.stderr
         restored = state.read_bytes()
         for offset in [32+0x2222, 32+0x1002000+30, 32+0x1002000+140+0xeeee]: assert restored[offset] == updated[offset]
+        if args.mpeg:
+            warm_audio=(root/'speaker.wav').read_bytes();assert warm_audio==cold_audio
+            print('Synthetic native digital speaker cold/warm WAV SHA256 '+hashlib.sha256(cold_audio).hexdigest()+' PASS')
+            if args.evidence_dir:
+                shutil.copyfile(root/'speaker.wav',args.evidence_dir/'speaker-warm.wav')
+                (args.evidence_dir/'warm.log').write_text(warm.stdout+warm.stderr)
+        if args.live:
+            print(output,end='');print('Synthetic native digital live SDL speaker test PASS');return
         original = run('--system573')
         assert original.returncode and 'original main.bin size/CRC mismatch' in original.stderr
         assert run('--system573-fixture').returncode # The base fixture selector cannot open a digital profile.

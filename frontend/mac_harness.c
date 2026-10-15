@@ -240,7 +240,6 @@ static void harness_system573_speaker_pcm(void *opaque,const int16_t *samples,un
   }
 }
 static int open_system573_speaker_audio(const char *path){
-  if(system573_has_digital()){fprintf(stderr,"System573 digital native speaker clock/mix pending\n");return -1;}
   if(!system573_has_cd() || !out_current || pcm_wav_open(&system573_speaker_wav,path,44100))return -1;
   system573_headless_feed=out_current->feed;out_current->feed=harness_system573_spu_pcm;
   system573_set_audio_output(harness_system573_speaker_pcm,NULL);return 0;
@@ -971,11 +970,6 @@ static void interactive_zn_spu_pcm(void *data, int bytes)
 
 static int open_interactive_audio(void)
 {
-#ifdef PCSX_SYSTEM573
-  if(selected_board->family==115 && system573_has_digital()){
-    fprintf(stderr,"System573 digital live speaker clock/mix pending\n");return -1;
-  }
-#endif
   const SDL_AudioSpec spec = { SDL_AUDIO_S16, 2, selected_board->family == 113 ? 48000 : selected_board->family == 102 || selected_board->family == 103 || selected_board->family == 104 || selected_board->family == 105 || selected_board->family == 106 || selected_board->family == 107 || selected_board->family == 108 || selected_board->family == 109 || selected_board->family == 110 || selected_board->family == 111 || selected_board->family == 112 || selected_board->family == 114 || selected_board->family == 115 ? 44100 : 88200 };
   if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) return -1;
   interactive_audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
@@ -1023,6 +1017,7 @@ static int open_interactive_audio(void)
     interactive_spu_feed=out_current->feed;out_current->feed=harness_system573_spu_pcm;
     system573_set_audio_output(interactive_system573_speaker,NULL);
     fprintf(stderr,"Interactive System573 CD audio: SPU=44100 Hz gain=1 CDDA=44100 Hz gain=1 timestamped speaker output=44100 Hz\n");
+    if(system573_has_digital())fprintf(stderr,"Interactive System573 digital audio: source MPEG rate, gain=1, CPU-clocked resampling to 44100 Hz\n");
   }
 #endif
   else if (source_spu_speaker_board()) {
@@ -1617,7 +1612,7 @@ int main(int argc, char **argv)
   }
   if (interactive) {
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
-    if (!board || (board_family != 12 && board_family != 102 && board_family != 103 && board_family != 104 && board_family != 105 && board_family != 106 && board_family != 107 && board_family != 108 && board_family != 109 && board_family != 110 && board_family != 111 && board_family != 112 && board_family != 113 && board_family != 114 && board_family != 115) || board_test) {
+    if (!board || (board_family != 12 && board_family != 102 && board_family != 103 && board_family != 104 && board_family != 105 && board_family != 106 && board_family != 107 && board_family != 108 && board_family != 109 && board_family != 110 && board_family != 111 && board_family != 112 && board_family != 113 && board_family != 114 && board_family != 115) || (board_test && system573_fixture!=2)) {
       fprintf(stderr, "interactive mode requires a supported arcade board without board-test options\n");
       return 2;
     }
@@ -1725,7 +1720,7 @@ int main(int argc, char **argv)
 #endif
   if (fx1z_fixture && (exe || inputs_path || audio_path || interactive || use_drc)) { usage(argv[0]); return 2; }
   if (cbaj_fixture && (exe || inputs_path || audio_path || nvram_path || interactive || use_drc)) { usage(argv[0]); return 2; }
-  if(system573_fixture && (exe || use_drc || interactive)){usage(argv[0]);return 2;}
+  if(system573_fixture && (exe || use_drc || (interactive && (system573_fixture!=2 || !board_test)))){usage(argv[0]);return 2;}
   if(metro_fixture && (exe || use_drc || interactive || nvram_path)){usage(argv[0]);return 2;}
   if (metro_cabinet >= 0 && (!board || board_family != 114)) { usage(argv[0]); return 2; }
   if(jd_fixture && (exe || inputs_path || audio_path || nvram_path || interactive || use_drc)){usage(argv[0]);return 2;}

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 #include "../libpcsxcore/arcade/system573_digital.h"
+#include "../libpcsxcore/arcade/system573_digital_clock.h"
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -53,6 +54,34 @@ struct Rig {
         }
     }
 };
+struct ClockCapture {
+    System573DigitalClock clock{};
+    std::vector<float> pcm;
+    bool reenter=false,reject=false;
+    explicit ClockCapture(Rig &r){assert(!system573_digital_clock_init(&clock,r.chip,sink,this));}
+    static int sink(void *opaque,uint64_t index,float left,float right){
+        auto &c=*static_cast<ClockCapture *>(opaque);assert(index==c.pcm.size()/2);
+        c.pcm.push_back(left);c.pcm.push_back(right);
+        if(c.reenter)assert(system573_digital_clock_advance(&c.clock,0)==-1);
+        return c.reject?-1:0;
+    }
+    void to(uint64_t cycle){assert(!system573_digital_clock_advance(&clock,cycle));}
+};
+static void clock_epoch(){
+    Rig r;ClockCapture c(r);c.to(767);assert(c.pcm.empty());c.to(768);assert(c.pcm.size()==2);
+    c.to(33868800);assert(c.clock.inputs==44100 && c.clock.outputs==44100 && !c.clock.nonzero);
+    assert(r.status().now_ns==1000000000 && !r.status().frame_counter);
+    assert(!c.clock.faults && !c.clock.rate_changes && r.r(0xcc)==0);
+    system573_digital_reset(r.chip);c.to(67737600);
+    assert(c.clock.outputs==88200 && r.status().now_ns==2000000000 && !r.status().frame_counter);
+    assert(system573_digital_clock_advance(&c.clock,33868799)==-1 && c.clock.faults==1);
+    Rig bad;ClockCapture b(bad);b.reenter=true;
+    assert(system573_digital_clock_advance(&b.clock,768)==-1 && b.clock.faults==8);
+    Rig late;late.at(1);System573DigitalClock clock{};
+    assert(system573_digital_clock_init(&clock,late.chip,ClockCapture::sink,nullptr)==-1);
+    Rig rejected;ClockCapture fail(rejected);fail.reject=true;
+    assert(system573_digital_clock_advance(&fail.clock,1536)==-1 && fail.clock.faults==16 && fail.clock.outputs==1);
+}
 static void registers_and_ram() {
     assert(!system573_digital_create(nullptr,8,0,nullptr,nullptr));
     assert(!system573_digital_create(fixture_id,7,0,nullptr,nullptr));
@@ -166,6 +195,29 @@ static std::vector<float> direct_mas(const std::vector<uint8_t> &bytes) {
     }
     assert(cursor==bytes.size());mas3507d_destroy(mas);return pcm;
 }
+static void clock_fixture(const char *path,const std::vector<uint8_t> &bytes){
+    auto words=encrypt(bytes,0);std::vector<float> reference;
+    for(unsigned quantum:{67737600u,997u}){
+        Rig r;r.load(words,0x1000);r.configure(0x1000,0x1000+uint32_t(words.size()*2),0xc3d2,0xab89,0xe7);r.w(0xae,0xe000);
+        ClockCapture c(r);
+        for(uint64_t cycle=0;cycle<67737600;){cycle=std::min(uint64_t(67737600),cycle+quantum);c.to(cycle);}
+        auto s=r.status();assert(!s.faults && !c.clock.faults && c.clock.outputs<=88200 && c.clock.outputs>=88194);
+        assert(s.decoder.decoded_frames>3 && s.frame_counter==s.decoder.decoded_frames && c.clock.nonzero>0);
+        assert(c.clock.rate==s.decoder.sample_rate);
+        assert((uint32_t(r.r(0xcc))|(uint32_t(r.r(0xca))<<16))==88198);
+        if(quantum==997)assert(c.pcm==reference);else reference=c.pcm;
+        if(c.clock.rate==44100 && !c.clock.rate_changes){
+            auto delivered=bytes;delivered.resize(words.size()*2-1,0);auto raw=direct_mas(delivered);
+            assert(c.clock.outputs==88200 && !c.clock.rate_changes);
+            assert(c.pcm[0]==0 && c.pcm[1]==0);
+            assert(std::equal(c.pcm.begin()+2,c.pcm.end(),raw.begin()));
+        }else assert(c.clock.rate_changes==(c.clock.rate==44100?2u:1u));
+        std::printf("Digital CPU clock MPEG: rate=%u inputs=%llu outputs=%llu frames=%u quantum=%u PASS\n",c.clock.rate,
+            (unsigned long long)c.clock.inputs,(unsigned long long)c.clock.outputs,s.frame_counter,quantum);
+    }
+    FILE *out=std::fopen((std::string(path)+".clock.f32").c_str(),"wb");assert(out);
+    assert(std::fwrite(reference.data(),sizeof(float),reference.size(),out)==reference.size());std::fclose(out);
+}
 static void mpeg_fixture(const char *path) {
     FILE *f=std::fopen(path,"rb");assert(f);std::vector<uint8_t> bytes;int value;
     while((value=std::fgetc(f))!=EOF)bytes.push_back(uint8_t(value));std::fclose(f);
@@ -209,9 +261,10 @@ static void mpeg_fixture(const char *path) {
     }
     f=std::fopen((std::string(path)+".digital.f32").c_str(),"wb");assert(f);
     assert(std::fwrite(reference.data(),sizeof(float),reference.size(),f)==reference.size());std::fclose(f);
+    clock_fixture(path,bytes);
 }
 int main(int argc,char **argv) {
-    registers_and_ram();gating_and_boundaries();clocks_and_reentry();
+    registers_and_ram();gating_and_boundaries();clocks_and_reentry();clock_epoch();
     for(int i=1;i<argc;i++) {
         if(!std::strcmp(argv[i],"--serial")) {
             assert(++i<argc);uint8_t id[8];FILE *f=std::fopen(argv[i],"rb");assert(f);

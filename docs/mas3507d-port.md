@@ -6,8 +6,9 @@ It provides serial MPEG data input, I2C configuration, decoder demand and
 MPEG frame-sync notifications, and normalized float stereo output. This is
 a component for System 573 digital, not a working digital game audio path.
 The [digital I/O/FPGA component](system573-digital-io.md) now feeds this decoder
-from source encrypted RAM/timer methods; PSX clock integration and speaker
-mixing remain open. The DSP's undumped internal program is not executed.
+from source encrypted RAM/timer methods. The [native CPU clock and speaker
+bridge](system573-digital-audio-clock.md) now pass synthetic MIPS/MPEG and live
+SDL checks. The DSP's undumped internal program is not executed.
 
 `mas3507d_generate.py` verifies SHA256 of all five source files from MAME
 `deb2f54fe7300e7a192690318beb860159bfd52a`; generated provenance records their
@@ -67,5 +68,5 @@ build/system573-tests/mas /tmp/mas-stereo-44100.mp3 /tmp/mas-mono-22050.mp3
 ```
 
 Original KAA cassette/CD acceptance, native installation, actual game music,
-live SDL output, instrument gameplay and digital board validation remain
-separate requirements in `system573-mac.md`.
+instrument gameplay and digital board validation remain separate requirements
+in `system573-mac.md`. Synthetic live SDL playback is now verified separately.

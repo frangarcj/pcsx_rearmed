@@ -27,7 +27,7 @@ def prepare(source, rompath, output):
         raise mame.PreparationError('complete original KAA CD audit required')
     report.update(format='pcsx-aow-system573-digital-v1', profile=configuration(),
                   native_profile_available=True, board_execution_verified=False,
-                  native_runtime_stage='CPU/MMIO/drum controls/NVRAM; digital audio clock and speaker mix pending')
+                  native_runtime_stage='CPU/MMIO/drum controls/NVRAM and CPU-clocked SPU/CDDA/digital audio; original game execution unverified')
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='prepare-system573-digital-', dir=output.parent) as temp:
         root = Path(temp)

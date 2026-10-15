@@ -3,10 +3,11 @@
 `system573_digital.cpp` now connects the source digital I/O registers, owned
 32 MiB zeroed volatile RAM, original DS2401 board serial, FPGA cipher and
 MAS3507D decoder. It is a standalone native Mac component with float PCM output.
-The PSX profile/MMIO binding now passes generated native MIPS tests on GL/NEON;
-the native sample-clock bridge and speaker mix remain open. No original
-digital game execution is claimed. See `system573-mac.md` for the separate
-native loader, drum input/output and NV3 evidence.
+The PSX profile/MMIO binding and CPU-clocked speaker mix now pass generated
+native MIPS/MPEG tests on GL/NEON, including live SDL output. No original
+digital game execution is claimed. See `system573-mac.md` for native loader,
+drum input/output and NV3 evidence, and
+`system573-digital-audio-clock.md` for clock/filter conventions and checks.
 
 `system573_digital_generate.py` checks SHA256 of MAME `k573dio.cpp/.h` and
 `k573fpga.cpp/.h` from `deb2f54fe7300e7a192690318beb860159bfd52a`. It extracts
@@ -92,8 +93,9 @@ optimized and ASan/UBSan builds pass. GL/NEON native builds and their existing
 System 573 fixtures continue passing; those fixtures are not digital gameplay.
 
 The decoder runs at its reported source rate, with caller-supplied monotonic
-nanosecond time. CPU-cycle scheduling, rate conversion into the native speaker
-clock, SPU/CDDA/digital mixing, instrument input/output wiring, original KAA CD
-acquisition, installation and real player execution remain open. Evidence and
-explicitly synthetic audio files live under ignored
+nanosecond time. The native clock bridge now supplies CPU-derived time and
+resamples into the 44.1 kHz SPU/CDDA/digital mix. Synthetic tests cover every
+supported MPEG rate and a midstream rate change; drum input/output wiring also
+passes native tests. Original KAA CD acquisition, installation and real player
+execution remain open. Evidence and explicitly synthetic audio files live under ignored
 `artifacts/boards-mac-20261015/system573/pcnfrk4mk`.

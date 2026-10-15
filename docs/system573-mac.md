@@ -13,7 +13,7 @@ The full family validation still requires three distinct configurations:
 | --- | --- | --- |
 | Hyper Bishi Bashi Champ EAA (`hyperbbc`) | Base board, eight onboard flashes, timekeeper, cassette Y lamp outputs and three-player buttons | Native interpreter GL/NEON P1 minigame, live source-gain SPU/SDL audio and complete flash/NVRAM persistence verified; full P2/P3 gameplay/operator checks pending |
 | Dance Dance Revolution 2nd Mix (`ddr2m`) | Analog daughterboard, CD-ROM, cassette X, dance input multiplexing | Original cassette/CD verified; source CR-589 transport and DDR analog multiplexor integrated. Native GL/NEON cold flash initialization completes and all eight programmed chips match MAME byte for byte. Native warm GL/NEON 1st Stage/PERFECT, 92/92 inputs and original nonzero SPU/CDDA decoding pass. Source gain-1 SPU/CDDA mix passes headless GL/NEON and live SDL. Full song/P2/operator coverage remains separate |
-| Percussion Freaks 4th Mix KAA (`pcnfrk4mk`) | Digital daughterboard, CD-ROM, cassette ZI/serial ID, instrument inputs and multi-session unit | Seven original game/device chips audited, retaining source BAD_DUMP serial/CD status. ZS01 encrypted pin protocol passes optimized/ASan tests and original-cassette readback; ZI bus also passes complete encrypted protocol/original readback and timed DS2401 checks. Digital I/O/FPGA-to-MAS encrypted MPEG, source registers and board ID now pass component checks. Native loader/MMIO/drum controls/NV3 now pass generated CPU tests on GL/NEON, strict original seven-chip/CD identity checks and cold/warm persistence. Original CD/game execution, CPU/audio-clock binding and speaker mix remain pending |
+| Percussion Freaks 4th Mix KAA (`pcnfrk4mk`) | Digital daughterboard, CD-ROM, cassette ZI/serial ID, instrument inputs and multi-session unit | Seven original game/device chips audited, retaining source BAD_DUMP serial/CD status. ZS01/ZI encrypted protocol, original serial readback and FPGA-to-MAS components pass. Native loader/MMIO/drum controls/NV3 pass generated CPU tests on GL/NEON with strict original chip/CD rejection and cold/warm persistence. CPU-clocked digital audio and gain-1 SPU/CDDA/digital mixing now pass synthetic MPEG tests, including identical GL/NEON/live SDL WAVs. Original KAA CD, installation and game execution remain pending |
 
 ## Digital KAA media and cassette component
 
@@ -135,18 +135,23 @@ python3 tests/check_system573_digital_harness.py \
   --original-media roms/audited/pcnfrk4mk --wrong-cd roms/ddr2m/895jaa02.chd
 ```
 
-The digital native audio clock and SPU/CDDA/MAS speaker bridge are still
-pending. Native `--mixed-audio`/live speaker setup rejects this profile
-explicitly instead of silently producing a partial mix; raw `--audio` remains
-SPU-only. Standalone FPGA-to-MAS audio evidence below is separate from this
-CPU integration and does not establish native digital music timing.
+The [native digital audio clock and speaker bridge](system573-digital-audio-clock.md)
+now bind FPGA/MAS rendering to actual PSX cycles, resample the decoder's rate
+to 44.1 kHz and sum SPU/CDDA/digital at source gain 1 before final saturation.
+`--mixed-audio` and live SDL use the complete speaker route; raw `--audio`
+remains SPU-only. Generated MIPS code loads encrypted synthetic MPEG through
+the real MMIO bus. Its 120-frame cold/warm runs pass at 22.05, 44.1 and 48 kHz;
+44.1 kHz output is byte-identical between GL, NEON and live SDL. Component tests
+cover all nine MPEG rates, a midstream rate/channel change, continuous reset
+epochs, callback rejection and coarse/fine CPU advance equivalence. These
+checks establish synthetic CPU/audio integration, not original game music.
 
 The pinned multi-session device declares its ROMs but has an empty
 `device_start`, no configured processor and no runtime address map. Auditing
 its original media does not establish emulation of a working external
-multi-session box. The digital I/O FPGA/MAS3507D audio path, instrument inputs,
-native cold installation and player validation still need integration and
-actual game evidence. This row remains open in the overall Mac matrix.
+multi-session box. Native cold installation, actual instrument gameplay and
+original game music still require the KAA CD and execution evidence. This row
+remains open in the overall Mac matrix.
 
 The standalone [MAS3507D decoder/I2C port](mas3507d-port.md) now retains the
 actual pinned MAME methods and identical minimp3 decoder. Explicit synthetic
@@ -159,8 +164,8 @@ reenter mutation. The [digital I/O/FPGA component](system573-digital-io.md) now 
 variants pass delivered-byte/PCM oracle checks, enable/counter/reset/mute tests
 and wrong-key silence; original digital-board serial readback passes too. The
 source last-pending-byte/guard-padding behaviour and its final-frame effect are
-recorded separately. CPU/sample-clock binding, speaker output and original
-game music evidence remain pending.
+recorded separately. CPU/sample-clock binding and speaker output now have the
+synthetic evidence above; original game music remains pending.
 
 ## Hyper Bishi Bashi media
 

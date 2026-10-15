@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 static int16_t output[40000][2];static unsigned used;
 static void sink(void *opaque,const int16_t *pcm,unsigned frames){
     (void)opaque;assert(used+frames<=40000);memcpy(output+used,pcm,frames*4);used+=frames;
@@ -34,5 +35,34 @@ int main(void){
     for(unsigned i=0;i<35000;i++)assert(!system573_audio_cd(a,i,0,0));
     system573_audio_set_sink(a,sink,NULL);
     assert(system573_audio_spu(a,0,samples,1)==-1 && a->faults==4);
-    free(a);puts("System573 timestamped gain-1 SPU/CDDA sum, stereo, saturation, silence, future deferral and clock/history rejection PASS");return 0;
+    /* All three source clocks must arrive; keep digital float gain until the
+     * final sum so early saturation does not change the actual speaker mix. */
+    system573_audio_init(a);used=0;assert(!system573_audio_enable_digital(a));system573_audio_set_sink(a,sink,NULL);
+    int16_t quiet[4]={1000,-1000,20000,-20000};assert(!system573_audio_spu(a,0,quiet,2));
+    assert(!system573_audio_cd(a,0,1000,-1000));assert(!system573_audio_cd(a,1,20000,-20000));
+    assert(!system573_audio_flush(a) && !used);
+    assert(!system573_audio_digital(a,0,.5f,-.5f));assert(!system573_audio_flush(a) && used==1);
+    assert(output[0][0]==18384 && output[0][1]==-18384);
+    assert(!system573_audio_digital(a,1,-1.0f,1.0f));assert(!system573_audio_flush(a) && used==2);
+    assert(output[1][0]==7232 && output[1][1]==-7232 && !a->clipped);
+    assert(a->digital_inputs==2 && a->digital_nonzero==2 && !a->faults);
+    assert(system573_audio_digital(a,2,NAN,0)==-1 && a->faults==8);
+    system573_audio_init(a);used=0;assert(!system573_audio_enable_digital(a));system573_audio_set_sink(a,sink,NULL);
+    assert(!system573_audio_spu(a,0,quiet,2));assert(!system573_audio_cd(a,0,0,0));assert(!system573_audio_cd(a,1,20000,-20000));
+    assert(!system573_audio_digital(a,0,.5f/32768.0f,-.5f/32768.0f));
+    assert(!system573_audio_digital(a,1,.75f,-.75f));assert(!system573_audio_flush(a));
+    assert(output[0][0]==1000 && output[0][1]==-1000); // Fractional PCM truncates, never rounds to an extra sample unit.
+    assert(output[1][0]==32767 && output[1][1]==-32768 && a->clipped==2);
+    system573_audio_init(a);assert(!system573_audio_enable_digital(a));
+    assert(system573_audio_digital(a,1,0,0)==-1 && a->faults==8);
+    system573_audio_init(a);assert(system573_audio_digital(a,0,0,0)==-1);
+    system573_audio_init(a);used=0;assert(!system573_audio_enable_digital(a));
+    for(unsigned i=0;i<35000;i++){assert(!system573_audio_cd(a,i,1,2));assert(!system573_audio_digital(a,i,.25f,-.25f));}
+    system573_audio_set_sink(a,sink,NULL);assert(!system573_audio_spu(a,34990,quiet,2));
+    assert(!system573_audio_flush(a) && used==2 && output[0][0]==9193 && output[0][1]==-9190);
+    system573_audio_init(a);used=0;assert(!system573_audio_enable_digital(a));system573_audio_set_sink(a,sink,NULL);
+    assert(!system573_audio_spu(a,0,quiet,1));
+    for(unsigned i=0;i<SYSTEM573_AUDIO_RING;i++)assert(!system573_audio_digital(a,i,0,0));
+    assert(system573_audio_digital(a,SYSTEM573_AUDIO_RING,0,0)==-1 && a->faults==8);
+    free(a);puts("System573 gain-1 SPU/CDDA/digital clock sum, float cancellation, saturation, source deferral and history rejection PASS");return 0;
 }
