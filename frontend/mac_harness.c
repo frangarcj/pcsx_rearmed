@@ -492,7 +492,7 @@ static void usage(const char *name)
     "[--audio-test-fixture] "
     "[--reset-at-cycle N] "
     "[--trace FILE --trace-blocks N --trace-start CYCLES] [--cycle-snapshots FILE "
-    "--snapshot-start CYCLES --snapshot-interval N] "
+    "--snapshot-start CYCLES --snapshot-interval N --snapshot-ram ADDRESS...] "
     "[--board-bus-trace FILE] [--system12-edge-trace FILE] [--system12-trace-shared-writes | --system12-trace-shared-accesses] "
     "[--max-blocks N] [--icache] [--widescreen] [--borderless] [--gpu-thread] [--save-state-at FRAME FILE] [--load-state FILE] [--drc] [--metro-cabinet generic|dedicated] [--interactive [--art-dir DIR] [--pause-at N [--pause-script STEPS] [--pause-shot FILE.ppm]]...] [--system12-vblank-sync-only] [--system12-source-step] [--frontend-loop]\n"
     "       %s (--gpu-type1-test | --gpu-type1-test-1m)\n", name, name);
@@ -1426,6 +1426,8 @@ int main(int argc, char **argv)
   FILE *trace = NULL;
   const char *snapshot_path = NULL;
   FILE *snapshots = NULL;
+  uint32_t snapshot_ram[16];
+  unsigned snapshot_ram_count = 0;
   const char *bus_trace_path = NULL;
   FILE *bus_trace_file = NULL;
   const char *edge_trace_path = NULL;
@@ -1629,6 +1631,20 @@ int main(int argc, char **argv)
     else if (!strcmp(argv[i], "--frontend-loop")) frontend_loop = 1;
     else if (!strcmp(argv[i], "--trace") && i + 1 < argc) trace_path = argv[++i];
     else if (!strcmp(argv[i], "--cycle-snapshots") && i + 1 < argc) snapshot_path = argv[++i];
+    else if (!strcmp(argv[i], "--snapshot-ram") && i + 1 < argc) {
+      char *tail; unsigned long value;
+      const char *arg = argv[++i];
+      errno = 0; value = strtoul(arg, &tail, 0);
+      if (errno || tail == arg || *tail || value > UINT32_MAX || (value & 3) ||
+          snapshot_ram_count == 16 ||
+          ((value & 0xe0000000u) != 0 && (value & 0xe0000000u) != 0x80000000u &&
+           (value & 0xe0000000u) != 0xa0000000u) ||
+          (value & 0x1fffffffu) >= 0x800000u) {
+        fprintf(stderr, "--snapshot-ram requires an aligned main RAM address (up to 16)\n");
+        return 2;
+      }
+      snapshot_ram[snapshot_ram_count++] = (uint32_t)value;
+    }
     else if (!strcmp(argv[i], "--board-bus-trace") && i + 1 < argc) bus_trace_path = argv[++i];
     else if (!strcmp(argv[i], "--system12-edge-trace") && i + 1 < argc) edge_trace_path = argv[++i];
     else if (!strcmp(argv[i], "--system12-trace-shared-writes")) trace_shared_flags |= 1;
@@ -1781,7 +1797,7 @@ int main(int argc, char **argv)
       (gpu_type1_test && (exe || board || verify || trace_path)) || (board_test && !board) ||
       ((inputs_path || audio_path) && !board && !disc) ||
       ((audio_test_fixture || nvram_path) && !board) ||
-      (snapshot_path && !board) ||
+      (snapshot_path && !board) || (snapshot_ram_count && !snapshot_path) ||
       (bus_trace_path && (!board || board_family != 12)) ||
       (edge_trace_path && (!board || board_family != 12 || board_test)) ||
       (trace_shared_flags && !edge_trace_path) ||
@@ -1871,6 +1887,8 @@ int main(int argc, char **argv)
       "ram_d21c0,ram_d21c4,ram_d21c8,ram_d21cc,ram_d21d0,ram_d21d4,"
       "ram_d21d8,ram_d21dc", snapshots);
     for (i = 0; i < 32; i++) fprintf(snapshots, ",r%d", i);
+    for (i = 0; i < (int)snapshot_ram_count; i++)
+      fprintf(snapshots, ",ram_%08x", snapshot_ram[i]);
     fputc('\n', snapshots);
   }
   if (bus_trace_path) {
@@ -2049,6 +2067,18 @@ int main(int argc, char **argv)
 #else
   if (board) { fprintf(stderr, "Rebuild with BOARD=1 for arcade boards.\n"); return 2; }
 #endif
+  for (i = 0; i < (int)snapshot_ram_count; i++) {
+    if ((snapshot_ram[i] & 0x1fffffffu) > PSX_RAM_SIZE - 4) {
+      fprintf(stderr, "--snapshot-ram address %08x exceeds selected main RAM (%u bytes)\n",
+        snapshot_ram[i], (unsigned)PSX_RAM_SIZE);
+#ifdef PCSX_SYSTEM12
+      if (selected_board) selected_board->unload();
+#endif
+      if (snapshots) fclose(snapshots);
+      if (trace) fclose(trace);
+      return 2;
+    }
+  }
   if (gpu_type1_test && (gpu_set_model(1) || gpu_set_vram_height(gpu_type1_test == 2 ? 512 : 1024))) {
     fprintf(stderr, "Rebuild with BOARD=1 for type-1 GPU testing.\n"); return 2;
   }
@@ -2563,6 +2593,12 @@ int main(int argc, char **argv)
         psxMemRead32(&psxRegs, 0x800d21d0), psxMemRead32(&psxRegs, 0x800d21d4),
         psxMemRead32(&psxRegs, 0x800d21d8), psxMemRead32(&psxRegs, 0x800d21dc));
       for (r = 0; r < 32; r++) fprintf(snapshots, ",%08x", psxRegs.GPR.r[r]);
+      /* Validated main RAM only: observation must not touch MMIO devices. */
+      for (r = 0; r < snapshot_ram_count; r++) {
+        uint32_t value;
+        memcpy(&value, psxRegs.ptrs.psxM + (snapshot_ram[r] & 0x1fffffffu), sizeof(value));
+        fprintf(snapshots, ",%08x", SWAP32(value));
+      }
       fputc('\n', snapshots);
       snapshot_count++;
       do {

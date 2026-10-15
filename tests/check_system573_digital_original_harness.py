@@ -2,6 +2,7 @@
 """Verify original KAA installation, scored drums and optional live playback."""
 import argparse
 import array
+import csv
 import hashlib
 import json
 from pathlib import Path
@@ -93,6 +94,50 @@ def pcm(path):
         frames=wav.getnframes();samples=array.array('h',wav.readframes(frames))
     if sys.byteorder!='little': samples.byteswap()
     return frames,samples
+
+
+def verify_timing(root):
+    log=(root/'timing-neon-ok.log').read_text()
+    assert 'cpu=interpreter frames=13800' in log and 'Arcade inputs: consumed=1495/1495' in log
+    assert 'failed' not in log and 'execution limit reached' not in log
+    for prefix in ['System573:','System573 digital:','System573 CD:','System573 speaker:']:
+        assert 'faults=0' in diagnostic(log,prefix)
+    for suffix in ['spu.wav','speaker.wav']:
+        assert (root/f'timing-neon-ok-{suffix}').read_bytes()==(root/f'player-pads-neon-{suffix}').read_bytes()
+    with (root/'timing-neon-ok.csv').open() as stream:
+        native=list(csv.DictReader(stream))
+    with (root/'mame-song-oracle/score.csv').open() as stream:
+        reference=list(csv.DictReader(stream))
+    first_native=next(row for row in native if int(row['ram_803493f8'],16)>0)
+    first_reference=next(row for row in reference if int(row['ram_803493f8'],16)>0)
+    assert int(first_native['ram_803493f8'],16)==int(first_reference['ram_803493f8'],16)==1
+    assert int(first_native['frame'])==12758
+    for row in native:
+        tick=int(row['ram_803493f8'],16)
+        if tick: assert int(row['frame'])-tick in (12757,12758)
+    a,b=native[-1],reference[-1]
+    assert int(a['ram_803493f8'],16)==int(b['ram_803493f8'],16)==1042
+    assert (int(b['boot_rows']),int(b['pad_rows']))==(19,1476)
+    # Check original chart parameters, rather than comparing unrelated songs.
+    for key in ['ram_80349414','ram_80349424','ram_80349428','ram_8034942c']:
+        assert a[key]==b[key],key
+    reference_log=(root/'mame-song-oracle/run.log').read_text()
+    assert 'LUA ERROR' not in reference_log and 'SONG_FINAL\t1042\t' in reference_log
+    pad_events=[line.split() for line in reference_log.splitlines() if line.startswith('SONG_INPUT\t')]
+    assert len(pad_events)==1476
+    expected=[(int(f)-12758,n,v) for f,n,v in
+              (line.split(',') for line in player_inputs().splitlines()[1:]) if n.startswith('p1button')]
+    # Convert CSV frame strings explicitly; source order is retained.
+    for fields,(tick,name,value) in zip(pad_events,expected):
+        assert (int(fields[1]),int(fields[2]),fields[3],fields[4])==(tick,tick,name,value)
+    native_score=int(a['ram_80349538'],16);reference_score=int(b['ram_80349538'],16)
+    return {'native_song_start_seconds':int(first_native['cycles'])/33868800,
+            'reference_song_start_seconds':float(first_reference['time']),
+            'native_score':native_score,'reference_score':reference_score,
+            'same_chart_tick_endpoint':1042,'native_first_pad_tick_before_game_update':42,
+            'reference_first_pad_tick':42,
+            'score_equal':native_score==reference_score,
+            'accuracy_claim':'open; traces observe different CPU/video callback phases'}
 
 
 def verify_player(root,live=False):
@@ -189,14 +234,18 @@ def main():
     p.add_argument('--reference-nvram',type=Path,help='independent MAME installation directory')
     p.add_argument('--player',action='store_true',help='also verify the original scored drum replay')
     p.add_argument('--live',action='store_true',help='also require the same replay through SDL playback')
+    p.add_argument('--timing',action='store_true',help='inspect the original song-clock comparison; reports differences')
     args=p.parse_args();root=args.evidence_dir.resolve()
     reference=args.reference_nvram or root/'mame-install/nvram/pcnfrk4mk'
     result=verify(root,reference)
     if args.player or args.live: result['player']=verify_player(root,args.live)
+    if args.timing: result['timing']=verify_timing(root)
     print(json.dumps(result,indent=2))
     print('Original KAA native cold install, eight flashes, ZS01 and updated CR-589 match independent MAME PASS')
     if args.player or args.live:
         print('Original KAA scored six-pad replay and source MPEG/SPU mix PASS'+(' with live SDL' if args.live else ''))
+    if args.timing:
+        print('Original song-clock comparison recorded; judgement equivalence remains OPEN')
 
 
 if __name__=='__main__': main()

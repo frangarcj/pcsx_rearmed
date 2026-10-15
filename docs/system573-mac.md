@@ -306,8 +306,9 @@ Independent MAME enters the same original 1st Stage and shows **120,150**
 points under an approximate time-converted replay. That Lua replay converts
 native frame numbers using a single cold-boot average, so its input events
 are not aligned to native VBlank transitions or the same song phase. The score
-difference remains an open comparison, not a passing judgement oracle or a
-proven oscillator defect. The pinned `konami573`/`drmn4m` source and MAME
+difference initially remained an open comparison. The song-clock follow-up
+below confirms a remaining mismatch after aligning the song phase; neither
+comparison is a passing judgement oracle or a proven oscillator defect. The pinned `konami573`/`drmn4m` source and MAME
 0.287 `-listxml pcnfrk4mk` both declare CPU 67,737,600 Hz, SPU 33,868,800 Hz
 and CDDA 44,100 Hz, matching the native profile/core clock. No clock is changed
 to improve a score.
@@ -328,6 +329,67 @@ harness with `--system573 roms/prepared/pcnfrk4mk --frames 13800
 --max-blocks 3000000000 --inputs INPUT.csv --nvram COPY.nv --audio SPU.wav
 --mixed-audio SPEAKER.wav --dump-ram RAM.bin --output FRAME.ppm`; the GL run
 also uses `--capture-gl`, and the SDL replay adds `--interactive`.
+
+## Original KAA song-clock comparison
+
+The previous comparison now has a stronger follow-up. Optional
+`--snapshot-ram ADDRESS` arguments append up to 16 selected little-endian RAM
+words to the native cycle-snapshot CSV. Reads use the backing main RAM directly,
+reject MMIO, unaligned/invalid segment addresses and offsets beyond the selected
+board's actual RAM size. They neither call mapped devices nor write guest state.
+The original 4 MiB profile passes alias, boundary, dump-agreement and invalid
+address checks on both Mac renderers:
+
+```sh
+python3 tests/check_mac_snapshot_ram.py --harness build/mac-harness/pcsx-harness \
+  --system573 roms/prepared/pcnfrk4mk
+python3 tests/check_mac_snapshot_ram.py \
+  --harness build/mac-harness-vitagl-like/pcsx-harness \
+  --system573 roms/prepared/pcnfrk4mk
+```
+
+A fresh complete 13,800-frame native replay records the original song counter
+at `803493f8`, score fields and chart parameters from core cycle 6,773,760,000,
+every 564,480 cycles. It reports zero device/audio errors, scores 1,150 and
+retains both previous headless WAVs **byte for byte**. The first nonzero song
+tick occurs at native frame 12,758 / about 212.950 seconds. Independent MAME
+reaches that tick at 207.201084 seconds: approximately 5.749 seconds earlier.
+This proves that total-boot-time conversion did not align song input phase.
+
+The committed `tests/mame_system573_song_oracle.lua` keeps the recorded 19
+boot/menu events, then schedules the 1,476 pad transitions against this original
+song tick. Native frame 12,800 precedes game tick 43's update; the corresponding
+MAME frame-done callback sets inputs at tick 42. Both traces finish at song tick
+1,042 and retain the same four original chart parameters. The oracle consumes
+all events and exits cleanly using its own independently installed MAME state.
+**It scores 25,950, versus native 1,150.** A separate tick-43 boundary probe
+scored 24,300, so shifting the first pulse by one tick also does not establish
+judgement equality. These are retained differences, not a compatibility pass.
+Further input-sampling and MPEG playback-clock alignment is still required.
+
+For an independent reference run, copy `mame-install/nvram/pcnfrk4mk` into a
+fresh MAME NVRAM directory; never substitute that data into a native run. Set
+`PCSX_PF4_INPUTS` to the absolute path of `player-pads.csv` and
+`PCSX_PF4_TRACE` to a fresh output CSV, then launch MAME `pcnfrk4mk` with
+`-noreadconfig -autoboot_delay 0 -autoboot_script
+/absolute/path/to/tests/mame_system573_song_oracle.lua`, that separate
+`-nvram_directory`, `-video none -sound none -nothrottle -seconds_to_run 226`
+and the audited original `-rompath`. The script reads memory and delivers real
+cabinet inputs; it does not modify original program or chart data.
+
+```sh
+python3 tests/check_system573_digital_original_harness.py \
+  --evidence-dir artifacts/boards-mac-20261015/system573/pcnfrk4mk --timing
+```
+
+This verifier checks collected observations and reports the score comparison
+as open. The authoritative new traces are `timing-neon-ok.*` and
+`mame-song-oracle/*`. The earlier `timing-neon.*` attempt completed its CPU
+bound but failed WAV writes when the volume filled; those truncated WAVs are
+not successful audio evidence. Two temporary CHD copies were removed only
+after full SHA256 equality with the preserved prepared originals was confirmed;
+`verified-temporary-cleanup.json` records the paths, sizes and hashes. Neither
+original media nor prior unique validation evidence was discarded.
 
 ## Hyper Bishi Bashi media
 
