@@ -5,6 +5,19 @@ through a standalone C API. This is MAME's high-level model of the security
 cassette PIC, not execution of its firmware. It is a component for the System
 573 digital configuration; it is not yet connected to a native game profile.
 
+`system573_flash_init_zi` now wires that chip and the timed DS2401 into the
+shared board bus. Security D1/D2/D3 drive clock/select/reset, D4 drives the
+inverted DS2401 line, and D0 has no ZI callback. Control bit 6 drives inverted
+ZS01 SDA independently of flash bank selection. IN1 bits 18 and 14 report
+secure-flash SDA and one-wire output. Masked high-byte writes do not trigger
+low-byte pin callbacks. Both original images remain mandatory.
+
+The board owns elapsed microsecond time for the one-wire timers, rejects
+overflow, and restarts transient cassette timing on reset while retaining
+EEPROM/serial bytes. ZI does not execute Y lamp callbacks or the DDR analog
+stage multiplexor. This does not add a normal digital game loader or replace
+its missing CD/audio path.
+
 The constructor requires both a complete 140-byte ZS01 image and an eight-byte
 DS2401 serial image. The ZS01 layout is reset response 4, command key 8, data
 key 8, configuration registers 8 and data 112. Both images are copied; no
@@ -64,3 +77,12 @@ build/konami-security-tests/test-konami-zs01 \
 This original-image check reads the supplied reset response, every page,
 configuration and both source serial addresses. It is component evidence,
 not proof that the game has accepted the cassette or entered gameplay.
+
+The complete same host-codec suite also runs through security/control/IN1
+MMIO in `tests/Makefile.system573`'s `zi-bus` target, including an original
+KAA readback run under ASan/UBSan. During this replay D0 deliberately disagrees
+with SDA, and high-byte control writes are interleaved. Separate bus tests
+verify 479 versus 480 microsecond resets, exact presence windows, all 64
+serial bits, warm reset and timer overflow rejection. Mac GL/NEON builds and
+their native Hyperbbc fixtures plus original DDR loader/NVRAM regressions pass;
+these regressions do not constitute digital game execution.

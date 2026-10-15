@@ -7,10 +7,10 @@ SOURCES := tests/test_system573_peripherals.c libpcsxcore/arcade/m48t58.c libpcs
 $(BUILD)/peripherals: $(SOURCES) libpcsxcore/arcade/m48t58.h libpcsxcore/arcade/adc0834.h
 	@mkdir -p $(BUILD)
 	$(CC) -std=c99 $(OPT) -Wall -Wextra -Werror $(SOURCES) -o $@
-$(BUILD)/flash-c.o: libpcsxcore/arcade/system573_flash.c libpcsxcore/arcade/system573_flash.h
+$(BUILD)/flash-c.o: libpcsxcore/arcade/system573_flash.c libpcsxcore/arcade/system573_flash.h libpcsxcore/arcade/konami_zs01.h
 	@mkdir -p $(BUILD)
 	$(CC) -std=c99 $(OPT) -Wall -Wextra -Werror -c $< -o $@
-$(BUILD)/flash-test.o: tests/test_system573_flash.c
+$(BUILD)/flash-test.o: tests/test_system573_flash.c libpcsxcore/arcade/system573_flash.h
 	@mkdir -p $(BUILD)
 	$(CC) -std=c99 $(OPT) -Wall -Wextra -Werror -c $< -o $@
 $(BUILD)/nor.o: libpcsxcore/arcade/nor_flash.c
@@ -21,14 +21,21 @@ $(BUILD)/adc.o: libpcsxcore/arcade/adc0834.c
 	$(CC) -std=c99 $(OPT) -Wall -Wextra -Werror -c $< -o $@
 $(BUILD)/security.o: libpcsxcore/arcade/konami_security.cpp libpcsxcore/arcade/konami_security_x76.inc
 	$(CXX) -std=c++17 $(OPT) -Wall -Wextra -Wno-unused-parameter -c $< -o $@
-$(BUILD)/flash: $(BUILD)/flash-c.o $(BUILD)/flash-test.o $(BUILD)/nor.o $(BUILD)/rtc.o $(BUILD)/adc.o $(BUILD)/security.o
+$(BUILD)/zs01.o: libpcsxcore/arcade/konami_zs01.cpp libpcsxcore/arcade/konami_zs01_mame.inc libpcsxcore/arcade/konami_zs01.h
+	$(CXX) -std=c++17 $(OPT) -Wall -Wextra -Werror -c $< -o $@
+$(BUILD)/flash: $(BUILD)/flash-c.o $(BUILD)/flash-test.o $(BUILD)/nor.o $(BUILD)/rtc.o $(BUILD)/adc.o $(BUILD)/security.o $(BUILD)/zs01.o
+	$(CXX) $(OPT) $^ -o $@
+$(BUILD)/zi-bus-test.o: tests/test_konami_zs01.cpp libpcsxcore/arcade/system573_flash.h
+	$(CXX) -std=c++17 $(OPT) -DPCSX_ZS01_TEST_BOARD_BUS -Wall -Wextra -Werror -c $< -o $@
+$(BUILD)/zi-bus: $(BUILD)/zi-bus-test.o $(BUILD)/flash-c.o $(BUILD)/nor.o $(BUILD)/rtc.o $(BUILD)/adc.o $(BUILD)/security.o $(BUILD)/zs01.o
 	$(CXX) $(OPT) $^ -o $@
 $(BUILD)/audio: tests/test_system573_audio.c libpcsxcore/arcade/system573_audio.c libpcsxcore/arcade/system573_audio.h
 	@mkdir -p $(BUILD)
 	$(CC) -std=c99 $(OPT) -Wall -Wextra -Werror tests/test_system573_audio.c libpcsxcore/arcade/system573_audio.c -o $@
-test: $(BUILD)/peripherals $(BUILD)/flash $(BUILD)/audio
+test: $(BUILD)/peripherals $(BUILD)/flash $(BUILD)/audio $(BUILD)/zi-bus
 	$(BUILD)/peripherals
 	$(BUILD)/flash
 	$(BUILD)/audio
+	$(BUILD)/zi-bus
 sanitize:
 	$(MAKE) -f tests/Makefile.system573 BUILD=$(BUILD)/sanitize OPT='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' test

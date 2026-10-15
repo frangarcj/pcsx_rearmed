@@ -13,7 +13,7 @@ The full family validation still requires three distinct configurations:
 | --- | --- | --- |
 | Hyper Bishi Bashi Champ EAA (`hyperbbc`) | Base board, eight onboard flashes, timekeeper, cassette Y lamp outputs and three-player buttons | Native interpreter GL/NEON P1 minigame, live source-gain SPU/SDL audio and complete flash/NVRAM persistence verified; full P2/P3 gameplay/operator checks pending |
 | Dance Dance Revolution 2nd Mix (`ddr2m`) | Analog daughterboard, CD-ROM, cassette X, dance input multiplexing | Original cassette/CD verified; source CR-589 transport and DDR analog multiplexor integrated. Native GL/NEON cold flash initialization completes and all eight programmed chips match MAME byte for byte. Native warm GL/NEON 1st Stage/PERFECT, 92/92 inputs and original nonzero SPU/CDDA decoding pass. Source gain-1 SPU/CDDA mix passes headless GL/NEON and live SDL. Full song/P2/operator coverage remains separate |
-| Percussion Freaks 4th Mix KAA (`pcnfrk4mk`) | Digital daughterboard, CD-ROM, cassette ZI/serial ID, instrument inputs and multi-session unit | Seven original game/device chips audited, retaining source BAD_DUMP serial/CD status. ZS01 encrypted pin protocol passes optimized/ASan tests and original-cassette readback; native cassette wiring, original CD, FPGA/MAS3507D sound and game runtime remain pending |
+| Percussion Freaks 4th Mix KAA (`pcnfrk4mk`) | Digital daughterboard, CD-ROM, cassette ZI/serial ID, instrument inputs and multi-session unit | Seven original game/device chips audited, retaining source BAD_DUMP serial/CD status. ZS01 encrypted pin protocol passes optimized/ASan tests and original-cassette readback; ZI bus also passes complete encrypted protocol/original readback and timed DS2401 checks. Native digital loader, original CD, FPGA/MAS3507D sound and game runtime remain pending |
 
 ## Digital KAA media and cassette component
 
@@ -69,7 +69,10 @@ persistence and serial reads with an independent host codec, both optimized
 and under ASan/UBSan. The original audited KAA cassette/serial also pass reset,
 all fourteen data pages, configuration and serial readback. Existing X76F041,
 X76F100 and DS2401 tests still pass. This does not prove game acceptance of
-the cassette: native ZI bus wiring and execution remain pending.
+the cassette. ZI security/control/IN1 wiring now passes the same complete
+protocol and original-image readback through the board bus, including timed
+DS2401, masked lanes and reset persistence, under optimized and ASan/UBSan
+builds. Native digital loader and execution remain pending.
 
 The pinned multi-session device declares its ROMs but has an empty
 `device_start`, no configured processor and no runtime address map. Auditing

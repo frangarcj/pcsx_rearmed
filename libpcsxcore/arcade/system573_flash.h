@@ -5,9 +5,17 @@
 #include "m48t58.h"
 #include "adc0834.h"
 #include "konami_security.h"
+#include "konami_zs01.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
+enum { SYSTEM573_CASSETTE_ZI = 0x5a49 };
 typedef struct System573Flash {
     nor_flash_t *flash[8];
     KonamiSecureFlash *cassette;
+    KonamiZS01 *zs01;
+    KonamiDS2401 *serial;
+    uint64_t cassette_us;
     M48T58 rtc;
     Adc0834 adc;
     const uint8_t *h8_response;
@@ -31,6 +39,10 @@ int system573_flash_init(System573Flash *b,uint8_t *flash[8],uint8_t *rtc,
 int system573_flash_init_cassette(System573Flash *b,uint8_t *flash[8],uint8_t *rtc,
                          const uint8_t *response,const uint8_t *cassette,
                          unsigned cassette_type,const struct tm *local);
+/* Cassette ZI uses its own original EEPROM and serial, not X/Y fallback data. */
+int system573_flash_init_zi(System573Flash *b,uint8_t *flash[8],uint8_t *rtc,
+                         const uint8_t *response,const uint8_t *cassette,size_t cassette_size,
+                         const uint8_t *serial,size_t serial_size,const struct tm *local);
 void system573_flash_destroy(System573Flash *b);
 void system573_flash_reset(System573Flash *b);
 void system573_flash_advance_us(System573Flash *b,uint64_t us);
@@ -38,4 +50,7 @@ int system573_flash_read(System573Flash *b,uint32_t address,unsigned width,uint3
 int system573_flash_write(System573Flash *b,uint32_t address,unsigned width,uint32_t value);
 /* Instruction-fetch view; data and commands still use actual x8 engines. */
 void system573_flash_fetch_view(System573Flash *b,uint8_t *window);
+#ifdef __cplusplus
+}
+#endif
 #endif

@@ -6,29 +6,53 @@ int system573_flash_init(System573Flash *b,uint8_t *flash[8],uint8_t *rtc,
                          const uint8_t *response,const uint8_t *cassette,const struct tm *local){
     return system573_flash_init_cassette(b,flash,rtc,response,cassette,KONAMI_X76F100,local);
 }
-int system573_flash_init_cassette(System573Flash *b,uint8_t *flash[8],uint8_t *rtc,
-                         const uint8_t *response,const uint8_t *cassette,unsigned type,const struct tm *local){
+static int init_cassette(System573Flash *b,uint8_t *flash[8],uint8_t *rtc,
+                         const uint8_t *response,const uint8_t *cassette,unsigned type,
+                         const uint8_t *serial,const struct tm *local){
     if(!b || !flash || !rtc || !response || !cassette || !local)return -1;
-    if(type!=KONAMI_X76F100 && type!=KONAMI_X76F041)return -1;
+    if(type!=KONAMI_X76F100 && type!=KONAMI_X76F041 && type!=SYSTEM573_CASSETTE_ZI)return -1;
+    if(type==SYSTEM573_CASSETTE_ZI && !serial)return -1;
     memset(b,0,sizeof(*b));b->h8_response=response;
     b->cassette_type=type;b->stage_input=b->stage_mask=UINT32_MAX;
     for(unsigned i=0;i<8;i++)if(!(b->flash[i]=nor_flash_create(NOR_FLASH_FUJITSU_MBM29F016A,flash[i],0x200000)))goto bad;
-    b->cassette=konami_secure_flash_create(type,cassette,type==KONAMI_X76F041?548:132);if(!b->cassette)goto bad;
+    if(type==SYSTEM573_CASSETTE_ZI){
+        b->zs01=konami_zs01_create(cassette,140,serial,8);
+        b->serial=konami_ds2401_create(serial,8);if(!b->zs01 || !b->serial)goto bad;
+    }else{
+        b->cassette=konami_secure_flash_create(type,cassette,type==KONAMI_X76F041?548:132);if(!b->cassette)goto bad;
+    }
     if(m48t58_init(&b->rtc,rtc,local))goto bad;
     adc0834_init(&b->adc);
     b->input[0]=UINT32_MAX;b->input[1]=0x13001007;b->input[2]=0xffff;b->input[3]=0x0f000f00;
     return 0;
 bad:system573_flash_destroy(b);return -1;
 }
+int system573_flash_init_cassette(System573Flash *b,uint8_t *flash[8],uint8_t *rtc,
+                         const uint8_t *response,const uint8_t *cassette,unsigned type,const struct tm *local){
+    return init_cassette(b,flash,rtc,response,cassette,type,NULL,local);
+}
+int system573_flash_init_zi(System573Flash *b,uint8_t *flash[8],uint8_t *rtc,
+                         const uint8_t *response,const uint8_t *cassette,size_t cassette_size,
+                         const uint8_t *serial,size_t serial_size,const struct tm *local){
+    if(cassette_size!=140 || serial_size!=8)return -1;
+    return init_cassette(b,flash,rtc,response,cassette,SYSTEM573_CASSETTE_ZI,serial,local);
+}
 void system573_flash_destroy(System573Flash *b){
     if(!b)return;for(unsigned i=0;i<8;i++)nor_flash_destroy(b->flash[i]);
-    konami_secure_flash_destroy(b->cassette);memset(b,0,sizeof(*b));
+    konami_secure_flash_destroy(b->cassette);konami_zs01_destroy(b->zs01);
+    konami_ds2401_destroy(b->serial);memset(b,0,sizeof(*b));
 }
 void system573_flash_reset(System573Flash *b){
     b->control=b->security=0;b->h8_index=b->h8_clk=0;b->jvs_r=b->jvs_w=0;memset(b->jvs,0,sizeof(b->jvs));
     konami_secure_flash_reset(b->cassette);
+    konami_zs01_reset(b->zs01);konami_ds2401_reset(b->serial);b->cassette_us=0;
 }
 void system573_flash_advance_us(System573Flash *b,uint64_t us){
+    if(b->serial){
+        if(us>UINT64_MAX-480-b->cassette_us){b->faults|=4;return;}
+        b->cassette_us+=us;
+        if(konami_ds2401_advance_to_us(b->serial,b->cassette_us))b->faults|=4;
+    }
     m48t58_advance_us(&b->rtc,us);for(unsigned i=0;i<8;i++)nor_flash_advance_us(b->flash[i],us);
 }
 void system573_flash_fetch_view(System573Flash *b,uint8_t *window){
@@ -45,6 +69,13 @@ static int aperture(uint32_t a){
         (a>=0x1f6a0000 && a<0x1f6a0002);
 }
 static uint32_t in1(System573Flash *b){
+    if(b->zs01){
+        int serial=konami_ds2401_read_pin(b->serial,b->cassette_us);
+        if(serial<0){b->faults|=4;serial=0;}
+        return (b->input[1]&~0x00044000u)|((b->h8_response[b->h8_index]&15u)<<4)|
+            ((uint32_t)b->adc.dout<<16)|((uint32_t)konami_zs01_read_sda(b->zs01)<<18)|
+            ((uint32_t)serial<<14)|0x0c080000;
+    }
     return b->input[1]|((b->h8_response[b->h8_index]&15u)<<4)|
         ((uint32_t)b->adc.dout<<16)|((uint32_t)konami_secure_flash_read_sda(b->cassette)<<18)|
         0x0c080000; /* no cards (CD1 high), no JVS device (sense high). */
@@ -57,6 +88,14 @@ static void out0(System573Flash *b,uint32_t v,uint32_t mask){
 }
 static void security(System573Flash *b,uint16_t v,uint16_t mask){
     b->security=(b->security&~mask)|(v&mask);
+    if(b->zs01){
+        /* Cassette ZI has no D0 input. SDA is active-low OUT2 bit 6. */
+        if(mask&2)konami_zs01_scl(b->zs01,(v>>1)&1);
+        if(mask&4)konami_zs01_cs(b->zs01,(v>>2)&1);
+        if(mask&8)konami_zs01_rst(b->zs01,(v>>3)&1);
+        if(mask&16)if(konami_ds2401_write_pin(b->serial,!(v&16),b->cassette_us))b->faults|=4;
+        return;
+    }
     if(mask&1)konami_secure_flash_sda(b->cassette,v&1);
     if(mask&2)konami_secure_flash_scl(b->cassette,(v>>1)&1);
     if(mask&4)konami_secure_flash_cs(b->cassette,(v>>2)&1);
@@ -188,7 +227,9 @@ int system573_flash_write(System573Flash *b,uint32_t a,unsigned w,uint32_t v){
     uint32_t base=a&~3u,mask=w==4?UINT32_MAX:((1u<<(8*w))-1)<<(8*(a&3));v<<=8*(a&3);
     switch(base){
     case 0x1f400000:out0(b,v,mask);break;
-    case 0x1f500000:b->control=(b->control&~mask)|(v&mask);break;
+    case 0x1f500000:b->control=(b->control&~mask)|(v&mask);
+        if(b->zs01 && (mask&0x40))konami_zs01_sda(b->zs01,!(v&0x40));
+        break;
     case 0x1f6a0000:security(b,v,mask);break;
     case 0x1f680000:jvs_write(b,v);break;
     }

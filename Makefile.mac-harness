@@ -76,7 +76,7 @@ endif
 ifeq ($(BOARD),1)
 CFLAGS += -DPCSX_SYSTEM573
 SOURCES += libpcsxcore/system573.c libpcsxcore/arcade/system573_flash.c libpcsxcore/arcade/system573_audio.c libpcsxcore/arcade/m48t58.c libpcsxcore/arcade/adc0834.c
-CXXSOURCES += libpcsxcore/arcade/konami_security.cpp
+CXXSOURCES += libpcsxcore/arcade/konami_security.cpp libpcsxcore/arcade/konami_zs01.cpp
 ifeq ($(ARCADE_TIMING),1)
 CFLAGS += -DPCSX_ARCADE_SOURCE_TIMING
 endif

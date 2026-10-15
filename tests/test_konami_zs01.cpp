@@ -5,6 +5,10 @@
 #include <cassert>
 #include <cstdio>
 #include <cstring>
+#ifdef PCSX_ZS01_TEST_BOARD_BUS
+#include "../libpcsxcore/arcade/system573_flash.h"
+#include <vector>
+#endif
 
 using Packet = std::array<uint8_t, 12>;
 using Key = std::array<uint8_t, 8>;
@@ -71,6 +75,42 @@ static Image image() {
 struct Host {
     KonamiZS01 *chip;
     uint8_t previous_byte = 0;
+#ifdef PCSX_ZS01_TEST_BOARD_BUS
+    System573Flash board{};
+    std::vector<uint8_t> flash;
+    uint8_t rtc[8192]{}, h8[64]{};
+    explicit Host(const Image &p, const Key &serial = id) : chip(nullptr), flash(0x1000000, 0xff) {
+        uint8_t *chips[8];
+        for (unsigned i = 0; i < 8; i++) chips[i] = flash.data() + i * 0x200000;
+        struct tm local{}; local.tm_year = 126; local.tm_mon = 9; local.tm_mday = 15;
+        assert(system573_flash_init_zi(&board, chips, rtc, h8, p.data(), p.size(), serial.data(), serial.size(), &local) == 0);
+        chip = board.zs01;
+    }
+    ~Host() { assert(!board.faults); system573_flash_destroy(&board); }
+    void security(unsigned mask, unsigned v) {
+        uint32_t latch = 0;
+        assert(system573_flash_read(&board, 0x1f6a0000, 1, &latch) == 1);
+        assert(system573_flash_write(&board, 0x1f6a0000, 1, (latch & ~mask) | v) == 1);
+    }
+    void clock(int v) { security(2, v ? 2 : 0); }
+    void cs(int v) { security(4, v ? 4 : 0); }
+    void rst(int v) { security(8, v ? 8 : 0); }
+    void reset() { system573_flash_reset(&board); }
+    void data(int v) {
+        uint32_t latch = 0;
+        assert(system573_flash_read(&board, 0x1f500000, 1, &latch) == 1);
+        assert(system573_flash_write(&board, 0x1f500000, 1, (latch & ~0x40u) | (v ? 0 : 0x40)) == 1);
+        // ZI ignores D0, even if it disagrees with SDA. Upper-byte control
+        // writes must not update the low-byte active-low SDA output either.
+        security(1, v ? 0 : 1);
+        assert(system573_flash_write(&board, 0x1f500001, 1, 0xa5) == 1);
+    }
+    int output() {
+        uint32_t port = 0;
+        assert(system573_flash_read(&board, 0x1f400004, 4, &port) == 1);
+        return (port >> 18) & 1;
+    }
+#else
     explicit Host(const Image &p, const Key &serial = id)
         : chip(konami_zs01_create(p.data(), p.size(), serial.data(), serial.size())) {
         assert(chip);
@@ -79,6 +119,10 @@ struct Host {
     void clock(int v) { konami_zs01_scl(chip, v); }
     void data(int v) { konami_zs01_sda(chip, v); }
     int output() { return konami_zs01_read_sda(chip); }
+    void cs(int v) { konami_zs01_cs(chip, v); }
+    void rst(int v) { konami_zs01_rst(chip, v); }
+    void reset() { konami_zs01_reset(chip); }
+#endif
     void start() { clock(0); data(1); clock(1); data(0); clock(0); }
     void send(uint8_t byte) {
         for (int bit = 7; bit >= 0; bit--) {
@@ -136,9 +180,9 @@ static void expect_data(const Packet &p, const Key &data) {
     assert(std::equal(data.begin(), data.end(), p.begin() + 2));
 }
 static void reset_response(Host &h, const Image &p) {
-    konami_zs01_reset(h.chip);
+    h.reset();
     h.previous_byte = 0;
-    konami_zs01_rst(h.chip, 1);
+    h.rst(1);
     for (unsigned byte = 0; byte < 4; byte++) {
         unsigned value = 0;
         for (unsigned bit = 0; bit < 8; bit++) {
@@ -195,7 +239,7 @@ static void mutations() {
     auto saved = h.saved();
     expect_data(h.command(0, 0x80, new_key, key, response_key.data()), zero);
     assert(h.saved() == saved);
-    konami_zs01_reset(h.chip); assert(h.saved() == saved);
+    h.reset(); assert(h.saved() == saved);
     Host restored(saved);
     expect_data(restored.command(5, 8, response_key, key, response_key.data(), false, new_key.data()), id);
     // Explicit erase clears only data and data key; retains command key/config.
@@ -227,10 +271,10 @@ static void errors_and_pins() {
     expect_data(h.command(1, 0, response_key, key, response_key.data()), zero);
     assert(h.saved()[25] == 0);
     // Deselection freezes the protocol and reports high; RST while CS high is ignored.
-    konami_zs01_reset(h.chip); konami_zs01_cs(h.chip, 1);
-    konami_zs01_rst(h.chip, 1);
+    h.reset(); h.cs(1);
+    h.rst(1);
     for (unsigned i = 0; i < 100; i++) { h.clock(i & 1); h.data(i & 1); assert(h.output() == 1); }
-    konami_zs01_cs(h.chip, 0); konami_zs01_reset(h.chip);
+    h.cs(0); h.reset();
     Packet request{}; request[0] = 1; request[1] = 0xfd;
     std::copy(response_key.begin(), response_key.end(), request.begin() + 2); checksum(request);
     h.start();
@@ -238,9 +282,9 @@ static void errors_and_pins() {
     for (auto v : encode(request, key)) {
         h.send(v);
         if (++sent == 5) {
-            konami_zs01_cs(h.chip, 1);
+            h.cs(1);
             for (unsigned i = 0; i < 20; i++) { h.clock(i & 1); h.data(i & 1); assert(h.output() == 1); }
-            h.clock(0); h.data(1); konami_zs01_cs(h.chip, 0);
+            h.clock(0); h.data(1); h.cs(0);
         }
     }
     auto first = h.read(false); assert(h.read() == first); // NACK repeats current byte.
@@ -272,4 +316,7 @@ int main(int argc, char **argv) {
         std::puts("ZS01 supplied-image pin readback PASS (component evidence only)");
     } else assert(argc == 1);
     std::puts("ZS01 encrypted pin commands, EEPROM, retries, serial and reset PASS");
+#ifdef PCSX_ZS01_TEST_BOARD_BUS
+    std::puts("ZS01 full protocol through System573 security/control/IN1 MMIO PASS");
+#endif
 }

@@ -3,6 +3,36 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+static void zi_serial(System573Flash *b,int high){
+    assert(system573_flash_write(b,0x1f6a0000,1,(b->security&~16u)|(high?0:16))==1);
+}
+static int zi_serial_read(System573Flash *b){
+    uint32_t v;assert(system573_flash_read(b,0x1f400004,4,&v)==1);return !!(v&0x4000);
+}
+static void zi_reset_serial(System573Flash *b){
+    zi_serial(b,0);system573_flash_advance_us(b,480);zi_serial(b,1);
+    system573_flash_advance_us(b,29);assert(zi_serial_read(b)==1);
+    system573_flash_advance_us(b,1);assert(zi_serial_read(b)==0);
+    system573_flash_advance_us(b,119);assert(zi_serial_read(b)==0);
+    system573_flash_advance_us(b,1);assert(zi_serial_read(b)==1);
+}
+static void zi_read_serial(System573Flash *b,const uint8_t *id){
+    zi_reset_serial(b);
+    for(unsigned bit=0;bit<8;bit++){
+        int high=(0x33>>bit)&1;
+        zi_serial(b,0);system573_flash_advance_us(b,high?6:60);
+        zi_serial(b,1);system573_flash_advance_us(b,high?64:10);
+    }
+    for(unsigned byte=0;byte<8;byte++){
+        unsigned v=0;
+        for(unsigned bit=0;bit<8;bit++){
+            zi_serial(b,0);system573_flash_advance_us(b,6);
+            zi_serial(b,1);system573_flash_advance_us(b,9);
+            v|=zi_serial_read(b)<<bit;system573_flash_advance_us(b,55);
+        }
+        assert(v==id[7-byte]);
+    }
+}
 int main(void){
     uint8_t *chips[8],rtc[8192]={0},response[64],factory[132]={0x19,0,0xaa,0x55};
     for(unsigned i=0;i<8;i++){chips[i]=malloc(0x200000);assert(chips[i]);memset(chips[i],0x10+i,0x200000);}
@@ -98,7 +128,29 @@ int main(void){
     system573_flash_write(&b,0x1f640088,2,0x20);system573_flash_reset(&b);
     assert(b.analog_output[1]==0x20 && b.stage[1].data==1);
     system573_flash_read(&b,0x1f640088,4,&v);assert(v==0);
-    assert(!b.faults);system573_flash_destroy(&b);for(unsigned i=0;i<8;i++)free(chips[i]);
-    puts("System 573 flash/x8 dirty lanes, H8/RTC, X/Y cassettes, analog DDR two-stage multiplexor, empty ATA/JVS and warm reset PASS");
+    assert(!b.faults);system573_flash_destroy(&b);
+    uint8_t zimage[140]={0x5a,0x53,0,1},id[8]={0x9b,0x22,0x76,0x8a,0xfe,0x45,0x11,1};
+    assert(system573_flash_init_zi(&b,chips,rtc,response,zimage,139,id,8,&t)==-1);
+    assert(system573_flash_init_zi(&b,chips,rtc,response,zimage,140,id,7,&t)==-1);
+    assert(system573_flash_init_zi(&b,chips,rtc,response,zimage,140,NULL,8,&t)==-1);
+    assert(system573_flash_init_cassette(&b,chips,rtc,response,zimage,SYSTEM573_CASSETTE_ZI,&t)==-1);
+    assert(!system573_flash_init_zi(&b,chips,rtc,response,zimage,140,id,8,&t));
+    assert(b.zs01 && b.serial && !b.cassette && b.cassette_type==SYSTEM573_CASSETTE_ZI);
+    assert(zi_serial_read(&b)==1);
+    b.input[1]|=0x4000; /* Custom input must override even a high backing bit. */
+    zi_serial(&b,0);system573_flash_advance_us(&b,479);zi_serial(&b,1);
+    system573_flash_advance_us(&b,150);assert(zi_serial_read(&b)==1); // No presence on short reset.
+    zi_read_serial(&b,id);
+    system573_flash_write(&b,0x1f6a0000,1,0xf8);
+    assert(!b.lamp_color && !b.lamps[0] && !b.lamps[1] && !b.lamps[2]);
+    system573_flash_reset(&b);assert(!b.cassette_us && zi_serial_read(&b)==1);
+    zi_reset_serial(&b);zi_serial(&b,0);
+    system573_flash_reset(&b);assert(!b.cassette_us && zi_serial_read(&b)==1);
+    zi_read_serial(&b,id); // Complete identity survives reset; no regenerated CRC.
+    uint8_t zsaved[140];assert(!konami_zs01_get_image(b.zs01,zsaved,140));assert(!memcmp(zsaved,zimage,140));
+    assert(!b.faults);
+    system573_flash_advance_us(&b,UINT64_MAX);assert(b.faults==4); // Reject impossible timer overflow.
+    system573_flash_destroy(&b);for(unsigned i=0;i<8;i++)free(chips[i]);
+    puts("System 573 flash/x8 dirty lanes, H8/RTC, X/Y/ZI cassettes, timed ZI serial, analog DDR two-stage multiplexor, empty ATA/JVS and warm reset PASS");
     return 0;
 }
