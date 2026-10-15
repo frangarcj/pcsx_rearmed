@@ -59,6 +59,11 @@ For future work:
 - The guard also refuses a new batch while WAV/RAM/VRAM/PPM captures remain
   in `artifacts/`. Preserve compact observations and hashes, then remove those
   intermediates before proceeding. It does not automatically delete anything.
+- Chain a preflight and its batch with `&&`, or inspect the tool's exit code
+  before launching it. A printed rejection does not stop a later independent
+  tool call. An agent orchestration error launched two GL object compilations
+  after a failed preflight; the objects were then removed and the required
+  gating rule made explicit in `AGENTS.md`.
 - Mac validation raw captures have a 256 MiB budget per batch. Compare and hash
   the outputs, preserve commands/diagnostics and compact observations, then
   discard WAV/RAM/VRAM/PPM intermediates. Keep useful PNGs and installed NVRAM.
@@ -88,3 +93,14 @@ For future work:
   archive members and links into the output package are rejected.
 - All `build/` outputs are ignored by Git; commits contain source and reproducible
   tests, with local validation evidence kept separately.
+
+Another same-day cleanup during pad-read diagnostics removed 31.97 MiB of
+rebuildable objects and 25.00 MiB of remaining generated RAM/VRAM `.bin` files.
+Seventeen byte-identical media copies (169 MiB) were converted to independent
+APFS copy-on-write clones after SHA-256 checks, preserving each destination's
+metadata. These are separate inodes: future writes do not modify their peers.
+The clone operation reclaimed 168.85 MiB of actual blocks. Every original path
+and byte remains available. The operation manifest is
+`artifacts/disk-cleanup-20261015-pad-reads.jsonl`. New raw captures were pruned;
+no emulator/build process was left running. Shared-volume free space changed
+during the work, and no further emulation batch was launched near the floor.
