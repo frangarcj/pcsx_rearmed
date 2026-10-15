@@ -1,13 +1,21 @@
 # Representative arcade board validation on Mac
 
-The current goal is to run representative games across the PlayStation-derived
-arcade board families. A ROM/profile parser, a synthetic guest or a passing
+This pass runs representative games across the PlayStation-derived arcade
+board families. A ROM/profile parser, a synthetic guest or a passing
 component test does not establish game compatibility. A passing row requires
 observed player gameplay, exercised inputs, recorded device diagnostics and
 appropriate sound evidence; title/demo/installation screens are recorded as
 intermediate results. Physical Vita is outside this Mac pass. Raw captures
 pruned under [the storage policy](build-storage.md) remain historical results;
 retained logs/CSVs/hashes do not constitute a fresh audio or gameplay rerun.
+
+The user accepted the representative Mac pass as complete on 2026-10-15.
+Each family/configuration below has observed bounded player gameplay, with
+its scope and limitations retained in the evidence column. The deferred checks
+below remain known limitations: in particular System 573 judgement/MPEG phase,
+full-song results, special printer/calibration cases and Metro's missing H8
+disk firmware. DRC, physical Vita and cabinet-to-cabinet transport retain their
+separate unvalidated status. No further runs are planned for this accepted pass.
 
 | Family / configuration | Representatives | Current runtime evidence |
 | --- | --- | --- |
@@ -41,7 +49,7 @@ not establish their compatibility. Regional clones do not substitute for distinc
 sound or peripheral configurations. Retail PlayStation is inventoried separately
 from the arcade boards.
 
-## Current next checks
+## Known limitations and deferred checks
 
 - Cabinet links: Kart Duel and Gallop Racer 2 Link pass local game checks;
   transport between two cabinets is neither implemented nor validated. The
