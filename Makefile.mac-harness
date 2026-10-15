@@ -112,8 +112,8 @@ CXXSOURCES += libpcsxcore/arcade/adsp2181.cpp libpcsxcore/arcade/rax_sound.cpp l
   libpcsxcore/arcade/nscsi_bus.cpp libpcsxcore/arcade/nscsi_target.cpp
 ifeq ($(HAVE_CHD),1)
 CFLAGS += -DPCSX_SYSTEM_GV -DPCSX_SYSTEM_GNET -DPCSX_SYSTEM_GQ -DPCSX_SYSTEM_TWINKLE
-CXXSOURCES += libpcsxcore/systemtwinkle.cpp libpcsxcore/arcade/twinkle_board.cpp libpcsxcore/arcade/rtc65271.cpp libpcsxcore/arcade/rf5c400.cpp libpcsxcore/arcade/m24c02.cpp
-$(BUILD)/libpcsxcore/systemtwinkle.o $(BUILD)/libpcsxcore/arcade/twinkle_board.o: CXX_STANDARD = c++20
+CXXSOURCES += libpcsxcore/systemtwinkle.cpp libpcsxcore/arcade/twinkle_board.cpp libpcsxcore/arcade/rtc65271.cpp libpcsxcore/arcade/rf5c400.cpp libpcsxcore/arcade/m24c02.cpp libpcsxcore/arcade/twinkle_serial.cpp
+$(BUILD)/libpcsxcore/systemtwinkle.o $(BUILD)/libpcsxcore/arcade/twinkle_board.o $(BUILD)/libpcsxcore/arcade/twinkle_serial.o: CXX_STANDARD = c++20
 SOURCES += libpcsxcore/arcade/tokimeki_io.c libpcsxcore/arcade/upd4701.c libpcsxcore/arcade/simpbowl_io.c libpcsxcore/arcade/btchamp_io.c libpcsxcore/arcade/kdeadeye_io.c libpcsxcore/systemgv.c libpcsxcore/systemgnet.c libpcsxcore/systemgq.c libpcsxcore/arcade/k056800.c libpcsxcore/arcade/k054539.c
 CFLAGS += -DPCSX_SYSTEM12_CDXA
 CXXSOURCES += libpcsxcore/arcade/sh2.cpp libpcsxcore/arcade/system12_cdxa.cpp
@@ -164,6 +164,7 @@ CXX_STANDARD = c++17
 twinkle-test: $(TARGET)
 ifeq ($(HAVE_CHD),1)
 	$(MAKE) -f tests/Makefile.m24c02 test
+	$(MAKE) -f tests/Makefile.twinkle-serial test
 	python3 tests/check_twinkle_harness.py --harness $(TARGET)
 else
 	python3 tests/check_twinkle_harness.py --harness $(TARGET) --reject-chd

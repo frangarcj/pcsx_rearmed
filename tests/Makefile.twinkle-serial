@@ -1,0 +1,15 @@
+CXX ?= c++
+BUILD ?= build/twinkle-serial-tests
+SOURCES := tests/test_twinkle_serial.cpp libpcsxcore/arcade/twinkle_serial.cpp
+HEADERS := libpcsxcore/arcade/twinkle_serial.h libpcsxcore/arcade/twinkle_serial_declarations.inc libpcsxcore/arcade/twinkle_serial_mame.inc
+.PHONY: test sanitize
+$(BUILD)/twinkle-serial: $(SOURCES) $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CXX) -std=c++20 -O2 -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -Ilibpcsxcore/arcade $(SOURCES) -o $@
+$(BUILD)/twinkle-serial-sanitize: $(SOURCES) $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CXX) -std=c++20 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -Ilibpcsxcore/arcade $(SOURCES) -o $@
+test: $(BUILD)/twinkle-serial
+	$(BUILD)/twinkle-serial
+sanitize: $(BUILD)/twinkle-serial-sanitize
+	ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $(BUILD)/twinkle-serial-sanitize

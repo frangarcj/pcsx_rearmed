@@ -20,6 +20,7 @@ extern "C" {
 #include "arcade/twinkle_board.h"
 #include "arcade/rtc65271.h"
 #include "arcade/m24c02.h"
+#include "arcade/twinkle_serial.h"
 #include "arcade/psx_sio.h"
 #include "arcade/ncr53cf96.h"
 #include "arcade/nscsi_cd.h"
@@ -51,6 +52,7 @@ struct Board {
     std::vector<uint8_t> bios,soundrom,security_factory;
     std::array<uint8_t,256> security{};
     std::unique_ptr<M24c02> eeprom;
+    std::unique_ptr<TwinkleSerial> serial;
     std::vector<uint16_t> wave;
     std::unique_ptr<TwinkleBoard> sound;
     Rtc65271 *rtc=nullptr;Rtc65271Date date{};
@@ -147,6 +149,7 @@ int load(const char *directory,bool fixture){
         std::fprintf(stderr,"SystemTwinkle: original program/video/HDD identity or metadata mismatch\n");systemtwinkle_unload();return -1;
     }
     b.eeprom=std::make_unique<M24c02>(b.security);
+    b.serial=std::make_unique<TwinkleSerial>();
     b.wave.resize(TwinkleBoard::WAVE_RAM_BYTES/2);ata_storage_config_t ata{};
     ata.sector_count=hd.sector_count;ata.cylinders=hd.cylinders;ata.heads=hd.heads;ata.sectors_per_track=hd.sectors_per_track;
     ata.read_sector=hdd_read;ata.write_sector=hdd_write;
@@ -173,7 +176,7 @@ int load(const char *directory,bool fixture){
     }
     b.old_ram=psxRamSize;b.old_rom=psxRomSize;psxRamSize=0x400000;psxRomSize=0x80000;
     b.active=true;b.fixture=fixture;b.last_cycle=psxRegs.cycle;Config.HLE=FALSE;
-    std::fprintf(stderr,"SystemTwinkle bmiidx2: %s; FDC/UART/DVD not yet integrated; unresolved accesses fault explicitly\n",fixture?"GENERATED MIPS/SOUND FIXTURE, not original game evidence":"three original chip SHA1s and all three source CHD identities matched");
+    std::fprintf(stderr,"SystemTwinkle bmiidx2: %s; source UART/JVC control connected; unsupported floppy/parallel accesses fault explicitly\n",fixture?"GENERATED MIPS/SOUND FIXTURE, not original game evidence":"three original chip SHA1s and all three source CHD identities matched");
     return 0;
 }
 bool range(uint32_t a,unsigned w,uint32_t first,uint32_t last){return a<=last && uint64_t(a)+w>first;}
@@ -190,20 +193,15 @@ int access(uint32_t address,unsigned width,uint32_t *value,uint32_t mask,bool wr
     if(!write)*value=0;
     if(systemtwinkle_sync(psxRegs.cycle))return -1;
     if(write)b.writes++;else b.reads++;
-    for(unsigned lane=0;lane<width;lane++) {
-        uint32_t p=a+lane;
-        if(p>=0x1f210000 && p<=0x1f2107ff && !(p&1) &&
-           (!write || (mask&(255u<<(lane*8))))) {
-            fault("unsupported FDC37C665GT/UART access",p);return -1;
-        }
-    }
-
     uint32_t result=0;
     for(unsigned lane=0;lane<width;lane++){
         uint32_t p=a+lane;uint8_t byte=0,v=uint8_t(*value>>(lane*8));if(write && !(mask&(255u<<(lane*8))))continue;
         if(p>=0x1f000000 && p<0x1f000800 && !(p&1)){
             if(write){if(b.sound->main_dpram_write((p-0x1f000000)/2,v))fault("sound mailbox write",p);}
             else if(b.sound->main_dpram_read((p-0x1f000000)/2,&byte))fault("sound mailbox read",p);
+        }else if(p>=0x1f210000 && p<0x1f210800 && !(p&1)){
+            int rc=write?b.serial->write((p-0x1f210000)/2,v):b.serial->read((p-0x1f210000)/2,&byte);
+            if(rc)fault(b.serial->error(),p);
         }else if(p>=0x1f200000 && p<0x1f200020 && !(p&1)){
             if(write)ncr53cf96_write(b.ncr,(p-0x1f200000)/2,v);else byte=ncr53cf96_read(b.ncr,(p-0x1f200000)/2);
             if(!flush() || !dma_pump())break;
@@ -275,6 +273,7 @@ extern "C" int systemtwinkle_sync(uint32_t cycle){
             fault("sound CPU/device failure",b.sound->last_bus_error_address());return -1;}
     }
     for(auto *s:b.sio)if(psx_sio_advance_to_cycle(s,b.cycles)){fault("Sony serial clock failure");return -1;}
+    if(b.serial->advance_to(ns)){fault(b.serial->error());return -1;}
     if(rtc65271_advance_to(b.rtc,ns) || !scsi_to(ns)){fault("device clock failure");return -1;}
     return b.faults?-1:0;
 }
@@ -313,7 +312,7 @@ extern "C" int systemtwinkle_set_input(const char *name,int value){
 }
 extern "C" int systemtwinkle_selftest(void){
     if(!b.active || psxRamSize!=0x400000 || gpu_get_vram_height()!=1024)return -1;
-    std::fprintf(stderr,"SystemTwinkle native geometry/selftest PASS; incomplete peripherals remain explicit faults\n");return 0;
+    std::fprintf(stderr,"SystemTwinkle native geometry/selftest PASS; unsupported floppy/parallel remain explicit faults\n");return 0;
 }
 extern "C" size_t systemtwinkle_nvram_size(void){return nv_bytes;}
 extern "C" int systemtwinkle_nvram_export(unsigned char *out,size_t size){
@@ -334,6 +333,9 @@ extern "C" int systemtwinkle_nvram_import(const unsigned char *in,size_t size){
 extern "C" void systemtwinkle_report(FILE *out){
     if(!b.active || !out)return;ncr53cf96_status_t n{};nscsi_cdrom_status_t c{};Rtc65271Status r{};
     ncr53cf96_get_status(b.ncr,&n);nscsi_cdrom_get_status(b.target,&c);rtc65271_get_status(b.rtc,&r);
+    TwinkleSerial::Status serial{};b.serial->status(serial);
+    std::fprintf(out,"Twinkle serial: reads=%llu writes=%llu tx_line_updates=%llu rx_line_updates=%llu commands=%llu response_bytes=%llu UART2=%02x/%02x divisor=%u FIFO=%02x powered=%d chapter=%u playback=%u faults=%u\n",
+        (unsigned long long)serial.reads,(unsigned long long)serial.writes,(unsigned long long)serial.uart_tx_updates,(unsigned long long)serial.uart_rx_updates,(unsigned long long)serial.dvd_commands,(unsigned long long)serial.dvd_response_bytes,serial.uart_lcr[1],serial.uart_lsr[1],serial.uart_divisor[1],serial.uart_fcr[1],serial.powered,serial.chapter,serial.playback,serial.faults);
     std::fprintf(out,"SystemTwinkle: profile=bmiidx2 media=%s CPU=CXD8530CQ RAM=4194304 VRAM=2097152 PC=%08x cycles=%llu faults=%u MMIO=%llu/%llu\n",b.fixture?"SYNTHETIC_FIXTURE":"SOURCE_SHA_VERIFIED",psxRegs.pc,(unsigned long long)b.cycles,b.faults,(unsigned long long)b.reads,(unsigned long long)b.writes);
     std::fprintf(out,"Twinkle sound: PC=%06x cycles=%llu bus_error=%d HDD_reads=%llu failures=%llu ATA=%02x DMA_words=%llu RF_frames=%llu nonzero=%llu peak=%u\n",b.sound->cpu_pc(),(unsigned long long)b.sound->cpu_cycles(),b.sound->cpu_bus_error(),(unsigned long long)b.hdd_reads,(unsigned long long)b.hdd_failures,b.sound->ata_status(),(unsigned long long)b.sound->ata_dma_words(),(unsigned long long)b.rf_frames,(unsigned long long)b.rf_nonzero,b.rf_peak);
     std::fprintf(out,"Twinkle SCSI: requests=%llu bytes=%llu pending=%llu NCR_faults=%u target_faults=%u RTC_faults=%u RTC_page=%u watchdog_kicks=%llu\n",(unsigned long long)b.dma_requests,(unsigned long long)b.dma_bytes,(unsigned long long)b.dma_remaining,n.faults,c.target.faults,r.faults,r.xram_page,(unsigned long long)b.watchdog_kicks);

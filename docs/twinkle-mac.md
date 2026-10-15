@@ -4,10 +4,11 @@ The representative is original beatmania IIDX 2nd style GC985 JAA (`bmiidx2`),
 machine/input `twinklei`, parent BIOS `gq863`. Pinned MAME
 `deb2f54fe7300e7a192690318beb860159bfd52a`, `konami/twinkle.cpp`, marks it
 `MACHINE_IMPERFECT_SOUND`, without the first style's `MACHINE_NOT_WORKING`.
-This row remains open: the native interpreter now boots the original program
-into its device check, but UART/DVD integration and player validation remain
-pending. Original native execution, component vectors and the independent
-MAME reference are tracked separately.
+This row remains open: the native interpreter now initializes original backup
+RAM, reaches the title and runs the tutorial/attract sequence on GL and NEON.
+Complete speaker output and player validation remain pending. Original native
+execution, component vectors and the independent MAME reference are tracked
+separately.
 
 ## Original media, 2026-10-15
 
@@ -130,7 +131,9 @@ The shared source clock profile selects 67.7376 MHz input, 33.8688 MHz core
 cycles, multiplier 200 and the existing source-derived GPU cadence. Source 4 MiB RAM,
 2 MiB VRAM/type-2 GPU, low-byte mailbox/RTC lanes, panel/turntable/volume
 inputs, SIO0/1, original HDD-backed sound board, and NCR53CF96/XM-5401 CD
-transport are now connected. DMA5 completes its PSX channel immediately as in
+transport are now connected. The [source serial adapter](twinkle-serial.md)
+connects the FDC37C665GT configuration/decoder, two NS16550s and the original
+JVC XV-D701 control state machine. DMA5 completes its PSX channel immediately as in
 source while the payload remains gated by actual NCR DRQ. Original media is
 opened read-only. The video CD is audited/opened but DVD presentation is not
 implemented. LED and source video-mixer serial shift latches are retained.
@@ -148,8 +151,9 @@ length/CRC header, 4,152-byte source RTC image and 256 mutable EEPROM bytes.
 It is cold-start NVRAM, not CPU/timer/sample-RAM save state. Malformed or corrupt
 images are rejected atomically. The configured 1.2-second watchdog is armed
 and rearmed by real writes; expiry stops explicitly until full machine-reset
-sequencing is implemented. FDC37C665GT/NS16550 accesses on mapped byte lanes
-also stop explicitly; unmapped upper lanes remain source zero.
+sequencing is implemented. Unsupported floppy/parallel subdevice accesses still stop explicitly; UART
+registers and configuration use the source map, and unmapped upper lanes
+remain source zero.
 
 ```sh
 python3 scripts/prepare_twinkle_board.py --mame-source ../mamedev --rompath roms \
@@ -161,37 +165,52 @@ build/mac-harness/pcsx-harness --twinkle roms/prepared/bmiidx2 --frames 7200 \
   --output /tmp/iidx2.ppm
 ```
 
-The original BIOS displays `TWINKLE BOOT PROGRAM`, passes ROM/memory/video
-checks, loads and executes the original CD program, and reaches `GC985JA
-DEVICE CHECK` with SCSI/CD-ROM OK. With the EEPROM connected, the first
-unimplemented access is UART2 at physical `1f2105f8`, main PC `8005341c`,
-CPU cycle 943,717,072 (about 27.864 emulated seconds). At this stop: 62 real
-SCSI DMA requests / 833,720 bytes, 2,901 successful HDD sector reads and
-606,208 ATA DMA words in sample RAM; NCR, target, RTC and sound CPU report
-zero device faults; 655 real watchdog writes keep the timer armed. GL and
-NEON stop at the same CPU cycle/PC, with identical 4 MiB RAM (SHA256
-`737a85f1054b4b8173f0cf43cdc7c61fd116bd7b81255936048d9e13f4600e5e`)
-and synchronized 2 MiB VRAM dump files (16-byte header plus pixels, SHA256
-`ce5fafd18f4d66277905b10038bf89382c7a45e9305489f8d2c53234bb661221`).
-Both captures visibly show the device check. RF output is still silent.
-This proves partial original native
-boot and sample transfer, not complete installation, music, player acceptance,
-or a playable board. No MAME NVRAM is imported into the native run.
+The original BIOS passes ROM/memory/video checks, loads and executes the CD
+program, and now completes UART/JVC control instead of stopping at its first
+UART access. In a fresh 9,000-frame run, a real 1P Start pulse at frames
+5,400–5,700 clears the original E150 backup error after the sound checks finish.
+The program writes 3,264 nonzero RTC XRAM bytes and reaches the original title /
+INSERT COIN screen. No initialized MAME NVRAM or invented security bytes are
+imported. The 4,440-byte native NVRAM retains the original EEPROM SHA1 and a
+valid payload CRC.
+
+Separate 6,600-frame processes restore copies of that runtime NVRAM without
+inputs on GL and NEON. Both reach the original `How to play` attract/tutorial
+screen with identical PC `8005f9f0`, 3,736,392,002 cycles and final state:
+
+| Native warm artifact | SHA256, equal on GL and NEON |
+| --- | --- |
+| 4 MiB main RAM | `a242c9c78fa8606b629d69353167dd81002384e5a6dc4d921c07b3bd4d02fdac` |
+| 2 MiB VRAM dump including 16-byte header | `db834b6b048bed273a7918671aac2366d55caec031e82e045b36dd3d25687baf` |
+| 4,440-byte NVRAM | `3b5de8428f79c2b91e2e13f67b53343fc9407a8ac01a4c46ce35caa8c2a551b2` |
+
+Both warm runs execute three original JVC commands and send 33 serial reply
+bytes. NCR/SCSI completes 114 DMA requests / 2,965,688 bytes. The sound CPU
+reads 68,473 HDD sectors and transfers 17,383,424 ATA words to sample RAM.
+RF5C400 produces 4,865,093 source frames, including 1,031,121 nonzero frames
+with peak 20,874. Serial, sound CPU, disk reads, NCR, target and RTC report zero
+faults. These counters and visible captures establish original boot, backup
+persistence and tutorial/attract progress; the complete SPU/CD/RF speaker mix
+and player-scored notes are still unverified.
 
 Generated MIPS tests separately check upper 4 MiB RAM, mapped/unmapped byte
 lanes, mailbox, RTC paging, button/turntable/volume values, Sony SIO register
 access, a real CHD sector through NCR/SCSI/DMA5, M24C02 pin writes/readback,
-checksummed cold/warm NVRAM, corrupt-image retention, original-chip rejection,
-DMA bounds, watchdog expiry and explicit unsupported UART failure. The same
+UART scratch/modem mapped and unmapped lanes, checksummed cold/warm NVRAM,
+corrupt-image retention, original-chip rejection,
+DMA bounds, watchdog expiry and explicit unsupported floppy failure. The same
 vectors pass on GL/NEON; the HAVE_CHD=0 build rejects the profile. Existing
 GV SCSI/DMA and the normal MIPS/GPU smoke regression also pass. Shared SPU
 DMA timing/large-payload acceptance also runs with this board selected.
 
-Remaining native work is FDC37C665GT/NS16550/JVC DVD control, complete speaker
-mixing, watchdog reset sequencing and cabinet presentation, followed by actual
-backup initialization/warm boot, playable notes and music on GL/NEON. The
-full board matrix remains open.
+Remaining native work is complete SPU/CD/RF speaker mixing, scored player
+notes and songs, interactive cabinet controls/presentation and watchdog reset
+sequencing. DVD video decoding is absent in the pinned JVC reference too; the
+control protocol follows that source and is tracked separately from video.
+Unused floppy/parallel controller implementation remains explicit unsupported
+scope. The full board matrix remains open.
 
 Evidence is retained under ignored
-`artifacts/boards-mac-20261015/twinkle/bmiidx2`; ROMs, CHDs, mutable state,
+`artifacts/boards-mac-20261015/twinkle/bmiidx2`, with the serial/title/warm
+evidence in its `serial` subdirectory; ROMs, CHDs, mutable state,
 binaries and captures are not committed.

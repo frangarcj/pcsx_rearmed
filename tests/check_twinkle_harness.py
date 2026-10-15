@@ -24,6 +24,7 @@ def guest(fault=None):
     def ncr(r,v): store(v,0xbf200000+r*2,1)
     li(10,0x80000000)
     store(0xff,0xbf210001,1);read(0xbf210001,30,1)
+    store(0x5a,0xbf2105fe,1);read(0xbf2105fe,31,2);read(0xbf2105ff,32,1);read(0xbf2105fc,33,1)
     store(0x1234,0x803ff000);read(0x803ff000,0)
     store(0x56,0xbf000006,1);read(0xbf000006,1,2);read(0xbf000007,2,1)
     store(0x5a,0xbf2a0040,1);read(0xbf2a0006,3,1)
@@ -89,7 +90,7 @@ def main():
         data=(root/'ram.bin').read_bytes();actual=struct.unpack_from('<16I',data,0x100)
         expected=(0x1234,0x56,0,0,0xc7,0,0x80,0xfe,45,123,10,0xbffe,0x0005004e,0x18,0x200,0x54474f4b)
         assert actual==expected,(actual,expected,out)
-        assert struct.unpack_from("<I",data,0x178)==(0,)
+        assert struct.unpack_from("<4I",data,0x178)==(0,0x5a,0,0xf0)
         assert len(data)==4194304 and data[0x300000:0x300800]==sector,out
         assert 'bytes=2048 pending=0 NCR_faults=0 target_faults=0 RTC_faults=0' in out,out
         nv=state.read_bytes();assert len(nv)==4440 and nv[:13]==b'TWINKNV1BMII2'
@@ -106,7 +107,7 @@ def main():
         assert state.read_bytes()==corrupt
         # Normal profile never accepts generated chips; unsupported devices stop explicitly.
         r=run('--twinkle');assert r.returncode and 'original chip size/SHA1 mismatch' in r.stderr,r.stderr
-        for address,token in [(0xbf210000,'unsupported FDC37C665GT/UART')]:
+        for address,token in [(0xbf2107e8,'unsupported Super-I/O floppy MSR')]:
             bios(address);r=run();assert r.returncode and token in r.stderr,r.stdout+r.stderr
         bios('bad-dma');r=run();assert r.returncode and 'invalid SCSI DMA range' in r.stderr,r.stdout+r.stderr
         bios();r=run(extra=('--frames','90'));assert r.returncode and 'watchdog expired' in r.stderr,r.stdout+r.stderr
