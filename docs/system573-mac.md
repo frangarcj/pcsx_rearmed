@@ -13,7 +13,7 @@ The full family validation still requires three distinct configurations:
 | --- | --- | --- |
 | Hyper Bishi Bashi Champ EAA (`hyperbbc`) | Base board, eight onboard flashes, timekeeper, cassette Y lamp outputs and three-player buttons | Native interpreter GL/NEON P1 minigame, live source-gain SPU/SDL audio and complete flash/NVRAM persistence verified; full P2/P3 gameplay/operator checks pending |
 | Dance Dance Revolution 2nd Mix (`ddr2m`) | Analog daughterboard, CD-ROM, cassette X, dance input multiplexing | Original cassette/CD verified; source CR-589 transport and DDR analog multiplexor integrated. Native GL/NEON cold flash initialization completes and all eight programmed chips match MAME byte for byte. Native warm GL/NEON 1st Stage/PERFECT, 92/92 inputs and original nonzero SPU/CDDA decoding pass. Source gain-1 SPU/CDDA mix passes headless GL/NEON and live SDL. Full song/P2/operator coverage remains separate |
-| Percussion Freaks 4th Mix KAA (`pcnfrk4mk`) | Digital daughterboard, CD-ROM, cassette ZI/serial ID, instrument inputs and multi-session unit | Seven original game/device chips audited, retaining source BAD_DUMP serial/CD status. ZS01 encrypted pin protocol passes optimized/ASan tests and original-cassette readback; ZI bus also passes complete encrypted protocol/original readback and timed DS2401 checks. Native digital loader, original CD, FPGA/MAS3507D sound and game runtime remain pending |
+| Percussion Freaks 4th Mix KAA (`pcnfrk4mk`) | Digital daughterboard, CD-ROM, cassette ZI/serial ID, instrument inputs and multi-session unit | Seven original game/device chips audited, retaining source BAD_DUMP serial/CD status. ZS01 encrypted pin protocol passes optimized/ASan tests and original-cassette readback; ZI bus also passes complete encrypted protocol/original readback and timed DS2401 checks. Digital I/O/FPGA-to-MAS encrypted MPEG, source registers and board ID now pass component checks. Native digital loader/CD, CPU/audio-clock binding, speaker mix and game runtime remain pending |
 
 ## Digital KAA media and cassette component
 
@@ -87,8 +87,13 @@ actual pinned MAME methods and identical minimp3 decoder. Explicit synthetic
 frame-sync/counter agreement, deterministic restart, mute and independent
 channel gain. Optimized/ASan/UBSan checks pass with identical baseline PCM
 hashes. Empty/invalid input produces no successful frame sync; callbacks cannot
-reenter mutation. This is not yet connected to the FPGA's encrypted RAM/timers
-or native speaker output, and does not provide original game music evidence.
+reenter mutation. The [digital I/O/FPGA component](system573-digital-io.md) now connects encrypted
+32 MiB RAM, source cipher/timer/register methods and this decoder. Both FPGA
+variants pass delivered-byte/PCM oracle checks, enable/counter/reset/mute tests
+and wrong-key silence; original digital-board serial readback passes too. The
+source last-pending-byte/guard-padding behaviour and its final-frame effect are
+recorded separately. CPU/sample-clock binding, speaker output and original
+game music evidence remain pending.
 
 ## Hyper Bishi Bashi media
 

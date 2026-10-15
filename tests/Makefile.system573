@@ -19,7 +19,7 @@ $(BUILD)/rtc.o: libpcsxcore/arcade/m48t58.c
 	$(CC) -std=c99 $(OPT) -Wall -Wextra -Werror -c $< -o $@
 $(BUILD)/adc.o: libpcsxcore/arcade/adc0834.c
 	$(CC) -std=c99 $(OPT) -Wall -Wextra -Werror -c $< -o $@
-$(BUILD)/security.o: libpcsxcore/arcade/konami_security.cpp libpcsxcore/arcade/konami_security_x76.inc
+$(BUILD)/security.o: libpcsxcore/arcade/konami_security.cpp libpcsxcore/arcade/konami_security.h libpcsxcore/arcade/konami_security_x76.inc
 	$(CXX) -std=c++17 $(OPT) -Wall -Wextra -Wno-unused-parameter -c $< -o $@
 $(BUILD)/zs01.o: libpcsxcore/arcade/konami_zs01.cpp libpcsxcore/arcade/konami_zs01_mame.inc libpcsxcore/arcade/konami_zs01.h
 	$(CXX) -std=c++17 $(OPT) -Wall -Wextra -Werror -c $< -o $@
@@ -35,11 +35,14 @@ $(BUILD)/audio: tests/test_system573_audio.c libpcsxcore/arcade/system573_audio.
 $(BUILD)/mas: tests/test_mas3507d.cpp libpcsxcore/arcade/mas3507d.cpp libpcsxcore/arcade/mas3507d.h libpcsxcore/arcade/mas3507d_mame/mas_methods.inc libpcsxcore/arcade/mas3507d_mame/minimp3.h
 	@mkdir -p $(BUILD)
 	$(CXX) -std=c++17 $(OPT) -Wall -Wextra -Werror tests/test_mas3507d.cpp libpcsxcore/arcade/mas3507d.cpp -o $@
-test: $(BUILD)/peripherals $(BUILD)/flash $(BUILD)/audio $(BUILD)/zi-bus $(BUILD)/mas
+$(BUILD)/digital: tests/test_system573_digital.cpp libpcsxcore/arcade/system573_digital.cpp libpcsxcore/arcade/system573_digital.h libpcsxcore/arcade/system573_digital_mame.inc libpcsxcore/arcade/konami_security.h libpcsxcore/arcade/mas3507d.cpp libpcsxcore/arcade/mas3507d.h libpcsxcore/arcade/mas3507d_mame/mas_methods.inc libpcsxcore/arcade/mas3507d_mame/minimp3.h $(BUILD)/security.o
+	$(CXX) -std=c++17 $(OPT) -Wall -Wextra -Werror tests/test_system573_digital.cpp libpcsxcore/arcade/system573_digital.cpp libpcsxcore/arcade/mas3507d.cpp $(BUILD)/security.o -o $@
+test: $(BUILD)/peripherals $(BUILD)/flash $(BUILD)/audio $(BUILD)/zi-bus $(BUILD)/mas $(BUILD)/digital
 	$(BUILD)/peripherals
 	$(BUILD)/flash
 	$(BUILD)/audio
 	$(BUILD)/zi-bus
 	$(BUILD)/mas
+	$(BUILD)/digital
 sanitize:
 	$(MAKE) -f tests/Makefile.system573 BUILD=$(BUILD)/sanitize OPT='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' test

@@ -5,7 +5,8 @@ model and its `mp3_audio` wrapper, including the identical minimp3 header.
 It provides serial MPEG data input, I2C configuration, decoder demand and
 MPEG frame-sync notifications, and normalized float stereo output. This is
 a component for System 573 digital, not a working digital game audio path.
-The native FPGA, its encrypted RAM stream, timer integration and speaker
+The [digital I/O/FPGA component](system573-digital-io.md) now feeds this decoder
+from source encrypted RAM/timer methods; PSX clock integration and speaker
 mixing remain open. The DSP's undumped internal program is not executed.
 
 `mas3507d_generate.py` verifies SHA256 of all five source files from MAME
