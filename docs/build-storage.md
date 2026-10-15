@@ -42,8 +42,25 @@ The excluded `host-fix-obj` caches are rebuilt from the retained source/patches
 and original build commands when needed. This local archive is not a remote
 backup; preserve it when moving or removing the workspace.
 
+On 2026-10-15, another cleanup removed 5,429 generated audio/memory/raw-frame
+captures and rebuildable object files (10.43 GiB allocated), leaving 11.46 GiB
+free. Original media, installed NVRAM, applications and the historical archive
+were retained. Commands, diagnostics, CSV observations, PNGs and capture hashes
+remain; removed raw files are historical evidence and must not be reported as
+freshly reverified. The ignored cleanup manifest is
+`artifacts/disk-cleanup-20261015.jsonl`.
+
 For future work:
 
+- Before every build or validation batch, run
+  `python3 scripts/check_validation_storage.py --reserve-mib N` on the output
+  volume, reserving the estimated total new output. The check refuses batches
+  that would leave less than 10 GiB free; do not bypass that floor.
+- Mac validation raw captures have a 256 MiB budget per batch. Compare and hash
+  the outputs, preserve commands/diagnostics and compact observations, then
+  discard WAV/RAM/VRAM/PPM intermediates. Keep useful PNGs and installed NVRAM.
+  Previously pruned captures need not be regenerated to rerun an evidence-only
+  verifier; its old PASS remains a historical result, not a fresh verification.
 - Reuse the active Mac build directory for incremental builds rather than
   retaining a new complete build for every experiment.
 - Keep one current Vita3K runtime and a separate control only when a comparison
