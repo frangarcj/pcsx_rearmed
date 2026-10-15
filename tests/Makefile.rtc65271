@@ -1,0 +1,15 @@
+CXX ?= c++
+BUILD ?= build/rtc65271-tests
+SOURCES := tests/test_rtc65271.cpp libpcsxcore/arcade/rtc65271.cpp
+HEADERS := libpcsxcore/arcade/rtc65271.h libpcsxcore/arcade/rtc65271_mame.inc
+.PHONY: test sanitize
+$(BUILD)/rtc65271: $(SOURCES) $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CXX) -std=c++17 -O2 -Wall -Wextra -Werror $(SOURCES) -o $@
+$(BUILD)/rtc65271-sanitize: $(SOURCES) $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CXX) -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror $(SOURCES) -o $@
+test: $(BUILD)/rtc65271
+	$(BUILD)/rtc65271
+sanitize: $(BUILD)/rtc65271-sanitize
+	ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $(BUILD)/rtc65271-sanitize

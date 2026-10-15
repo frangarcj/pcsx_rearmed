@@ -97,12 +97,30 @@ delivery is verified, but successful backup initialization is not. The first
 snapshot script's unsupported uppercase PSX `PC` lookup was corrected in the
 subsequent runs; their logs and captured screens are retained separately.
 
-This reference is an initialization checkpoint, not an IIDX player result.
-No RTC/security bytes were supplied as an invented initialized NVRAM seed.
-The original ROM-only sound-board probe likewise injects no main-CPU commands.
+The initial E150 attempts above happened before the sound checks had finished.
+A subsequent Test pulse reaches the real operator menu. Waiting until 65–70
+seconds before pressing Start clears backup through the original program;
+the 120-second run reaches the IIDX 2nd style title / INSERT COIN screen and
+persists 3264 nonzero XRAM bytes. This is independent MAME initialization,
+not a native IIDX player result. No RTC/security bytes were supplied as an
+invented initialized NVRAM seed. The original ROM-only sound-board probe
+likewise injects no main-CPU commands.
+A separate 80-second MAME process restores this runtime backup and reaches
+the title again without any input, confirming that the original program's
+initialization survives a restart.
+
+## RTC component follow-up
+
+The [source RTC65271 port](rtc65271-port.md) now supplies indirect registers,
+all 4 KiB backup RAM, exact update/divider scheduling, alarms/IRQ and source
+NVRAM serialization. O2/ASan/UBSan vectors preserve the pinned source's
+calendar and status quirks. Replaying the actual original-game backup-clear
+trace matches all 14,240 read responses, 35,618 writes, final registers/XRAM
+and the complete 4152-byte MAME NVRAM exactly. The native main-board wiring
+is still pending; a trace replay does not establish native PSX execution.
 
 The remaining native work includes the 4 MiB main PSX profile, 2 MiB VRAM,
-NCR/SCSI DMA and program CD, panel/turntable inputs, RTC65271, watchdog,
+NCR/SCSI DMA and program CD, panel/turntable inputs, RTC65271 wiring, watchdog,
 FDC37C665GT/UART/DVD control, original I2C security and complete speaker
 integration. Original boot, installation, warm state, playable notes and music
 must then be validated on GL/NEON. The full board matrix remains open.
