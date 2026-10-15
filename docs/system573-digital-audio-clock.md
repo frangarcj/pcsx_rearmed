@@ -2,9 +2,11 @@
 
 The native digital profile now connects PSX execution to the source
 FPGA/MAS3507D audio model and the complete SPU/CDDA/digital speaker route.
-Evidence below uses generated MIPS code and synthetic MPEG tones. The original
-Percussion Freaks KAA CD is still missing; original installation, music and
-instrument gameplay remain unverified. See [the board report](system573-mac.md).
+Evidence below uses generated MIPS code and synthetic MPEG tones. Subsequent
+original KAA CD evidence now includes an installation matching MAME, scored
+six-pad GL/NEON gameplay and live SDL playback. Headless original WAVs match; live SPU-effect differences and pending judgement alignment are
+reported separately in [the board report](system573-mac.md). The synthetic
+results below remain separate component evidence.
 
 ## Clock and filter contract
 

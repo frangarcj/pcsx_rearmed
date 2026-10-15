@@ -6,7 +6,9 @@ versus two COMPUTER players in a ship alignment minigame, consume 1902/1902
 input rows and produce identical RAM/SPU WAV with zero device faults. This
 covers the base flash-only board. DDR 2nd Mix now also passes a bounded analog/CD
 P1 run and source-gain SPU/CDDA speaker mix. The digital configuration now has
-original-media cold installation evidence; player validation remains open. Independent MAME 0.287 captures are separate reference evidence.
+original-media cold installation and bounded scored P1 gameplay with live SDL
+playback. Rhythm judgement alignment against MAME remains open. Independent
+MAME 0.287 captures are separate reference evidence.
 
 The full family validation still requires three distinct configurations:
 
@@ -14,7 +16,7 @@ The full family validation still requires three distinct configurations:
 | --- | --- | --- |
 | Hyper Bishi Bashi Champ EAA (`hyperbbc`) | Base board, eight onboard flashes, timekeeper, cassette Y lamp outputs and three-player buttons | Native interpreter GL/NEON P1 minigame, live source-gain SPU/SDL audio and complete flash/NVRAM persistence verified; full P2/P3 gameplay/operator checks pending |
 | Dance Dance Revolution 2nd Mix (`ddr2m`) | Analog daughterboard, CD-ROM, cassette X, dance input multiplexing | Original cassette/CD verified; source CR-589 transport and DDR analog multiplexor integrated. Native GL/NEON cold flash initialization completes and all eight programmed chips match MAME byte for byte. Native warm GL/NEON 1st Stage/PERFECT, 92/92 inputs and original nonzero SPU/CDDA decoding pass. Source gain-1 SPU/CDDA mix passes headless GL/NEON and live SDL. Full song/P2/operator coverage remains separate |
-| Percussion Freaks 4th Mix KAA (`pcnfrk4mk`) | Digital daughterboard, CD-ROM, cassette ZI/serial ID, instrument inputs and multi-session unit | Seven original game/device chips audited, retaining source BAD_DUMP serial/CD status. ZS01/ZI encrypted protocol, original serial readback and FPGA-to-MAS components pass. Native loader/MMIO/drum controls/NV3 pass generated CPU tests on GL/NEON with strict original chip/CD rejection and cold/warm persistence. CPU-clocked digital audio and gain-1 SPU/CDDA/digital mixing now pass synthetic MPEG tests, including identical GL/NEON/live SDL WAVs. Original KAA CD now passes full audit, and native GL/NEON cold installation matches all eight MAME flash chips, mutable ZS01 and the CR-589 update buffer. Original player execution remains in progress |
+| Percussion Freaks 4th Mix KAA (`pcnfrk4mk`) | Digital daughterboard, CD-ROM, cassette ZI/serial ID, instrument inputs and multi-session unit | Seven original game/device chips audited, retaining source BAD_DUMP serial/CD status. ZS01/ZI encrypted protocol, original serial readback and FPGA-to-MAS components pass. Native loader/MMIO/drum controls/NV3 pass generated CPU tests on GL/NEON with strict original chip/CD rejection and cold/warm persistence. CPU-clocked digital audio and gain-1 SPU/CDDA/digital mixing now pass synthetic MPEG tests, including identical GL/NEON/live SDL WAVs. Original KAA CD now passes full audit, and native GL/NEON cold installation matches all eight MAME flash chips, mutable ZS01 and the CR-589 update buffer. Original GL/NEON and live SDL six-pad replays now reach 1st Stage with 1,150 points; full-song results and judgement alignment against MAME remain open |
 
 ## Digital KAA media and cassette component
 
@@ -153,9 +155,9 @@ checks establish synthetic CPU/audio integration, not original game music.
 The pinned multi-session device declares its ROMs but has an empty
 `device_start`, no configured processor and no runtime address map. Auditing
 its original media does not establish emulation of a working external
-multi-session box. The following original run establishes native cold
-installation; actual instrument/player validation remains separate. This row
-remains open in the overall Mac matrix.
+multi-session box. The following original runs establish native cold
+installation and bounded scored drum gameplay separately. Full-song judgement
+alignment and MSU operation remain open in the overall Mac matrix.
 
 The standalone [MAS3507D decoder/I2C port](mas3507d-port.md) now retains the
 actual pinned MAME methods and identical minimp3 decoder. Explicit synthetic
@@ -246,6 +248,86 @@ Player and complete sound replays use an explicit larger harness bound.
 Cold/warm/reference evidence, exact chip comparisons, CD origin and full-media
 test output are under ignored
 `artifacts/boards-mac-20261015/system573/pcnfrk4mk`.
+
+## Original KAA scored drums and live playback
+
+Separate GL and NEON interpreter runs restore copies of the native installation,
+select Flash boot, acknowledge NOTE 605, insert two coins and enter STANDARD.
+The exact 1,495-event replay pulses all six drum inputs for four frames every
+eight frames from 12,800 through 13,776. Both complete 13,800 video frames with
+`--max-blocks 3000000000` and show **1ST STAGE / 1,150 points**, falling notes
+and an active gauge. A matched NEON control retains all 19 boot/coin/start
+events and removes only the pad pulses; all four original score fields remain
+zero at the same 13,800-frame endpoint. This is a bounded input/score check,
+not a full-song clear or rhythm-accuracy benchmark.
+
+The unchanged original score getter at `8008a04c` loads `80349538`; that field
+and `803493fc`, `80349400`, `80349410` all contain 1,150 in each positive run.
+No executable, chart, score or installed game data is patched. Inputs retain
+the pinned source's six active-low masks: `0100`, `0200`, `0400`, `0800`,
+`1000`, `4000` (High Tom, Low Tom, Hi-Hat, Snare, Cymbal, Bass Drum).
+
+Both runs consume 1,495/1,495 events and read 13,260 CD sectors through the real
+CR-589/DMA path. The original encrypted RAM-to-MPEG path reports FPGA `e000`,
+MPEG `4000`, 599 decoded frames, 2,628,289 nonzero digital frames and no device,
+clock or mixer faults. Their 10,158,686-frame speaker captures mix SPU, CDDA
+and digital output at source gain 1. This data disc emits no decoded CDDA;
+the SPU and MPEG sources are both nonzero. One channel sample saturates at
+full scale in the source-gain sum.
+
+Headless GL/NEON WAV files match byte for byte:
+
+| Original replay artifact | SHA256 |
+| --- | --- |
+| Raw SPU WAV | `74fe81f4b975c475be994355c89491cbd4b4b6b328f8a9693f3e9aed7988ba27` |
+| Complete speaker WAV | `e62d9a2427f9c860cdeabc7d9100d8ce7203b593d0b230ec821a8164be252782` |
+
+Whole RAM does **not** match: the retained dumps differ at 92 bytes, including
+calendar/debug copies and challenge-like fields whose provenance is not fully
+traced. The two full NV3 files differ only at three live RTC clock bytes and
+the resulting CRC. Flash, mutable cassette and drive buffer remain identical.
+These differences are reported; no bytes are removed to claim equality.
+
+A separate original live GL/SDL replay consumes the same 1,495 events, shows
+1,150 points in all four score fields, plays the complete source speaker mix
+and reports zero SDL/device errors. Source digital/CD counters match the
+headless runs. Live WAVs first differ at 215.129660 seconds, during drum SPU
+effects: 96,038 raw SPU and 96,037 mixed channel samples differ. Every mixed
+change occurs where raw SPU also changes; subtracting the raw-SPU delta from
+the mixed delta leaves at most one signed PCM LSB. This measured relationship
+does not establish bit-identical live digital-only output. Live raw SPU SHA256
+is `1d576731020891a22589ef67f72138d1cae69e91409155ddbf259870904cac05`;
+live speaker SHA256 is
+`551c0630d5a7be20effbb614d22b221abb2c86019b80bab912eed142d2c9f0f3`.
+A separate manual keyboard run also enters STANDARD with coin/start and plays
+nonzero original audio; manual operation of all six pads is not yet recorded.
+
+Independent MAME enters the same original 1st Stage and shows **120,150**
+points under an approximate time-converted replay. That Lua replay converts
+native frame numbers using a single cold-boot average, so its input events
+are not aligned to native VBlank transitions or the same song phase. The score
+difference remains an open comparison, not a passing judgement oracle or a
+proven oscillator defect. The pinned `konami573`/`drmn4m` source and MAME
+0.287 `-listxml pcnfrk4mk` both declare CPU 67,737,600 Hz, SPU 33,868,800 Hz
+and CDDA 44,100 Hz, matching the native profile/core clock. No clock is changed
+to improve a score.
+
+The extended evidence verifier requires the matched zero-score control,
+original getter/score fields, full event consumption, device diagnostics,
+headless WAV equality and live audio-delta relationship:
+
+```sh
+python3 tests/check_system573_digital_original_harness.py \
+  --evidence-dir artifacts/boards-mac-20261015/system573/pcnfrk4mk --live
+```
+
+This verifies collected original-media artifacts; it does not launch MAME or
+substitute its installed NVRAM. For another native run, start from a **copy**
+of `install-neon.nv` and the retained `player-pads.csv`, then use either native
+harness with `--system573 roms/prepared/pcnfrk4mk --frames 13800
+--max-blocks 3000000000 --inputs INPUT.csv --nvram COPY.nv --audio SPU.wav
+--mixed-audio SPEAKER.wav --dump-ram RAM.bin --output FRAME.ppm`; the GL run
+also uses `--capture-gl`, and the SDL replay adds `--interactive`.
 
 ## Hyper Bishi Bashi media
 
@@ -383,7 +465,8 @@ pending even though their bus/SDL routing is checked.
 
 This base flash representative cannot replace analog/digital CD transport,
 security or sound validation. The analog/CD representative is validated below;
-the digital configuration remains open. Physical Vita is also outside the present Mac evidence.
+full digital judgement/song and MSU coverage remain open. Physical Vita is
+also outside the present Mac evidence.
 Authentic DRC, full-tournament progression and operator checks remain unverified.
 
 
