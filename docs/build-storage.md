@@ -56,6 +56,9 @@ For future work:
   `python3 scripts/check_validation_storage.py --reserve-mib N` on the output
   volume, reserving the estimated total new output. The check refuses batches
   that would leave less than 10 GiB free; do not bypass that floor.
+- The guard also refuses a new batch while WAV/RAM/VRAM/PPM captures remain
+  in `artifacts/`. Preserve compact observations and hashes, then remove those
+  intermediates before proceeding. It does not automatically delete anything.
 - Mac validation raw captures have a 256 MiB budget per batch. Compare and hash
   the outputs, preserve commands/diagnostics and compact observations, then
   discard WAV/RAM/VRAM/PPM intermediates. Keep useful PNGs and installed NVRAM.
@@ -72,6 +75,12 @@ For future work:
   their intermediates automatically.
 - Avoid copying ROMs, previous `build/` trees or accumulated `artifacts/` into
   source snapshots. Store exact inputs once and reference them by hashes.
+- A further cleanup on 2026-10-15 removed 29 raw captures (315.45 MiB allocated)
+  and replaced 13 byte-identical CHD copies with relative links to preserved
+  originals after SHA-256 comparison. This recovered about 2.7 GiB of actual
+  free space in total (APFS copies can share blocks). The operation manifest is
+  `artifacts/disk-cleanup-20261015-followup.jsonl`; source media, installed NVRAM,
+  executables and the historical archive remain available.
 - System GV preparation can use `--link-chd` to reference an audited standalone
   original disc. Full CHD/source checks still run; the prepared manifest records
   the external path, which must remain available. Repreparing a linked profile

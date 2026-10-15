@@ -10,7 +10,10 @@ has already interrupted this work; do not accumulate another set of raw captures
   captures to 256 MiB. Reuse the existing Mac build directories.
 - After comparing a batch, retain its commands, diagnostics, hashes, compact CSV
   observations and useful PNGs; remove generated WAV/RAM/VRAM/PPM intermediates.
+  The storage guard blocks the next batch while any such files remain in
+  `artifacts/`. Finish cleanup before starting another run.
   Do not rerun old tests just to restore captures removed for disk cleanup.
 - Preserve source, original ROMs/CHDs, installed NVRAM, runnable applications and
   the historical source/executable archive. Never remove these as disposable
   captures. Do not make another media copy when an existing input suffices.
+  Prepared CHDs must reference the verified original rather than duplicate it.
