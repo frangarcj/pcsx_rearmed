@@ -3,7 +3,8 @@
 `libpcsxcore/arcade/konami_zs01.cpp` exposes the pinned MAME ZS01 pin protocol
 through a standalone C API. This is MAME's high-level model of the security
 cassette PIC, not execution of its firmware. It is a component for the System
-573 digital configuration; it is not yet connected to a native game profile.
+573 digital configuration and is now connected to its native CPU/MMIO profile.
+Original-game acceptance of the cassette remains unverified.
 
 `system573_flash_init_zi` now wires that chip and the timed DS2401 into the
 shared board bus. Security D1/D2/D3 drive clock/select/reset, D4 drives the
@@ -15,8 +16,8 @@ low-byte pin callbacks. Both original images remain mandatory.
 The board owns elapsed microsecond time for the one-wire timers, rejects
 overflow, and restarts transient cassette timing on reset while retaining
 EEPROM/serial bytes. ZI does not execute Y lamp callbacks or the DDR analog
-stage multiplexor. This does not add a normal digital game loader or replace
-its missing CD/audio path.
+stage multiplexor. Native loader/MMIO/NVRAM integration is tracked separately
+in `system573-mac.md`; the original CD and native digital audio remain open.
 
 The constructor requires both a complete 140-byte ZS01 image and an eight-byte
 DS2401 serial image. The ZS01 layout is reset response 4, command key 8, data

@@ -18,6 +18,7 @@
 #include "arcade/system573_flash.h"
 #include "arcade/psx_sio.h"
 #include "arcade/system573_audio.h"
+#include "arcade/system573_digital.h"
 #ifdef HAVE_CHD
 #include "arcade/atapi_cr589.h"
 #include "arcade/chd_cd.h"
@@ -33,6 +34,9 @@
 static struct {
     System573Flash bus;
     uint8_t *media[11],*fetch,*cassette_image;
+    uint8_t *cassette_serial,*digital_id,*msu_flash,*msu_rtc;
+    System573Digital *digital;
+    uint8_t drum_outputs[10];
 #ifdef HAVE_CHD
     ChdCd *cd;AtapiCr589 *drive;
     uint64_t dma_due,dma_words,dma_transfers;uint32_t dma_base,dma_size;
@@ -48,28 +52,64 @@ static struct {
 static const struct {const char *file;size_t bytes;uint32_t crc;} media[]={
 #include "arcade/system573_media.inc"
 };
+static const struct {const char *file;size_t bytes;uint32_t crc;} digital_media[]={
+    {"main.bin",524288,0x11812ef8},{"h8_response.bin",64,0x131e0359},
+    {"cassette.bin",140,0x2b0efc90},{"serial.bin",8,0xce84419e},
+    {"digital_id.bin",8,0x2b977f4d},{"msu_flash.bin",524288,0xb70c65b0},{"msu_timekeeper.bin",8192,0x609ef020}
+};
 static int config(const char *dir){
     static const char *lines[]={"format=pcsx-aow-system573-flash-v1","mame_set=hyperbbc","mame_parent=sys573","bios=std",
         "cpu=CXD8530CQ","cpu_clock_hz=67737600","gpu=CXD8561Q","gpu_clock_hz=53693175",
         "ram_size=4194304","vram_size=2097152","flash_chips=8","flash_chip_size=2097152",
         "flash_bus_width=16","cassette=Y","cdrom_present=false","board_execution_verified=false"};
-    char path[4096],line[512];unsigned seen[2]={0,0};int valid[2]={1,1};
+    char path[4096],line[512];unsigned seen[3]={0,0,0};int valid[3]={1,1,1};
     static const char *cd_lines[]={"format=pcsx-aow-system573-cd-v1","mame_set=ddr2m","cassette=X","cdrom_present=true"};
+    static const char *digital_lines[]={"format=pcsx-aow-system573-digital-v1","mame_set=pcnfrk4mk","cassette=ZI","cdrom_present=true"};
     if(snprintf(path,sizeof(path),"%s/board.ini",dir)>=(int)sizeof(path))return -1;
     FILE *f=fopen(path,"r");if(!f)return -1;
     while(fgets(line,sizeof(line),f)){
         line[strcspn(line,"\r\n")]=0;if(!*line || *line=='#')continue;
-        for(unsigned profile=0;profile<2;profile++)if(valid[profile]){
+        for(unsigned profile=0;profile<3;profile++)if(valid[profile]){
             unsigned i;for(i=0;i<16;i++){
                 const char *expected=lines[i];
-                if(profile){if(i==0)expected=cd_lines[0];if(i==1)expected=cd_lines[1];if(i==13)expected=cd_lines[2];if(i==14)expected=cd_lines[3];}
+                if(profile){const char *const *extra=profile==2?digital_lines:cd_lines;
+                    if(i==0)expected=extra[0];if(i==1)expected=extra[1];if(i==13)expected=extra[2];if(i==14)expected=extra[3];
+                    if(profile==2 && i==2)expected="mame_parent=pcnfrk4m";}
                 if(!strcmp(line,expected))break;
             }
             if(i==16 || (seen[profile]&(1u<<i)))valid[profile]=0;else seen[profile]|=1u<<i;
         }
     }
     int bad=ferror(f);fclose(f);if(bad)return -1;
-    for(unsigned profile=0;profile<2;profile++)if(valid[profile] && seen[profile]==0xffff)return profile;return -1;
+    for(unsigned profile=0;profile<3;profile++)if(valid[profile] && seen[profile]==0xffff)return profile;return -1;
+}
+static void drum_output(void *opaque,unsigned line,int level){
+    (void)opaque;
+    switch(line){
+    case 0:case 16:board.drum_outputs[0]=!level;break; /* hi-hat */
+    case 1:case 17:board.drum_outputs[1]=!level;break;
+    case 2:case 18:board.drum_outputs[2]=!level;break;
+    case 3:case 19:board.drum_outputs[3]=!level;break;
+    case 8:case 30:board.drum_outputs[4]=!level;break;
+    case 9:case 31:board.drum_outputs[5]=level;break;
+    case 11:case 27:board.drum_outputs[6]=level;break;
+    case 12:case 20:board.drum_outputs[7]=!level;break;
+    case 13:case 21:board.drum_outputs[8]=level;break;
+    case 14:case 22:board.drum_outputs[9]=level;break;
+    }
+}
+static int digital_bus(u32 a,unsigned w,u32 *v,int write){
+    if(!board.digital || a<0x1f640000 || a>=0x1f640100)return 0;
+    u32 raw=0;
+    for(unsigned byte=0;byte<w;byte+=2){
+        unsigned shift=(a&1)*8,offset=(a+byte-0x1f640000)&~1u;
+        /* Pinned MAME PSX address spaces/maps default to unmapped zero. */
+        uint16_t data=write?(uint16_t)((*v>>(8*byte))<<shift):0;
+        int r=write?system573_digital_write16(board.digital,offset,data):system573_digital_read16(board.digital,offset,&data);
+        if(r<0)board.fault=1;
+        if(!write)raw|=(u32)(data>>shift)<<(8*byte);
+    }
+    if(!write)*v=w==1?raw&255:raw;return 1;
 }
 static void sio_irq(void *opaque,int level){
     unsigned port=(unsigned)(uintptr_t)opaque;
@@ -98,6 +138,21 @@ static int disc_info(void *cd,unsigned track,AtapiTrack *out){
     *out=(AtapiTrack){t.type,t.frames,t.pregap,t.pregap_data_bytes,0};return 1;
 }
 static int disc_raw(void *cd,uint32_t lba,uint8_t *out){return chd_cd_read_raw_sector(cd,lba,out);}
+/* An explicitly synthetic CPU fixture has a physical empty drive. No read
+ * returns successful media, tracks, sectors or audio. Normal profiles require
+ * their original CHD and never reach these callbacks. */
+static int empty_present(void *p){(void)p;return 0;}
+static uint64_t empty_sequence(void *p){(void)p;return 0;}
+static int empty_sector(void *p,uint32_t lba,uint8_t *out){(void)p;(void)lba;(void)out;return 0;}
+static uint32_t empty_track(void *p,unsigned track){(void)p;(void)track;return 0;}
+static unsigned empty_last(void *p){(void)p;return 0;}
+static uint8_t empty_adr(void *p,unsigned track){(void)p;(void)track;return 0;}
+static int empty_audio(void *p,unsigned track){(void)p;(void)track;return 0;}
+static void empty_start(void *p,uint32_t a,uint32_t n){(void)p;(void)a;(void)n;}
+static void empty_pause(void *p,int v){(void)p;(void)v;}
+static void empty_status(void *p,nscsi_cd_audio_status_t *s){(void)p;memset(s,0,sizeof(*s));}
+static void empty_gain(void *p,unsigned channel,float v){(void)p;(void)channel;(void)v;}
+static int empty_info(void *p,unsigned track,AtapiTrack *out){(void)p;(void)track;(void)out;return 0;}
 static void disc_pcm(void *opaque,int16_t left,int16_t right){
     (void)opaque;board.cdda_frames++;board.cdda_nonzero+=left!=0 || right!=0;
     unsigned l=left<0?-left:left,r=right<0?-right:right;
@@ -134,29 +189,44 @@ static int load_board(const char *dir,int synthetic){
 #ifdef PCSX_SYSTEM_GNET
     if(systemgnet_active())return -1;
 #endif
-    int profile=config(dir);if(profile<0 || (profile && synthetic)){fprintf(stderr,"System573: invalid or unsupported original profile\n");return -1;}
+    int profile=config(dir);if(profile<0 || (synthetic==1 && profile!=0) || (synthetic==2 && profile!=2)){fprintf(stderr,"System573: invalid or unsupported original profile\n");return -1;}
     board.cd_profile=profile;
     system573_audio_init(&board.audio);
 #ifndef HAVE_CHD
-    if(profile){fprintf(stderr,"System573: original DDR disc requires HAVE_CHD\n");return -1;}
+    if(profile){fprintf(stderr,"System573: original CD profile requires HAVE_CHD\n");return -1;}
 #endif
     if(!profile){
         for(unsigned i=0;i<11;i++)if(original_file(dir,media[i].file,media[i].bytes,media[i].crc,synthetic,&board.media[i]))goto bad;
     }else {
-        if(original_file(dir,"main.bin",0x80000,0x11812ef8,0,&board.media[0]) ||
+        if(profile==1 && (original_file(dir,"main.bin",0x80000,0x11812ef8,0,&board.media[0]) ||
            original_file(dir,"h8_response.bin",64,0x131e0359,0,&board.media[1]) ||
-           original_file(dir,"cassette.bin",548,0x5d906be5,0,&board.cassette_image))goto bad;
-        /* No flash or RTC ROM region is declared for DDR. Preserve original
+           original_file(dir,"cassette.bin",548,0x5d906be5,0,&board.cassette_image)))goto bad;
+        if(profile==2){
+            uint8_t **targets[]={&board.media[0],&board.media[1],&board.cassette_image,&board.cassette_serial,&board.digital_id,&board.msu_flash,&board.msu_rtc};
+            for(unsigned i=0;i<7;i++)if(original_file(dir,digital_media[i].file,digital_media[i].bytes,digital_media[i].crc,synthetic==2,targets[i]))goto bad;
+        }
+        /* No flash or RTC ROM region is declared for either CD profile. Preserve original
          * source device defaults; installation must run on the guest CPU. */
         for(unsigned i=2;i<11;i++){size_t size=i==10?8192:0x200000;board.media[i]=malloc(size);if(!board.media[i])goto bad;memset(board.media[i],0xff,size);}
 #ifdef HAVE_CHD
-        char path[4096],error[256];if(snprintf(path,sizeof(path),"%s/895jaa02.chd",dir)>=(int)sizeof(path))goto bad;
-        chd_cd_config_t cc={disc_pcm,NULL};board.cd=chd_cd_open(path,&cc,error,sizeof(error));
-        if(!board.cd){fprintf(stderr,"System573 CD: %s\n",error);goto bad;}
-        if(!chd_cd_set_clocked_pcm_sink(board.cd,disc_clocked_pcm,NULL))goto bad;
-        if(!chd_cd_verify_sha1(board.cd,"cfe3a6f3ed62ba388b07045e29e22472d17dcfe4"))goto bad;
-        AtapiCr589Config ac={0};if(!chd_cd_get_media_ops(board.cd,&ac.media))goto bad;
-        ac.track_info=disc_info;ac.read_raw=disc_raw;ac.irq=ata_irq;
+        AtapiCr589Config ac={0};
+        if(synthetic==2){
+            ac.media=(nscsi_cd_media_ops_t){NULL,empty_present,empty_sequence,empty_sector,empty_track,empty_last,
+                empty_track,empty_adr,empty_audio,empty_start,empty_pause,empty_status,empty_gain};
+            ac.track_info=empty_info;ac.read_raw=empty_sector;
+        }else{
+            char path[4096],error[256];const char *disc=profile==2?"a25kaa02.chd":"895jaa02.chd";
+            if(snprintf(path,sizeof(path),"%s/%s",dir,disc)>=(int)sizeof(path))goto bad;
+            chd_cd_config_t cc={disc_pcm,NULL};board.cd=chd_cd_open(path,&cc,error,sizeof(error));
+            if(!board.cd){fprintf(stderr,"System573 CD: %s\n",error);goto bad;}
+            if(!chd_cd_set_clocked_pcm_sink(board.cd,disc_clocked_pcm,NULL))goto bad;
+            if(profile==1 && !chd_cd_verify_sha1(board.cd,"cfe3a6f3ed62ba388b07045e29e22472d17dcfe4"))goto bad;
+            if(profile==2 && !chd_cd_verify_sha1(board.cd,"6c9084773c6964e794bd096822da4413aa7305ef")){
+                fprintf(stderr,"System573 KAA original CD SHA mismatch\n");goto bad;}
+            if(!chd_cd_get_media_ops(board.cd,&ac.media))goto bad;
+            ac.track_info=disc_info;ac.read_raw=disc_raw;
+        }
+        ac.irq=ata_irq;
         board.drive=atapi_cr589_create(&ac);if(!board.drive)goto bad;
 #endif
     }
@@ -164,23 +234,31 @@ static int load_board(const char *dir,int synthetic){
     /* Exact source Y factory default applies only to Hyperbbc (no region). */
     uint8_t factory[132]={0x19,0,0xaa,0x55};
     time_t now=time(NULL);struct tm local;if(!localtime_r(&now,&local))goto bad;
-    if(system573_flash_init_cassette(&board.bus,chips,board.media[10],board.media[1],profile?board.cassette_image:factory,profile?KONAMI_X76F041:KONAMI_X76F100,&local))goto bad;
+    if(profile==2){
+        if(system573_flash_init_zi(&board.bus,chips,board.media[10],board.media[1],board.cassette_image,140,board.cassette_serial,8,&local))goto bad;
+        board.digital=system573_digital_create(board.digital_id,8,0,drum_output,NULL);if(!board.digital)goto bad;
+    }else if(system573_flash_init_cassette(&board.bus,chips,board.media[10],board.media[1],profile?board.cassette_image:factory,profile?KONAMI_X76F041:KONAMI_X76F100,&local))goto bad;
     psx_sio_callbacks_t cb={0};cb.irq=sio_irq;
     for(unsigned p=0;p<2;p++){cb.opaque=(void *)(uintptr_t)p;if(psx_sio_create(p?PSX_SIO1:PSX_SIO0,&cb,&board.sio[p]))goto bad;}
     psx_sio_write_dsr(board.sio[1],0); /* Source cassette Y DSR. */
     board.fetch=malloc(0x400000);if(!board.fetch || gpu_set_model(2) || gpu_set_vram_height(1024))goto bad;
     board.old_ram=psxRamSize;board.old_rom=psxRomSize;psxRamSize=0x400000;psxRomSize=0x80000;
     Config.HLE=FALSE;board.active=1;board.synthetic=synthetic;
-    if(profile)fprintf(stderr,"System573 ddr2m: original BIOS/H8 response/cassette CRCs matched; original CD SHA matched; cassette/CD retain source BAD_DUMP status; flash/RTC source defaults\n");
+    if(profile==2)fprintf(stderr,"System573 pcnfrk4mk: %s; ZI/digital I/O/drum controls; MSU declared ROMs audited, source device has no execution map; native digital audio clock/mix pending\n",synthetic?"generated MIPS fixture, empty drive, not original game evidence":"seven original chip CRCs and original CD SHA matched; serial/CD retain source BAD_DUMP");
+    else if(profile)fprintf(stderr,"System573 ddr2m: original BIOS/H8 response/cassette CRCs matched; original CD SHA matched; cassette/CD retain source BAD_DUMP status; flash/RTC source defaults\n");
     else fprintf(stderr,"System573 hyperbbc: %s; cassette Y source factory default (no EEPROM dump), no CD-ROM\n",synthetic?"generated MIPS fixture, not original ROM evidence":"eleven source ROM CRCs matched; H8 response dump");
     return 0;
 bad:system573_unload();return -1;
 }
 int system573_load(const char *dir){return load_board(dir,0);}
 int system573_test_load(const char *dir){return load_board(dir,1);}
+int system573_test_load_digital(const char *dir){return load_board(dir,2);}
 int system573_active(void){return board.active;}
 int system573_has_cd(void){return board.active && board.cd_profile;}
+int system573_has_digital(void){return board.active && board.digital!=NULL;}
+unsigned system573_players(void){return board.cd_profile==2?1:board.cd_profile==1?2:3;}
 void system573_set_audio_output(void (*sink)(void *,const int16_t *,unsigned),void *opaque){
+    if(board.digital && sink){fprintf(stderr,"System573 digital speaker clock/mix not integrated yet\n");board.fault=1;return;}
     system573_audio_set_sink(&board.audio,sink,opaque);
 }
 int system573_audio_spu_output(const int16_t *stereo,unsigned frames,u32 end_cycle){
@@ -199,10 +277,12 @@ int system573_audio_flush_output(void){
 }
 void system573_unload(void){
     system573_flash_destroy(&board.bus);
+    system573_digital_destroy(board.digital);
 #ifdef HAVE_CHD
     atapi_cr589_destroy(board.drive);chd_cd_close(board.cd);
 #endif
     for(unsigned i=0;i<11;i++)free(board.media[i]);free(board.fetch);free(board.cassette_image);
+    free(board.cassette_serial);free(board.digital_id);free(board.msu_flash);free(board.msu_rtc);
     for(unsigned p=0;p<2;p++)psx_sio_destroy(board.sio[p]);
     if(board.active){psxRamSize=board.old_ram;psxRomSize=board.old_rom;}memset(&board,0,sizeof(board));
 }
@@ -214,6 +294,7 @@ void system573_mem_reset(void){
 }
 void system573_reset(void){
     if(!board.active)return;board.last_cycle=psxRegs.cycle;system573_flash_reset(&board.bus);map_flash();
+    system573_digital_reset(board.digital);
     /* Source SIO has no device_reset override; preserve its timer/pin state. */
     psx_sio_write_dsr(board.sio[1],0);
 #ifdef HAVE_CHD
@@ -225,11 +306,12 @@ int system573_sync(u32 cycle){
     uint32_t delta=cycle-board.last_cycle;board.last_cycle=cycle;board.cycles+=delta;
     uint64_t numerator=(uint64_t)delta*1000000+board.fraction;uint64_t elapsed=numerator/PSXCLK;board.fraction=numerator%PSXCLK;board.us+=elapsed;
     system573_flash_advance_us(&board.bus,elapsed);
+    if(board.digital && system573_digital_advance_to(board.digital,board.us*1000+board.fraction*1000/PSXCLK))board.fault=1;
     for(unsigned p=0;p<2;p++)if(psx_sio_advance_to_cycle(board.sio[p],board.cycles))board.fault=1;
 #ifdef HAVE_CHD
     if(board.drive){
         uint64_t ns=board.us*1000+board.fraction*1000/PSXCLK;
-        if(atapi_cr589_advance_to(board.drive,ns) || !chd_cd_advance_to(board.cd,ns))board.fault=1;
+        if(atapi_cr589_advance_to(board.drive,ns) || (board.cd && !chd_cd_advance_to(board.cd,ns)))board.fault=1;
         if(board.dma_due && board.cycles>=board.dma_due){
             board.dma_due=0;
             if(!psxRegs.ptrs.psxM || board.dma_base>0x400000 || board.dma_size>(0x400000-board.dma_base)/4)board.fault=1;
@@ -257,6 +339,7 @@ int system573_read(u32 a,unsigned w,u32 *v){
     if((a<0x1f000000 || a>=0x1f700000) && (a<0x1f801040 || a>=0x1f801060))return 0;
     if((w!=1 && w!=2 && w!=4) || (a&(w-1))){board.fault=1;*v=UINT32_MAX;return 1;}
     system573_sync(psxRegs.cycle);int r=sio_bus(a,w,v,0);
+    if(!r)r=digital_bus(a,w,v,0);
 #ifdef HAVE_CHD
     if(!r)r=ata_bus(a,w,v,0);
 #endif
@@ -268,6 +351,7 @@ int system573_write(u32 a,unsigned w,u32 v){
     if((a<0x1f000000 || a>=0x1f700000) && (a<0x1f801040 || a>=0x1f801060))return 0;
     if((w!=1 && w!=2 && w!=4) || (a&(w-1))){board.fault=1;return 1;}
     system573_sync(psxRegs.cycle);unsigned old_bank=board.bus.control&63;int r=sio_bus(a,w,&v,1);
+    if(!r)r=digital_bus(a,w,&v,1);
 #ifdef HAVE_CHD
     if(!r)r=ata_bus(a,w,&v,1);
 #endif
@@ -293,6 +377,21 @@ int system573_write(u32 a,unsigned w,u32 v){
 }
 int system573_set_input(const char *name,int pressed){
     if(!board.active || !name || (pressed!=0 && pressed!=1))return -1;
+    if(board.digital){
+        unsigned port=2,mask=0;
+        static const unsigned drums[]={0x100,0x200,0x400,0x800,0x1000,0x4000};
+        static const char *names[]={"high_tom","low_tom","hi_hat","snare","cymbal","bass_drum"};
+        for(unsigned i=0;i<6;i++)if(!strcmp(name,names[i]) ||
+            (!strncmp(name,"p1button",8) && name[8]=='1'+i && !name[9]))mask=drums[i];
+        if(!strcmp(name,"p1start"))mask=0x8000;
+        else if(!strcmp(name,"p1left") || !strcmp(name,"select_left"))mask=1;
+        else if(!strcmp(name,"p1right") || !strcmp(name,"select_right"))mask=2;
+        else if(!strcmp(name,"coin1")){port=1;mask=0x01000000;}
+        else if(!strcmp(name,"service1")){port=1;mask=0x10000000;}
+        else if(!strcmp(name,"test")){port=3;mask=0x400;}
+        else if(!strcmp(name,"boot_cd")){if(pressed)board.bus.input[1]|=8;else board.bus.input[1]&=~8u;return 0;}
+        if(!mask)return -1;if(pressed)board.bus.input[port]&=~mask;else board.bus.input[port]|=mask;return 0;
+    }
     unsigned port=0,mask=0;
     if(!strcmp(name,"coin1")){port=1;mask=0x01000000;}
     else if(!strcmp(name,"coin2")){port=1;mask=0x02000000;}
@@ -319,8 +418,9 @@ int system573_set_input(const char *name,int pressed){
     }
     if(!mask)return -1;if(pressed)board.bus.input[port]&=~mask;else board.bus.input[port]|=mask;return 0;
 }
-size_t system573_nvram_size(void){return board.cd_profile?32u+0x1000000u+8192u+548u+65536u:SYSTEM573_NVRAM_SIZE;}
-static const char *nv_header(void){return board.cd_profile?"S573NV2\0ddr2m\0\0\0":"S573NV1\0hyperbbc";}
+static unsigned cassette_bytes(void){return board.digital?140:board.cd_profile?548:132;}
+size_t system573_nvram_size(void){return board.cd_profile?32u+0x1000000u+8192u+cassette_bytes()+65536u:SYSTEM573_NVRAM_SIZE;}
+static const char *nv_header(void){return board.digital?"S573NV3\0PF4KAA\0\0":board.cd_profile?"S573NV2\0ddr2m\0\0\0":"S573NV1\0hyperbbc";}
 int system573_nvram_import(const unsigned char *image,size_t size){
     if(!board.active || !image || size!=system573_nvram_size() ||
        memcmp(image,nv_header(),16))return -1;
@@ -329,13 +429,18 @@ int system573_nvram_import(const unsigned char *image,size_t size){
     for(unsigned i=24;i<32;i++)if(image[i])return -1;
     if(length!=size || stored!=crc32(0,image+32,size-32))return -1;
     const uint8_t *payload=image+32;
-    KonamiSecureFlash *next=konami_secure_flash_create(board.cd_profile?KONAMI_X76F041:KONAMI_X76F100,payload+0x1002000,board.cd_profile?548:132);if(!next)return -1;
+    KonamiSecureFlash *next=NULL;KonamiZS01 *next_z=NULL;
+    if(board.digital)next_z=konami_zs01_create(payload+0x1002000,140,board.cassette_serial,8);
+    else next=konami_secure_flash_create(board.cd_profile?KONAMI_X76F041:KONAMI_X76F100,payload+0x1002000,cassette_bytes());
+    if(!next && !next_z)return -1;
 #ifdef HAVE_CHD
-    if(board.cd_profile && atapi_cr589_nvram_import(board.drive,payload+0x1002000+548,65536)){konami_secure_flash_destroy(next);return -1;}
+    if(board.cd_profile && atapi_cr589_nvram_import(board.drive,payload+0x1002000+cassette_bytes(),65536)){
+        konami_secure_flash_destroy(next);konami_zs01_destroy(next_z);return -1;}
 #endif
     for(unsigned i=0;i<8;i++)memcpy(board.media[i+2],payload+i*0x200000,0x200000);
     m48t58_nvram_import(&board.bus.rtc,payload+0x1000000);
-    konami_secure_flash_destroy(board.bus.cassette);board.bus.cassette=next;
+    if(board.digital){konami_zs01_destroy(board.bus.zs01);board.bus.zs01=next_z;}
+    else {konami_secure_flash_destroy(board.bus.cassette);board.bus.cassette=next;}
     board.nvram_loaded=1;map_flash();return 0;
 }
 int system573_nvram_export(unsigned char *image,size_t size){
@@ -344,15 +449,26 @@ int system573_nvram_export(unsigned char *image,size_t size){
     uint8_t *payload=image+32;
     for(unsigned i=0;i<8;i++)memcpy(payload+i*0x200000,board.media[i+2],0x200000);
     memcpy(payload+0x1000000,board.bus.rtc.ram,8192);
-    if(konami_secure_flash_get_image(board.bus.cassette,payload+0x1002000,board.cd_profile?548:132))return -1;
+    if(board.digital){if(konami_zs01_get_image(board.bus.zs01,payload+0x1002000,140))return -1;}
+    else if(konami_secure_flash_get_image(board.bus.cassette,payload+0x1002000,cassette_bytes()))return -1;
 #ifdef HAVE_CHD
-    if(board.cd_profile && atapi_cr589_nvram_export(board.drive,payload+0x1002000+548,65536))return -1;
+    if(board.cd_profile && atapi_cr589_nvram_export(board.drive,payload+0x1002000+cassette_bytes(),65536))return -1;
 #endif
     uint32_t crc=crc32(0,payload,size-32);
     for(unsigned i=0;i<4;i++){image[16+i]=size>>(8*i);image[20+i]=crc>>(8*i);}return 0;
 }
 int system573_selftest(void){
     if(!board.active)return -1;u32 v;
+    if(board.digital){
+        const unsigned masks[]={0x100,0x200,0x400,0x800,0x1000,0x4000};
+        for(unsigned i=0;i<6;i++){char name[16];snprintf(name,sizeof(name),"p1button%u",i+1);
+            if(system573_set_input(name,1) || !system573_read(0x1f400008,4,&v) || v!=(0xffffu&~masks[i]))return -1;
+            system573_set_input(name,0);}
+        if(system573_set_input("p1left",1) || !system573_read(0x1f400008,4,&v) || v!=0xfffe)return -1;
+        system573_set_input("p1left",0);
+        if(system573_set_input("coin2",1)!=-1 || system573_set_input("p2start",1)!=-1 || system573_set_input("p1up",1)!=-1)return -1;
+        fprintf(stderr,"System573 digital drum/select/input selftest PASS\n");return 0;
+    }
     if(board.cd_profile){
         if(system573_set_input("p1left",1) || !system573_read(0x1f400008,4,&v) || v!=0xfeff)return -1;
         system573_set_input("p1left",0);if(system573_set_input("p3start",1)!=-1)return -1;
@@ -387,7 +503,9 @@ int system573_dma5(u32 madr,u32 bcr,u32 chcr){
 }
 void system573_report(FILE *out){
     if(!board.active || !out)return;
-    fprintf(out,"System573: profile=%s RAM=4194304 VRAM=2097152 bank=%u control=%04x security=%04x faults=%u media=%s H8_response=%s H8_firmware=NO_DUMP cassette_seed=%s CDROM=%s NVRAM=%s\n",board.cd_profile?"ddr2m":"hyperbbc",board.bus.control&63,board.bus.control,board.bus.security,board.fault|board.bus.faults,board.synthetic?"SYNTHETIC_FIXTURE":"SOURCE_CRC_VERIFIED",board.synthetic?"GENERATED":"SOURCE_DUMP",board.cd_profile?"SOURCE_BAD_DUMP":"SOURCE_FACTORY_DEFAULT",board.cd_profile?"SOURCE_BAD_DUMP":"ABSENT",board.nvram_loaded?"RESTORED":"SOURCE_SEED");
+    fprintf(out,"System573: profile=%s RAM=4194304 VRAM=2097152 bank=%u control=%04x security=%04x faults=%u media=%s H8_response=%s H8_firmware=NO_DUMP cassette_seed=%s CDROM=%s NVRAM=%s\n",board.digital?"pcnfrk4mk":board.cd_profile?"ddr2m":"hyperbbc",board.bus.control&63,board.bus.control,board.bus.security,board.fault|board.bus.faults,board.synthetic?"SYNTHETIC_FIXTURE":"SOURCE_CRC_VERIFIED",board.synthetic?"GENERATED":"SOURCE_DUMP",board.digital?board.synthetic?"SYNTHETIC_FIXTURE":"SOURCE_DUMP":board.cd_profile?"SOURCE_BAD_DUMP":"SOURCE_FACTORY_DEFAULT",board.synthetic==2?"EMPTY_FIXTURE_DRIVE":board.cd_profile?"SOURCE_BAD_DUMP":"ABSENT",board.nvram_loaded?"RESTORED":"SOURCE_SEED");
+    if(board.digital){System573DigitalStatus s;system573_digital_get_status(board.digital,&s);
+        fprintf(out,"System573 digital: RAM=33554432 RAM_ptr=%08x/%08x FPGA=%04x MPEG=%04x frames=%u byte_count=%"PRIu64" faults=%u native_audio_clock=PENDING speaker_mix=PENDING drums=%u%u%u%u%u%u%u%u%u%u\n",s.ram_read_address,s.ram_write_address,s.fpga_control,s.mpeg_status,s.frame_counter,s.bytes_sent,s.faults,board.drum_outputs[0],board.drum_outputs[1],board.drum_outputs[2],board.drum_outputs[3],board.drum_outputs[4],board.drum_outputs[5],board.drum_outputs[6],board.drum_outputs[7],board.drum_outputs[8],board.drum_outputs[9]);}
 #ifdef HAVE_CHD
     if(board.drive){AtapiCr589Status st;atapi_cr589_get_status(board.drive,&st);
         fprintf(out,"System573 CD: packets=%"PRIu64" sectors=%"PRIu64" status=%02x command=%02x faults=%u DMA_transfers=%"PRIu64" DMA_words=%"PRIu64" stage_edges=%"PRIu64"\n",st.packets,st.sectors,st.status,st.packet_command,st.faults,board.dma_transfers,board.dma_words,board.bus.stage_edges);

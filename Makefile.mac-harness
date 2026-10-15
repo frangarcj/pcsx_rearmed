@@ -161,6 +161,11 @@ CXX_STANDARD = c++17
 system573-test: $(TARGET)
 	$(MAKE) -f tests/Makefile.system573 BUILD=$(BUILD)/system573-tests test
 	python3 tests/check_system573_harness.py --harness $(TARGET)
+ifeq ($(HAVE_CHD),1)
+	python3 tests/check_system573_digital_harness.py --harness $(TARGET)
+else
+	python3 tests/check_system573_digital_harness.py --harness $(TARGET) --reject-cd
+endif
 metro-zn-test: $(TARGET)
 	python3 scripts/generate_metro_zn_profiles.py --check
 	$(MAKE) -f tests/Makefile.metro-zn-bus test

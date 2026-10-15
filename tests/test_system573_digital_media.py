@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 import audit_system573_digital_media as board
 import prepare_mame_psx as mame
+import prepare_system573_digital_board as native
 ORIGINAL_NAMES = {'main.bin': '700a01.22g', 'h8_response.bin': 'h8a01.bin',
                   'cassette.bin': 'gka25kaa.u1', 'serial.bin': 'gea25aaa.u6',
                   'digital_id.bin': 'digital-id.bin', 'msu_flash.bin': 'flash.20t',
@@ -32,6 +33,25 @@ class DigitalMedia(unittest.TestCase):
             with self.assertRaises(mame.PreparationError):
                 board.source_profile(ROOT.parent / 'mamedev', name, bios)
 
+    def test_native_crc_checks_match_all_source_devices(self):
+        import re
+        romset, _, bios = board.source_profile(ROOT.parent / 'mamedev')
+        specs = [f for f in romset.files if f.bios_id is None or romset.bios[f.bios_id] == bios]
+        for device in board.source_device_profiles(ROOT.parent / 'mamedev').values():
+            specs.extend(device.files)
+        outputs = {'700a01.22g': 'main.bin', 'h8a01.bin': 'h8_response.bin', 'gka25kaa.u1': 'cassette.bin',
+                   'gka25kaa.u6': 'serial.bin', 'digital-id.bin': 'digital_id.bin',
+                   'flash.20t': 'msu_flash.bin', 'm48t58y.6t': 'msu_timekeeper.bin'}
+        expected = {outputs[f.filename]: (f.expected_size, int(f.crc32,16)) for f in specs}
+        text = (ROOT / 'libpcsxcore/system573.c').read_text()
+        body = re.search(r'digital_media\[\]=\{(.*?)\};', text, re.S)[1]
+        actual = {name: (int(size), int(crc,16)) for name,size,crc in re.findall(r'\{"([^"]+)",(\d+),0x([0-9a-f]+)\}', body)}
+        self.assertEqual(expected, actual)
+        self.assertIn('chd_cd_verify_sha1(board.cd,"' + board.DISK_SHA + '")', text)
+        profile = native.configuration()
+        self.assertEqual(16, len(profile))
+        self.assertEqual(('pcnfrk4m','ZI','true'), tuple(profile[k] for k in ('mame_parent','cassette','cdrom_present')))
+
     def original_payloads(self):
         rompath = ROOT / 'roms'
         if not all((rompath / name).is_file() for name in ['sys573.zip', 'pcnfrk4mk.zip', 'pcnfrk4m.zip',
@@ -48,6 +68,14 @@ class DigitalMedia(unittest.TestCase):
         self.assertEqual({'main.bin': 524288, 'h8_response.bin': 64, 'cassette.bin': 140, 'serial.bin': 8,
                           'digital_id.bin': 8, 'msu_flash.bin': 524288, 'msu_timekeeper.bin': 8192},
                          {k: len(v) for k, v in payloads.items()})
+
+    def test_normal_preparer_refuses_rom_only_publication(self):
+        self.original_payloads()
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / 'not-published'
+            with self.assertRaisesRegex(mame.PreparationError, 'CD.*missing'):
+                native.prepare(ROOT.parent / 'mamedev', ROOT / 'roms', output)
+            self.assertFalse(output.exists())
 
     def test_original_serial_corruption_rejected_and_cd_required(self):
         payloads, _ = self.original_payloads()

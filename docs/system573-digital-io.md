@@ -3,8 +3,10 @@
 `system573_digital.cpp` now connects the source digital I/O registers, owned
 32 MiB zeroed volatile RAM, original DS2401 board serial, FPGA cipher and
 MAS3507D decoder. It is a standalone native Mac component with float PCM output.
-The PSX game profile/MMIO binding, native sample-clock bridge and speaker mix
-are not yet integrated. No original digital game execution is claimed.
+The PSX profile/MMIO binding now passes generated native MIPS tests on GL/NEON;
+the native sample-clock bridge and speaker mix remain open. No original
+digital game execution is claimed. See `system573-mac.md` for the separate
+native loader, drum input/output and NV3 evidence.
 
 `system573_digital_generate.py` checks SHA256 of MAME `k573dio.cpp/.h` and
 `k573fpga.cpp/.h` from `deb2f54fe7300e7a192690318beb860159bfd52a`. It extracts

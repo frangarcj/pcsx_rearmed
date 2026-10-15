@@ -240,6 +240,7 @@ static void harness_system573_speaker_pcm(void *opaque,const int16_t *samples,un
   }
 }
 static int open_system573_speaker_audio(const char *path){
+  if(system573_has_digital()){fprintf(stderr,"System573 digital native speaker clock/mix pending\n");return -1;}
   if(!system573_has_cd() || !out_current || pcm_wav_open(&system573_speaker_wav,path,44100))return -1;
   system573_headless_feed=out_current->feed;out_current->feed=harness_system573_spu_pcm;
   system573_set_audio_output(harness_system573_speaker_pcm,NULL);return 0;
@@ -542,7 +543,7 @@ static int raw_axis(int value)
 }
 static void refresh_interactive_gamepads(void)
 {
-  const unsigned ports=selected_board && (selected_board->family==111 || selected_board->family==102)?4:selected_board && selected_board->family==115?(system573_has_cd()?2:3):selected_board && selected_board->family==113?3:2;
+  const unsigned ports=selected_board && (selected_board->family==111 || selected_board->family==102)?4:selected_board && selected_board->family==115?system573_players():selected_board && selected_board->family==113?3:2;
   for (unsigned i = 0; i < 4; ++i)
     if (interactive_pads[i] && !SDL_GamepadConnected(interactive_pads[i])) {
       SDL_CloseGamepad(interactive_pads[i]); interactive_pads[i] = NULL;
@@ -970,6 +971,11 @@ static void interactive_zn_spu_pcm(void *data, int bytes)
 
 static int open_interactive_audio(void)
 {
+#ifdef PCSX_SYSTEM573
+  if(selected_board->family==115 && system573_has_digital()){
+    fprintf(stderr,"System573 digital live speaker clock/mix pending\n");return -1;
+  }
+#endif
   const SDL_AudioSpec spec = { SDL_AUDIO_S16, 2, selected_board->family == 113 ? 48000 : selected_board->family == 102 || selected_board->family == 103 || selected_board->family == 104 || selected_board->family == 105 || selected_board->family == 106 || selected_board->family == 107 || selected_board->family == 108 || selected_board->family == 109 || selected_board->family == 110 || selected_board->family == 111 || selected_board->family == 112 || selected_board->family == 114 || selected_board->family == 115 ? 44100 : 88200 };
   if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) return -1;
   interactive_audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
@@ -1441,6 +1447,9 @@ int main(int argc, char **argv)
     else if(!strcmp(argv[i],"--system573-fixture") && i+1<argc){
       if(board){usage(argv[0]);return 2;}board=argv[++i];board_family=115;system573_fixture=1;
     }
+    else if(!strcmp(argv[i],"--system573-digital-fixture") && i+1<argc){
+      if(board){usage(argv[0]);return 2;}board=argv[++i];board_family=115;system573_fixture=2;
+    }
     else if(!strcmp(argv[i],"--metro-zn-fixture") && i+1<argc){
       if(board){usage(argv[0]);return 2;}board=argv[++i];board_family=114;metro_fixture=1;
     }
@@ -1859,7 +1868,7 @@ int main(int argc, char **argv)
       return 2;
     }
 #ifdef PCSX_SYSTEM573
-    if(system573_fixture){board_load_result=system573_test_load(board);}
+    if(system573_fixture){board_load_result=system573_fixture==2?system573_test_load_digital(board):system573_test_load(board);}
     else
 #endif
     if(metro_fixture){board_load_result=systemzn_test_load_metro(board);}
@@ -2188,6 +2197,8 @@ int main(int argc, char **argv)
       fprintf(stderr,"GQ controls: 5/6/7 coin, 1/2/3 Start, mouse aim, left click/A trigger, right click/S reload, three gamepad sticks, Escape pause\n");
     else if (selected_board->family==112)
       fprintf(stderr,"Judge controls: 5/6 coin, 1/2 Start, mouse aim, left click/A trigger, right click/S second button, shoot outside the viewport to reload, gamepad stick aim, Escape pause\n");
+    else if (selected_board->family==115 && system573_has_digital())
+      fprintf(stderr,"Drum controls: 5 Coin, 1 Start, A/S/D/Space/Q/E pads, left/right Select, T Test, 9 Service\n");
     else if (selected_board->family==115 && system573_has_cd())
       fprintf(stderr,"DDR controls: 5/6 Coin, 1/2 Start, P1 arrows + A/S/D/Space/F/H panel, P2 I/K/J/L + Z/X/C/V/B/N panel, T Test, 9 Service, Escape pause\n");
     else if (selected_board->family==115)

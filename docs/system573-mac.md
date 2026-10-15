@@ -13,7 +13,7 @@ The full family validation still requires three distinct configurations:
 | --- | --- | --- |
 | Hyper Bishi Bashi Champ EAA (`hyperbbc`) | Base board, eight onboard flashes, timekeeper, cassette Y lamp outputs and three-player buttons | Native interpreter GL/NEON P1 minigame, live source-gain SPU/SDL audio and complete flash/NVRAM persistence verified; full P2/P3 gameplay/operator checks pending |
 | Dance Dance Revolution 2nd Mix (`ddr2m`) | Analog daughterboard, CD-ROM, cassette X, dance input multiplexing | Original cassette/CD verified; source CR-589 transport and DDR analog multiplexor integrated. Native GL/NEON cold flash initialization completes and all eight programmed chips match MAME byte for byte. Native warm GL/NEON 1st Stage/PERFECT, 92/92 inputs and original nonzero SPU/CDDA decoding pass. Source gain-1 SPU/CDDA mix passes headless GL/NEON and live SDL. Full song/P2/operator coverage remains separate |
-| Percussion Freaks 4th Mix KAA (`pcnfrk4mk`) | Digital daughterboard, CD-ROM, cassette ZI/serial ID, instrument inputs and multi-session unit | Seven original game/device chips audited, retaining source BAD_DUMP serial/CD status. ZS01 encrypted pin protocol passes optimized/ASan tests and original-cassette readback; ZI bus also passes complete encrypted protocol/original readback and timed DS2401 checks. Digital I/O/FPGA-to-MAS encrypted MPEG, source registers and board ID now pass component checks. Native digital loader/CD, CPU/audio-clock binding, speaker mix and game runtime remain pending |
+| Percussion Freaks 4th Mix KAA (`pcnfrk4mk`) | Digital daughterboard, CD-ROM, cassette ZI/serial ID, instrument inputs and multi-session unit | Seven original game/device chips audited, retaining source BAD_DUMP serial/CD status. ZS01 encrypted pin protocol passes optimized/ASan tests and original-cassette readback; ZI bus also passes complete encrypted protocol/original readback and timed DS2401 checks. Digital I/O/FPGA-to-MAS encrypted MPEG, source registers and board ID now pass component checks. Native loader/MMIO/drum controls/NV3 now pass generated CPU tests on GL/NEON, strict original seven-chip/CD identity checks and cold/warm persistence. Original CD/game execution, CPU/audio-clock binding and speaker mix remain pending |
 
 ## Digital KAA media and cassette component
 
@@ -72,7 +72,74 @@ X76F100 and DS2401 tests still pass. This does not prove game acceptance of
 the cassette. ZI security/control/IN1 wiring now passes the same complete
 protocol and original-image readback through the board bus, including timed
 DS2401, masked lanes and reset persistence, under optimized and ASan/UBSan
-builds. Native digital loader and execution remain pending.
+builds. Native original-game execution remains pending.
+
+The native CPU/MMIO/input/NVRAM profile is now present, with original seven-chip
+checks and a separate `pcsx-aow-system573-digital-v1` configuration. The normal
+preparer requires the full original CD audit before publishing any native
+directory; the ROM-only auditor still emits no runnable profile. Its
+`native_profile_available=false` describes that audit-only artifact. Neither
+native game boot nor gameplay has been verified without the KAA CD.
+
+```sh
+python3 scripts/prepare_system573_digital_board.py --mame-source ../mamedev \
+  --rompath roms --output-dir roms/prepared/pcnfrk4mk
+```
+
+The normal loader verifies all seven source CRC/size pairs and the original
+KAA CD SHA. Tests accept the seven original chip files up to the missing-CD
+check, reject a one-bit change in each individual chip, and reject a real DDR
+CD supplied under the KAA filename. This is loader evidence, not execution of
+the original game. Source defaults remain eight erased FF Fujitsu flashes and
+FF main-board timekeeper SRAM with live RTC counters; old parent flash dumps
+and extracted game executables are not used.
+
+Digital I/O maps at `1f640000–1f6400ff`. CPU reads/writes split into the source
+16-bit handlers, including high-byte accesses, independent auto-incrementing
+RAM pointers and source-zero unmapped neighbours. ZI SDA retains its separate
+active-low control pin. Six drum buttons map to source IN2 masks
+`0100/0200/0400/0800/1000/4000`; left/right select use `0001/0002`, and Start
+uses `8000`. Coin 2 and P2 controls are rejected as unused by this source
+configuration. Source drum/spot/neon/start/select outputs are retained, with
+their actual inversion and duplicate offset cases. The Mac frontend reports
+one gamepad for this profile.
+
+`tests/check_system573_digital_harness.py` executes generated MIPS BIOS code
+through the real Mac CPU, in both GL and NEON. It verifies 8/16/32-bit register
+access, a high-byte RAM-address write followed by `5566` readback, unassigned
+lanes returning zero, ZS01 reset word `5a530001`, drum/select/start/DIP input
+and source output lamps. Both runs consume 20/20 input events with zero faults.
+The fixture uses an actual source CR589 model with an explicitly empty media
+backend: no CD sectors/tracks/decoded audio are supplied. Its guest delay lets
+the original ATA power-on diagnostic timer finish before checking signature
+`14/eb`; early reads correctly return BSY rather than an invented ready state.
+Every log labels `SYNTHETIC_FIXTURE` and `EMPTY_FIXTURE_DRIVE`. The ordinary
+loader rejects its generated BIOS, and the base fixture selector rejects the
+digital configuration. A no-CHD build rejects this CD profile explicitly.
+
+Digital NVRAM uses its own 16-byte identity `S573NV3\0PF4KAA\0\0` and a
+16,851,116-byte checksummed snapshot: 32-byte header, eight flashes, 8 KiB
+timekeeper, complete mutable 140-byte ZS01 image and 64 KiB source CR589 buffer.
+The immutable cassette/digital IDs stay in their verified source media. The
+32 MiB digital RAM, device protocols and timers are transient, not NVRAM.
+Native cold/warm tests preserve separately mutated flash, EEPROM and drive
+buffer bytes, while invalid size, identity, reserved header bytes, CRC and
+unreviewed/mixed profiles fail before importing state. Hyperbbc NV1 and DDR
+NV2 layouts and loader/persistence regressions continue passing on GL/NEON.
+
+```sh
+make -f Makefile.mac-harness GPU=neon system573-test
+make -f Makefile.mac-harness GPU=vitagl-like system573-test
+python3 tests/check_system573_digital_harness.py \
+  --harness build/mac-harness/pcsx-harness \
+  --original-media roms/audited/pcnfrk4mk --wrong-cd roms/ddr2m/895jaa02.chd
+```
+
+The digital native audio clock and SPU/CDDA/MAS speaker bridge are still
+pending. Native `--mixed-audio`/live speaker setup rejects this profile
+explicitly instead of silently producing a partial mix; raw `--audio` remains
+SPU-only. Standalone FPGA-to-MAS audio evidence below is separate from this
+CPU integration and does not establish native digital music timing.
 
 The pinned multi-session device declares its ROMs but has an empty
 `device_start`, no configured processor and no runtime address map. Auditing
