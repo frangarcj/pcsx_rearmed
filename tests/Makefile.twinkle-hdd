@@ -1,0 +1,39 @@
+# Mac original-media probe; no ROMs, CHDs or generated inputs are supplied.
+CC := xcrun clang
+CXX := xcrun clang++
+.DEFAULT_GOAL := all
+BUILD ?= build/twinkle-hdd
+OPT ?= -O2 -g
+GEN := $(BUILD)/generated
+include tools/mac-harness/libchdr.mk
+CFLAGS := -arch arm64 -std=gnu99 $(OPT) $(LIBCHDR_CFLAGS)
+CXXFLAGS := -arch arm64 -std=c++20 $(OPT) -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable $(LIBCHDR_CFLAGS) -I$(GEN) -Ilibpcsxcore/arcade -Ilibpcsxcore/arcade/m68000
+CPP := tests/probe_twinkle_sound.cpp libpcsxcore/arcade/m68000.cpp \
+       libpcsxcore/arcade/twinkle_board.cpp libpcsxcore/arcade/rf5c400.cpp \
+       libpcsxcore/arcade/ata_storage.cpp libpcsxcore/arcade/ata_mame/atahle_port.cpp \
+       libpcsxcore/arcade/ata_mame/atastorage_port.cpp libpcsxcore/arcade/gnet_pccard.cpp \
+       libpcsxcore/arcade/rf5c296.cpp libpcsxcore/arcade/chd_hd.cpp
+GENERATED := $(addprefix $(GEN)/m68000-,decode.o sdf.o sdp.o)
+OBJECTS := $(addprefix $(BUILD)/,$(LIBCHDR_SOURCES:.c=.o) $(CPP:.cpp=.o)) $(LIBCHDR_EXTRA_OBJECTS) $(GENERATED)
+TARGET := $(BUILD)/probe-twinkle-sound
+.SECONDARY: $(GENERATED:.o=.cpp)
+.PHONY: all
+all: $(TARGET)
+$(GEN)/m68000-%.cpp: libpcsxcore/arcade/m68000/m68000.lst libpcsxcore/arcade/m68000/m68000gen.py
+	@mkdir -p $(GEN)
+	python3 libpcsxcore/arcade/m68000/m68000gen.py $* $< $@
+$(GEN)/m68000-head.h: libpcsxcore/arcade/m68000/m68000.lst libpcsxcore/arcade/m68000/m68000gen.py
+	@mkdir -p $(GEN)
+	python3 libpcsxcore/arcade/m68000/m68000gen.py header $< $@
+$(GEN)/%.o: $(GEN)/%.cpp $(GEN)/m68000-head.h
+	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
+$(BUILD)/%.o: %.cpp $(GEN)/m68000-head.h
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
+$(BUILD)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+$(TARGET): $(OBJECTS)
+	$(CXX) $(CXXFLAGS) $^ -lz -o $@
+$(OBJECTS:.o=.d): ;
+-include $(OBJECTS:.o=.d)
