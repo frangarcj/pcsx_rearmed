@@ -70,12 +70,35 @@ class DigitalMedia(unittest.TestCase):
                          {k: len(v) for k, v in payloads.items()})
 
     def test_normal_preparer_refuses_rom_only_publication(self):
-        self.original_payloads()
+        payloads, _ = self.original_payloads()
         with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / 'roms'; root.mkdir()
+            for name, data in payloads.items():
+                (root / ORIGINAL_NAMES[name]).write_bytes(data)
             output = Path(temp) / 'not-published'
             with self.assertRaisesRegex(mame.PreparationError, 'CD.*missing'):
-                native.prepare(ROOT.parent / 'mamedev', ROOT / 'roms', output)
+                native.prepare(ROOT.parent / 'mamedev', root, output)
             self.assertFalse(output.exists())
+
+    def test_optional_original_cd_completes_native_preparation(self):
+        import hashlib
+        import json
+        self.original_payloads()
+        disc = ROOT / 'roms/pcnfrk4mk/a25kaa02.chd'
+        if not disc.is_file():
+            self.skipTest('optional original KAA CD not present')
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / 'prepared'
+            report = native.prepare(ROOT.parent / 'mamedev', ROOT / 'roms', output)
+            self.assertTrue(report['complete_media_verified'])
+            self.assertTrue(report['disk']['verified'])
+            self.assertTrue(report['native_profile_available'])
+            self.assertFalse(report['board_execution_verified'])
+            self.assertEqual(report, json.loads((output / 'manifest.json').read_text()))
+            self.assertEqual(hashlib.sha1(disc.read_bytes()).digest(),
+                             hashlib.sha1((output / 'a25kaa02.chd').read_bytes()).digest())
+            self.assertEqual(''.join(f'{k}={v}\n' for k,v in native.configuration().items()),
+                             (output / 'board.ini').read_text())
 
     def test_original_serial_corruption_rejected_and_cd_required(self):
         payloads, _ = self.original_payloads()

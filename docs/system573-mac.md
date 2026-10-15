@@ -5,7 +5,8 @@ P1 run on GL and NEON with original source-verified media. Both show PINKROCKER
 versus two COMPUTER players in a ship alignment minigame, consume 1902/1902
 input rows and produce identical RAM/SPU WAV with zero device faults. This
 covers the base flash-only board. DDR 2nd Mix now also passes a bounded analog/CD
-P1 run and source-gain SPU/CDDA speaker mix; the digital configuration remains open. Independent MAME 0.287 captures are separate reference evidence.
+P1 run and source-gain SPU/CDDA speaker mix. The digital configuration now has
+original-media cold installation evidence; player validation remains open. Independent MAME 0.287 captures are separate reference evidence.
 
 The full family validation still requires three distinct configurations:
 
@@ -13,7 +14,7 @@ The full family validation still requires three distinct configurations:
 | --- | --- | --- |
 | Hyper Bishi Bashi Champ EAA (`hyperbbc`) | Base board, eight onboard flashes, timekeeper, cassette Y lamp outputs and three-player buttons | Native interpreter GL/NEON P1 minigame, live source-gain SPU/SDL audio and complete flash/NVRAM persistence verified; full P2/P3 gameplay/operator checks pending |
 | Dance Dance Revolution 2nd Mix (`ddr2m`) | Analog daughterboard, CD-ROM, cassette X, dance input multiplexing | Original cassette/CD verified; source CR-589 transport and DDR analog multiplexor integrated. Native GL/NEON cold flash initialization completes and all eight programmed chips match MAME byte for byte. Native warm GL/NEON 1st Stage/PERFECT, 92/92 inputs and original nonzero SPU/CDDA decoding pass. Source gain-1 SPU/CDDA mix passes headless GL/NEON and live SDL. Full song/P2/operator coverage remains separate |
-| Percussion Freaks 4th Mix KAA (`pcnfrk4mk`) | Digital daughterboard, CD-ROM, cassette ZI/serial ID, instrument inputs and multi-session unit | Seven original game/device chips audited, retaining source BAD_DUMP serial/CD status. ZS01/ZI encrypted protocol, original serial readback and FPGA-to-MAS components pass. Native loader/MMIO/drum controls/NV3 pass generated CPU tests on GL/NEON with strict original chip/CD rejection and cold/warm persistence. CPU-clocked digital audio and gain-1 SPU/CDDA/digital mixing now pass synthetic MPEG tests, including identical GL/NEON/live SDL WAVs. Original KAA CD, installation and game execution remain pending |
+| Percussion Freaks 4th Mix KAA (`pcnfrk4mk`) | Digital daughterboard, CD-ROM, cassette ZI/serial ID, instrument inputs and multi-session unit | Seven original game/device chips audited, retaining source BAD_DUMP serial/CD status. ZS01/ZI encrypted protocol, original serial readback and FPGA-to-MAS components pass. Native loader/MMIO/drum controls/NV3 pass generated CPU tests on GL/NEON with strict original chip/CD rejection and cold/warm persistence. CPU-clocked digital audio and gain-1 SPU/CDDA/digital mixing now pass synthetic MPEG tests, including identical GL/NEON/live SDL WAVs. Original KAA CD now passes full audit, and native GL/NEON cold installation matches all eight MAME flash chips, mutable ZS01 and the CR-589 update buffer. Original player execution remains in progress |
 
 ## Digital KAA media and cassette component
 
@@ -58,10 +59,11 @@ with `complete_media_verified=false`, `native_profile_available=false` and
 `--roms-only`, the audit requires the original KAA CD `a25kaa02.chd`, source
 SHA1 `6c9084773c6964e794bd096822da4413aa7305ef`, matching CD metadata and a full
 `chdman verify`. Missing CD, a CD from DDR, corrupt serial bytes and unreviewed
-game/BIOS profiles are rejected in tests. The original KAA CD has not yet been
-acquired: queried modern archive entries mark it private, while inspected
-public older archives do not contain that image. No other-region disc or
-extracted executable substitutes for it. BAD_DUMP annotations remain explicit.
+game/BIOS profiles are rejected in tests. The earlier archive search found only
+private entries or older public archives without this disc. A subsequent public
+MDK download supplies the exact KAA image; full data verification and the
+original cold-install comparison are recorded below. No other-region disc or
+extracted executable supplies this result. BAD_DUMP annotations remain explicit.
 
 The standalone [ZS01 component](konami-zs01.md) now passes encrypted pin
 commands, CRC/retry erasure, data/configuration writes, key replacement,
@@ -72,14 +74,15 @@ X76F100 and DS2401 tests still pass. This does not prove game acceptance of
 the cassette. ZI security/control/IN1 wiring now passes the same complete
 protocol and original-image readback through the board bus, including timed
 DS2401, masked lanes and reset persistence, under optimized and ASan/UBSan
-builds. Native original-game execution remains pending.
+builds. Original boot/installation now has separate evidence below; these
+component checks alone do not establish game acceptance.
 
 The native CPU/MMIO/input/NVRAM profile is now present, with original seven-chip
 checks and a separate `pcsx-aow-system573-digital-v1` configuration. The normal
 preparer requires the full original CD audit before publishing any native
 directory; the ROM-only auditor still emits no runnable profile. Its
-`native_profile_available=false` describes that audit-only artifact. Neither
-native game boot nor gameplay has been verified without the KAA CD.
+`native_profile_available=false` describes that audit-only artifact. The subsequent
+complete-media package and original boot below use the actual KAA CD.
 
 ```sh
 python3 scripts/prepare_system573_digital_board.py --mame-source ../mamedev \
@@ -87,8 +90,9 @@ python3 scripts/prepare_system573_digital_board.py --mame-source ../mamedev \
 ```
 
 The normal loader verifies all seven source CRC/size pairs and the original
-KAA CD SHA. Tests accept the seven original chip files up to the missing-CD
-check, reject a one-bit change in each individual chip, and reject a real DDR
+KAA CD SHA. Tests retain a deliberately CD-free temporary ROM directory for
+missing-CD rejection, verify full preparation with the now-available original
+CD, reject a one-bit change in each individual chip, and reject a real DDR
 CD supplied under the KAA filename. This is loader evidence, not execution of
 the original game. Source defaults remain eight erased FF Fujitsu flashes and
 FF main-board timekeeper SRAM with live RTC counters; old parent flash dumps
@@ -149,8 +153,8 @@ checks establish synthetic CPU/audio integration, not original game music.
 The pinned multi-session device declares its ROMs but has an empty
 `device_start`, no configured processor and no runtime address map. Auditing
 its original media does not establish emulation of a working external
-multi-session box. Native cold installation, actual instrument gameplay and
-original game music still require the KAA CD and execution evidence. This row
+multi-session box. The following original run establishes native cold
+installation; actual instrument/player validation remains separate. This row
 remains open in the overall Mac matrix.
 
 The standalone [MAS3507D decoder/I2C port](mas3507d-port.md) now retains the
@@ -166,6 +170,82 @@ and wrong-key silence; original digital-board serial readback passes too. The
 source last-pending-byte/guard-padding behaviour and its final-frame effect are
 recorded separately. CPU/sample-clock binding and speaker output now have the
 synthetic evidence above; original game music remains pending.
+
+## Original KAA CD and cold installation
+
+The exact original KAA disc is now available from
+[MDK](https://mdk.cab/game/pcnfrk4mk), downloaded from its
+`/download/chd/pcnfrk4m/a25kaa02.chd` endpoint. Its 287,173,674 compressed bytes
+have file SHA1 `2c7d85598097d058989618f7e591768609f4ab96`; the independent CHD
+header/data+metadata SHA1 is the source-pinned
+`6c9084773c6964e794bd096822da4413aa7305ef`. Full `chdman verify`, all seven
+original chip audits and normal native preparation pass. MAME 0.287 reports
+the complete set as best available, retaining the source cassette-serial/CD
+BAD_DUMP annotations and undumped H8. No missing firmware is substituted.
+
+Cold native startup selects the CD DIP at frame zero, with all eight flashes
+and board timekeeper at their actual source erased defaults. The original
+CDUPDATE program displays NOTE 604 and requests Test. A real Test pulse at
+frames 2,400–2,460 starts its update; the CR-589's source buffer changes from
+its `GS0N` seed to the original update's `gscb` inquiry identity. The game then
+automatically starts `INSTALL G*A25KAA`, programs/verifies the flash chips and
+reaches INFO 508 / Installation completed by frame 14,400. Both GL and NEON
+show machine number `1891-5346` and the original request to power-cycle.
+
+Independent MAME starts with its own erased/source device defaults and uses
+a corresponding CD DIP/Test sequence. Its own installation also reaches INFO
+508. Each of the **eight 2 MiB native flash images matches MAME byte for byte**;
+the J pair (`31j`/`27j`) correctly remains erased in both implementations. The
+complete mutable 140-byte ZS01 image and updated 65,536-byte CR-589 buffer also
+match the independent reference exactly. The drive buffer SHA256 is
+`319602942bfce7b39fe2e806ff4e772dbf8c49d033c97db9f18b7d922a63b92f`.
+MAME runtime NVRAM is never imported to create either native installation.
+
+Both native runs consume 3/3 input events, read 8,426 original CD sectors,
+execute 547 packets / 8,426 DMA transfers / 4,314,112 DMA words, cross the
+32-bit CPU-cycle wrap and report zero board/CD/digital/clock faults. The
+captured 4 MiB RAM and whole 16,851,116-byte NV3 images also match each other:
+
+| Native GL/NEON cold artifact | SHA256 |
+| --- | --- |
+| Main RAM | `85e558b64f7a4ddfad540593cea5d7f7684f5dbfc1bc57149d38a20cce432012` |
+| Complete checksummed NV3 | `46f03fd07e3f8ce694c3f4a1d59b1ad1d38f97f2e291d51f51781d8cd3f6ee90` |
+
+The source chip/cassette/drive comparisons are required by
+`tests/check_system573_digital_original_harness.py`. Whole RAM/NV3 equality is
+reported separately because independent future cold starts may receive
+different live host calendar fields; bytes are never masked to manufacture
+equality. The static completion scene uses the existing GL front-buffer
+capture when it has not presented recently. Both native captures and the
+reference completion capture have been visually inspected.
+
+```sh
+python3 -m unittest discover -s tests -p test_system573_digital_media.py
+python3 scripts/prepare_system573_digital_board.py --mame-source ../mamedev \
+  --rompath roms --output-dir roms/prepared/pcnfrk4mk
+python3 tests/check_system573_digital_original_harness.py \
+  --evidence-dir artifacts/boards-mac-20261015/system573/pcnfrk4mk
+```
+
+The existing ROM-only audit artifact remains explicitly incomplete; preparing
+and executing the new full profile does not rewrite the older audit-only
+manifest into a gameplay claim. Normal preparation continues to set
+`board_execution_verified=false`.
+
+Warm Flash boot from copies of native-installed NV3 reaches the original
+NOTE 605 / Cleared RTC-RAM screen, matching an independent warm MAME process.
+A Test pulse at frames 1,800–1,860 acknowledges it and launches the actual
+`GCA25KAA Percussion Freaks 4th Mix` program. By frame 7,200 it is loading its
+original device/data files into digital sound RAM, with zero faults. A longer
+original boot then synchronizes MPEG, produces nonzero original digital PCM
+and reaches the animated attract flow. That first long probe stops at the
+harness's default one-billion-instruction-block bound at frame 9,867, so it
+is retained as intermediate evidence, not a completed 18,000-frame run.
+Player and complete sound replays use an explicit larger harness bound.
+
+Cold/warm/reference evidence, exact chip comparisons, CD origin and full-media
+test output are under ignored
+`artifacts/boards-mac-20261015/system573/pcnfrk4mk`.
 
 ## Hyper Bishi Bashi media
 
