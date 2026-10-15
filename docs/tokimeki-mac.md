@@ -8,6 +8,8 @@ RGB page through the game's own timed serial commands. This establishes an
 operator test print, not a completed romantic-game result or a physical printer.
 The original Plus (`tmoshsp`) now also reaches a bounded GL player scene with
 nonzero SPU/CDDA sound and produces its 16-cell operator sheet on GL and NEON.
+A separate extended player replay also generates the game's own sticker sheet
+on both renderers, without test/service inputs.
 
 ## Audited media
 
@@ -99,7 +101,7 @@ that exact legacy label for the two supported profiles.
 
 The shared GV source speaker mix is now integrated. Original Plus execution
 below exercises nonzero SPU and CDDA together; complete base/Seal speech/music
-coverage is still separate. Physical printing, final game reports, authentic
+coverage is still separate. Physical printing, the base/Seal final game report, authentic
 DRC, physical Vita and whole-machine save states remain unvalidated.
 
 
@@ -178,5 +180,52 @@ recorded equal operator hashes, retained EEPROM and the player screenshot.
 It explicitly labels audio verification as historical after cleanup; no raw
 captures are recreated. The linked-media preparer suite passes 16 tests,
 including reprepare, changed media, self-owned links and temporary-extraction
-rejection. Final game reports, live SDL sound for Plus and physical printing
-remain open.
+rejection. The separate extended player print is described below; live SDL
+sound for Plus and physical printing remain open.
+
+### Original Plus player sticker sheet
+
+Extending the original player CSV to 20,000 frames consumes 318/318 inputs on
+GL and NEON. The first 98 events are the bounded replay above; the extension
+only adds P1 button presses, held for sixteen frames every 120 frames through
+frame 19,800. The only controls are coins, P1 button 1, GSR and heartbeat.
+There are no test/service edges, ROM patches or injected game results.
+
+Both original-game executions send 58 printer packets with zero rejections,
+capture sixteen video images and issue one print. Their 800x600 sheets contain
+the Konami logo, fourteen identical Shiori festival images and the Plus logo.
+The heroine artwork differs from the operator test artwork. The retained final
+screen shows two heroines holding sticker sheets, collection dialogue and
+CREDIT 0. This establishes the original player's virtual sticker output;
+it does not establish every ending or a physical printer.
+
+Both native runs end at cycle 11,173,961,591, block 1,045,900,507 and PC
+`800da374`, with zero board/peripheral faults and equal persisted EEPROM.
+The final RAM SHA256 matches across renderers:
+`fdbc8e2dc0b0d820982112570b4f83ad3b18f390838994b2f65a06b515553b4a`.
+GL source speaker diagnostics record 14,549,429 stereo frames, 203,982
+nonzero CDDA frames, peak 8,492 and no clipping/mixer faults. The GL raw WAV
+was pruned with its hash retained; the NEON extension deliberately writes no
+audio capture, so this is not a new GL/NEON audio comparison.
+
+The NEON follow-up retains only small PNGs, logs, CSVs, hashes and EEPROM.
+Its temporary RAM/page/frame captures are hashed and removed in the runner's
+cleanup block.
+
+An independent MAME 0.287 replay consumes the same 318 inputs, using native
+CSV frame numbers divided by 60 for its input times. At 334 emulated seconds
+it also reaches the sticker-collection scene and has a populated 16-cell
+player sheet. Its awarded artwork differs: native GL/NEON show card 635-C,
+while this MAME replay shows card 748. This establishes reference player
+progression and page layout, **not matching gameplay timing or result**.
+Those remain open; the original operator comparison alone cannot prove them.
+The MAME reference uses `-video none` to bypass the interactive startup warning
+and writes only two PNGs, diagnostics and its own small EEPROM/configuration.
+
+The observation check has an explicit extended-player option:
+
+```sh
+python3 tests/check_tokimeki_plus_observations.py \
+  --evidence-dir artifacts/boards-mac-20261015/gv/tmoshsp \
+  --with-player-sheet
+```

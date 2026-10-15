@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Inspect retained original Plus print/player evidence without regenerating WAVs."""
 import argparse
+import csv
 import hashlib
 import json
 from pathlib import Path
@@ -85,12 +86,62 @@ def verify(root):
     return result
 
 
+def verify_player_sheet(root):
+    """Check the separate original player print; never infer it from TEST PRINT."""
+    with (root/'extended-player.csv').open() as source:
+        events = list(csv.DictReader(source))
+    with (root/'player.csv').open() as source:
+        short_events = list(csv.DictReader(source))
+    assert len(events) == 318 and events[:len(short_events)] == short_events
+    assert {row['control'] for row in events} == {'coin1', 'p1button1', 'gsr', 'heartbeat'}
+    assert all(row['control'] == 'p1button1' for row in events[len(short_events):])
+    assert [int(row['frame']) for row in events] == sorted(int(row['frame']) for row in events)
+    observed = json.loads((root/'extended-observation.json').read_text())
+    for name, recorded in observed['files'].items():
+        assert hashlib.sha256((root/name).read_bytes()).hexdigest() == recorded['sha256'], name
+    pages = {}
+    for gpu in ('gl', 'neon'):
+        log = (root/f'extended-{gpu}.log').read_text()
+        assert 'cpu=interpreter frames=20000' in log and 'Arcade inputs: consumed=318/318' in log
+        assert 'failed' not in log and 'execution limit reached' not in log
+        assert 'profile=tmoshsp' in line(log, 'SystemGV: profile=')
+        assert 'faults=00000000/00000000' in line(log, 'SystemGV: NCR=')
+        assert 'packets=58 rejected=0 captures=16 prints=1 unknown=40 faults=0' in line(log, 'Tokimeki IO:')
+        directory = 'prints-extended' if gpu == 'gl' else 'prints-extended-neon'
+        pages[gpu] = page(root/directory/'print-0001.png')
+        assert pages[gpu]['rgb_sha256'] != page(root/f'prints-{gpu}/print-0001.png')['rgb_sha256']
+    ram_gl = observed['removed_raw_captures']['extended-gl.ram']['sha256']
+    ram_neon = json.loads((root/'extended-neon-pruned.json').read_text())['extended-neon.ram']['sha256']
+    assert ram_gl == ram_neon
+    assert (root/'extended-gl.nv').read_bytes() == (root/'extended-neon.nv').read_bytes()
+    reference = (root/'mame-player-reference/run.log').read_text()
+    assert 'PLUS_PLAYER_REFERENCE\t318\t318' in reference and 'LUA ERROR' not in reference
+    pages['mame'] = page(root/'mame-player-reference/page.png')
+    assert pages['mame']['rgb_sha256'] != page(root/'mame-reference/page.png')['rgb_sha256']
+    return {'frames': 20000, 'events': len(events), 'test_or_service_inputs': False,
+            'player_sticker_sheet_printed': True, 'captures': 16, 'prints': 1,
+            'scene': observed['scene'], 'recorded_gl_neon_ram_sha256': ram_gl,
+            'awarded_card_visual_observation': observed['awarded_card_visual_observation'],
+            'reference_scope': observed['reference_scope'],
+            'reference_result_equivalence_verified': False,
+            'pages': pages, 'fresh_audio_verification': False,
+            'physical_printing_verified': False}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--evidence-dir', required=True, type=Path)
+    parser.add_argument('--with-player-sheet', action='store_true',
+                        help='also inspect the extended player print and its MAME reference')
     args = parser.parse_args()
-    print(json.dumps(verify(args.evidence_dir.resolve()), indent=2))
-    print('Original Plus operator grid and player observations verified; final report remains OPEN')
+    root = args.evidence_dir.resolve()
+    result = verify(root)
+    if args.with_player_sheet:
+        result['extended_player_sheet'] = verify_player_sheet(root)
+    print(json.dumps(result, indent=2))
+    print('Original Plus player sticker output verified; MAME result equivalence and physical printing remain OPEN'
+          if args.with_player_sheet else
+          'Original Plus operator grid and bounded player observations verified; extended player print not checked')
 
 
 if __name__ == '__main__':

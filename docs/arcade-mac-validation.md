@@ -57,7 +57,11 @@ from the arcade boards.
   validated complete ticket. Tokimeki Seal Version produces its original
   operator test page in virtual paper output. Original Plus now generates its
   sixteen-cell test sheet in GL/NEON, with an independent MAME layout reference;
-  final game reports and physical printers remain open.
+  an extended original Plus player replay now prints its own sixteen-cell
+  sticker sheet on GL/NEON without test inputs, with equal final RAM/EEPROM.
+  MAME also reaches a player sheet but awards different artwork under the
+  60-Hz input-time conversion; result/timing equivalence, base/Seal final
+  reports and physical printers remain open.
 
 - Psychic Force: PLAYER1 selection and combat pass with the later coin/start
   replay. Independent MAME reaches both screens, and its independently configured
