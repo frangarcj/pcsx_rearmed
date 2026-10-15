@@ -229,3 +229,54 @@ python3 tests/check_tokimeki_plus_observations.py \
   --evidence-dir artifacts/boards-mac-20261015/gv/tmoshsp \
   --with-player-sheet
 ```
+
+### Measuring the player replay's input times
+
+A new passive NEON run records cycle/frame snapshots every 262,144 CPU cycles.
+It ends at the same cycle/block/PC as the earlier player run and has the same
+final PNG and EEPROM. Each of its 318 input events is bracketed by the last
+snapshot before its requested frame and the first snapshot in that frame.
+The widest interval is 7.741 ms. These are bounds on native input application,
+not instruction-exact input timestamps.
+
+Dividing native frames by 60 introduces a changing error: the first coin is
+scheduled 112.472 ms early, while the last button release is 3,426.455 ms late
+relative to the interval midpoints. The measured frame/cycle relationship
+cannot be replaced by a fixed 60-Hz conversion while preserving this timeline.
+
+`scripts/input_timing_from_snapshots.py` derives the compact event bounds and
+their hashes from an existing passive capture. This run used:
+
+```sh
+python3 scripts/input_timing_from_snapshots.py \
+  --inputs artifacts/boards-mac-20261015/gv/tmoshsp/extended-player.csv \
+  --snapshots artifacts/boards-mac-20261015/gv/tmoshsp/timing/native.csv \
+  --frequency 33868800 \
+  --output artifacts/boards-mac-20261015/gv/tmoshsp/timing/input-bounds.csv \
+  --summary artifacts/boards-mac-20261015/gv/tmoshsp/timing/summary.json \
+  --prune-snapshots
+```
+
+The 23,378,302-byte full snapshot CSV was pruned after retaining its hash,
+the 318 event bounds and diagnostics. Do not recreate it to rerun the retained
+observation checker.
+
+An independent MAME replay uses `emu.attotime.from_ticks` and coroutine
+`emu.wait` to apply each event at the midpoint of its native interval. Its
+application CSV records all 318 events at their requested times, with zero
+reported timer error. It again produces a full player sticker sheet, now
+card 746-D instead of the earlier 60-Hz replay's card 748; native GL/NEON
+produce card 635-C. Thus the input conversion affects the result, but matching
+these estimated input times is **not sufficient to match the native result**.
+Boot/game phase, game sampling and execution timing remain to be compared;
+no clocks, sensor values, scores or ROM data were adjusted to force agreement.
+
+```sh
+python3 tests/check_tokimeki_plus_observations.py \
+  --evidence-dir artifacts/boards-mac-20261015/gv/tmoshsp \
+  --with-player-timing
+```
+
+This checks the retained interval/application tables, hashes, unchanged native
+end scene/EEPROM and the independent page layout. It explicitly leaves exact
+native input timestamps and reference result equivalence unproven.

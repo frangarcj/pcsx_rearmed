@@ -128,19 +128,70 @@ def verify_player_sheet(root):
             'physical_printing_verified': False}
 
 
+def verify_player_timing(root):
+    timing = root/'timing'
+    summary = json.loads((timing/'summary.json').read_text())
+    observation = json.loads((timing/'observation.json').read_text())
+    assert summary['frequency'] == 33868800 and summary['events'] == 318
+    assert summary['snapshots_pruned'] and not (timing/'native.csv').exists()
+    assert 0 < summary['maximum_bound_width_seconds'] < 0.008
+    for path, key in ((root/'extended-player.csv', 'inputs_sha256'),
+                      (timing/'input-bounds.csv', 'bounds_sha256')):
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == summary[key]
+    with (root/'extended-player.csv').open() as source:
+        inputs = list(csv.DictReader(source))
+    with (timing/'input-bounds.csv').open() as source:
+        bounds = list(csv.DictReader(source))
+    with (timing/'mame-midpoint/applied.csv').open() as source:
+        applied = list(csv.DictReader(source))
+    assert len(inputs) == len(bounds) == len(applied) == 318
+    for index, (event, bound, actual) in enumerate(zip(inputs, bounds, applied), 1):
+        assert all(event[key] == bound[key] for key in ('frame', 'control', 'pressed'))
+        assert int(bound['event']) == int(actual['event']) == index
+        assert actual['frame'] == event['frame'] and actual['control'] == event['control']
+        assert actual['value'] == event['pressed']
+        lo, hi = int(bound['lower_cycles']), int(bound['upper_cycles'])
+        assert 0 <= hi-lo < 0.008*summary['frequency']
+        midpoint = (lo+hi)/(2*summary['frequency'])
+        assert abs(float(actual['target_seconds'])-midpoint) < 1e-10
+        assert abs(float(actual['actual_seconds'])-midpoint) < 1e-9
+        assert abs(float(actual['error_ms'])) < 1e-6
+    native = (timing/'native.log').read_text()
+    assert 'frames=20000 cycles=11173961591 blocks=1045900507 pc=800da374' in native
+    assert 'Arcade inputs: consumed=318/318' in native
+    assert 'faults=00000000/00000000' in line(native, 'SystemGV: NCR=')
+    assert (timing/'native.png').read_bytes() == (root/'extended-neon.png').read_bytes()
+    assert (timing/'native.nv').read_bytes() == (root/'extended-neon.nv').read_bytes()
+    reference = (timing/'mame-midpoint/run.log').read_text()
+    assert 'PLUS_CYCLE_REFERENCE\t318\t318' in reference and 'LUA ERROR' not in reference
+    for name, recorded in observation['files'].items():
+        assert hashlib.sha256((timing/name).read_bytes()).hexdigest() == recorded['sha256']
+    return {'events': len(bounds), 'source_clock_hz': summary['frequency'],
+            'maximum_input_time_interval_seconds': summary['maximum_bound_width_seconds'],
+            'old_60hz_first_error_ms': float(bounds[0]['old_60hz_minus_midpoint_ms']),
+            'old_60hz_last_error_ms': float(bounds[-1]['old_60hz_minus_midpoint_ms']),
+            'mame_page': page(timing/'mame-midpoint/page.png'),
+            'result_observation': observation['result_observation'],
+            'exact_native_input_timestamps_verified': False}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--evidence-dir', required=True, type=Path)
     parser.add_argument('--with-player-sheet', action='store_true',
                         help='also inspect the extended player print and its MAME reference')
+    parser.add_argument('--with-player-timing', action='store_true',
+                        help='also inspect bounded cycle timing and the MAME timer replay')
     args = parser.parse_args()
     root = args.evidence_dir.resolve()
     result = verify(root)
-    if args.with_player_sheet:
+    if args.with_player_sheet or args.with_player_timing:
         result['extended_player_sheet'] = verify_player_sheet(root)
+    if args.with_player_timing:
+        result['player_timing'] = verify_player_timing(root)
     print(json.dumps(result, indent=2))
     print('Original Plus player sticker output verified; MAME result equivalence and physical printing remain OPEN'
-          if args.with_player_sheet else
+          if args.with_player_sheet or args.with_player_timing else
           'Original Plus operator grid and bounded player observations verified; extended player print not checked')
 
 

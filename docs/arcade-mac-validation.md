@@ -60,8 +60,10 @@ from the arcade boards.
   an extended original Plus player replay now prints its own sixteen-cell
   sticker sheet on GL/NEON without test inputs, with equal final RAM/EEPROM.
   MAME also reaches a player sheet but awards different artwork under the
-  60-Hz input-time conversion; result/timing equivalence, base/Seal final
-  reports and physical printers remain open.
+  60-Hz input-time conversion. A later passive cycle capture bounds all 318
+  native inputs within 7.741 ms; MAME applies their interval midpoints exactly
+  but still awards different artwork. Result/execution-timing equivalence,
+  base/Seal final reports and physical printers remain open.
 
 - Psychic Force: PLAYER1 selection and combat pass with the later coin/start
   replay. Independent MAME reaches both screens, and its independently configured
