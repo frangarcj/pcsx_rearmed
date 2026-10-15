@@ -55,8 +55,11 @@ from the arcade boards.
   buffer; bounded scored drums/live sound pass, with judgement alignment open.
   A separate digital reference cancels four late menu Start edges without
   changing its 25,950-point score. Its passive pad-read tap records 2,082
-  original reads with unchanged frame observations; native poll comparison
-  remains open.
+  original reads with unchanged frame observations. Native now records the same
+  read sites: correcting a one-tick reference boundary makes all 2,082 returned
+  pad values match, but scores remain 24,300 versus 1,150 and actual-read MPEG
+  timer latches differ by 2,424–2,426 samples. Full RAM equality was not
+  established under differing host RTC conditions; judgement remains open.
 - Printers: Technodrive responds at its JVS printer endpoint but has no
   validated complete ticket. Tokimeki Seal Version produces its original
   operator test page in virtual paper output. Original Plus now generates its

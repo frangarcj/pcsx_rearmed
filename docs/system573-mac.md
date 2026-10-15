@@ -499,10 +499,64 @@ python3 tests/check_system573_mpeg_observation.py \
   --evidence-dir artifacts/boards-mac-20261015/system573/pcnfrk4mk --pad-reads
 ```
 
-Native pad MMIO reads at the corresponding instruction have not yet been
-recorded. Actual input-poll/MPEG-phase alignment and judgement equivalence
-therefore remain open; these reference observations do not establish a
-native timing fix.
+The native follow-up below records the corresponding instruction. These
+reference-only observations do not establish a native timing fix.
+
+## Actual native pad polls and corrected reference boundary
+
+`--system573-pad-reads FILE` now observes completed native IN2 bus reads
+through a callback without replacing the returned data or advancing any extra
+device clocks. It requires a System 573 interpreter replay, rejects output
+path collisions and can append the same validated backing-RAM words used by
+`--snapshot-ram`. `--trace-start CYCLES` limits its observation window. A
+100,000-row bound reports failure if exceeded; the trace is detached before
+closing and on board unload. The source compiles for NEON and the GL C objects;
+the original-game runtime observation here is NEON.
+
+The new original 13,800-frame replay starts tracing at cycle 6,773,760,000
+and watches song tick `803493f8` and score `80349538`. It consumes 1,495/1,495
+events with zero faults. Of 3,636 retained input reads, 2,082 occur during song
+ticks 1 through 1,041: exactly two 16-bit reads per tick, separated by 162
+native cycles. The reported native PC is `80018770`; the interpreter advances
+PC by four before executing the load, corresponding to MAME's instruction
+PC `8001876c`.
+
+This reveals a callback-boundary error in the old reference: 492 actual pad
+reads differ. `PCSX_PF4_PAD_TICK_OFFSET=1` corrects the reference by the measured
+one-tick difference. With the menu control still enabled, all **2,082 actual
+returned pad values now match native**. All 1,476 pad transitions are retained.
+The corrected reference scores **24,300**, while native remains **1,150**;
+matching actual input values does not establish matching rhythm judgement.
+
+Among the 1,484 paired reads at ticks 300 through 1,041, the reference-minus-
+native already-latched MPEG timer difference is exclusively 2,424 through
+2,426 samples (54.966–55.011 ms). The earlier 38-ms band is absent from this
+comparison at the actual read sites. This narrows the remaining comparison
+to MPEG/game sampling phase; it does not by itself prove an oscillator defect
+or complete-song clock equality. No guest clocks, chart data or scores change.
+
+A fresh native run without the observer also scores 1,150 and has the identical
+final PNG. Its full RAM hash differs from the observed run, so full-state
+equivalence is **not established**. The persisted NV3 images differ only in
+live RTC seconds/minutes and their CRC; the source loader initializes RTC from
+host local time even when importing NVRAM. The runs therefore did not hold RTC
+conditions equal. Neither a RAM match nor a proven cause of the RAM difference
+is claimed. Both temporary 4 MiB RAM captures and raw frames were hashed and
+removed immediately; no new WAV files were requested.
+
+Native evidence is under `native-pad-reads/` and `native-pad-control/`; the
+corrected source observation is `mame-poll-aligned/`. The retained checker
+checks actual read pairs/PC semantics, all matching pad values, the timer
+distribution, scores, PNGs and the limited NV differences:
+
+```sh
+python3 scripts/check_validation_storage.py --reserve-mib 1 && \
+python3 tests/check_system573_mpeg_observation.py \
+  --evidence-dir artifacts/boards-mac-20261015/system573/pcnfrk4mk --native-pad-reads
+```
+
+It explicitly reports `native_full_ram_equivalence_verified=false`,
+`fresh_audio_verification=false` and `judgement_equivalence=OPEN`.
 
 ## Hyper Bishi Bashi media
 

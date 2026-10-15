@@ -175,18 +175,82 @@ def verify_pad_reads(root):
             'native_actual_pad_reads_observed': False, 'judgement_equivalence': 'OPEN'}
 
 
+def verify_native_pad_reads(root):
+    native_root, control_root = root/'native-pad-reads', root/'native-pad-control'
+    ref_root = root/'mame-poll-aligned'
+    for path in (native_root, control_root):
+        source_log(path/'run.log', native=True)
+        state = json.loads((path/'pruned.json').read_text())
+        assert state['end.ram']['bytes'] == 4194304
+        assert (state['end.ram']['song_tick'], state['end.ram']['score']) == (1042, 1150)
+        assert not (path/'end.ram').exists() and not (path/'frame.ppm').exists()
+    assert (native_root/'frame.png').read_bytes() == (control_root/'frame.png').read_bytes()
+    source_log(ref_root/'run.log')
+    assert 'PAD_TICK_OFFSET\t1' in (ref_root/'run.log').read_text()
+    assert int(rows(ref_root/'score.csv')[-1]['ram_80349538'], 16) == 24300
+    streams = {}
+    for name, path in (('native', native_root), ('original_reference', root/'mame-pad-reads'),
+                       ('aligned_reference', ref_root)):
+        by_tick = defaultdict(list)
+        for row in rows(path/'reads.csv'):
+            tick = int(row['ram_803493f8'], 16) if name == 'native' else int(row['song_tick'])
+            if 1 <= tick <= 1041:
+                by_tick[tick].append(row)
+        assert sorted(by_tick) == list(range(1, 1042))
+        assert all(len(value) == 2 for value in by_tick.values())
+        streams[name] = by_tick
+    mismatches, deltas, read_gaps = 0, [], Counter()
+    for tick, native in streams['native'].items():
+        read_gaps[int(native[1]['cycles'])-int(native[0]['cycles'])] += 1
+        for a, old, aligned in zip(native, streams['original_reference'][tick],
+                                   streams['aligned_reference'][tick]):
+            assert a['address'] == aligned['address'] == '1f400008'
+            assert int(a['width']) == 2 and aligned['mask'] == '0000ffff'
+            assert int(a['reported_pc'], 16)-4 == int(aligned['pc'], 16) == 0x8001876c
+            mismatches += a['data'] != old['data']
+            assert a['data'] == aligned['data']
+            if tick >= 300:
+                deltas.append(int(aligned['latched_samples'])-int(a['s573_latched_samples']))
+    assert mismatches == 492
+    assert set(deltas) == {2424, 2425, 2426}
+    nv = [(path/'state.nv').read_bytes() for path in (native_root, control_root)]
+    assert len(nv[0]) == len(nv[1])
+    nv_diff = [i for i, (a, b) in enumerate(zip(*nv)) if a != b]
+    allowed = set(range(20, 24)) | set(range(0x1002018, 0x1002020))
+    assert nv_diff and set(nv_diff) <= allowed, 'NVRAM differences outside CRC/live RTC'
+    ram_hashes = {name: json.loads((path/'pruned.json').read_text())['end.ram']['sha256']
+                  for name, path in (('observed', native_root), ('control', control_root))}
+    metadata = json.loads((native_root/'comparison.json').read_text())
+    for name, recorded in metadata['files'].items():
+        assert hashlib.sha256((root/name).read_bytes()).hexdigest() == recorded['sha256']
+    return {'native_reads_during_song': 2082, 'native_read_pairs': 1041,
+            'old_reference_mismatched_reads': mismatches, 'aligned_reference_matching_reads': 2082,
+            'native_reported_pc': '80018770', 'source_instruction_pc': '8001876c',
+            'native_read_pair_cycle_gap_histogram': dict(read_gaps),
+            'reference_minus_native_latched_samples_after_tick300': dict(sorted(Counter(deltas).items())),
+            'native_score_observed_and_control': 1150, 'aligned_reference_score': 24300,
+            'native_final_images_equal': True, 'nv_differing_offsets': nv_diff,
+            'native_final_ram_sha256': ram_hashes,
+            'native_full_ram_equivalence_verified': False,
+            'fresh_audio_verification': False, 'judgement_equivalence': 'OPEN'}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--evidence-dir', required=True, type=Path)
     parser.add_argument('--cleanup-manifest', type=Path)
     parser.add_argument('--pad-reads', action='store_true',
                         help='also inspect isolated navigation and passive MAME pad polls')
+    parser.add_argument('--native-pad-reads', action='store_true',
+                        help='also compare actual native polls with the corrected reference')
     args = parser.parse_args()
     root = args.evidence_dir.resolve()
     manifest = args.cleanup_manifest or root.parents[2]/'disk-cleanup-20261015.jsonl'
     result = verify(root, manifest)
-    if args.pad_reads:
+    if args.pad_reads or args.native_pad_reads:
         result['pad_reads'] = verify_pad_reads(root)
+    if args.native_pad_reads:
+        result['native_pad_reads'] = verify_native_pad_reads(root)
     print(json.dumps(result, indent=2))
     print('Retained MPEG observations verified; judgement equivalence remains OPEN')
 

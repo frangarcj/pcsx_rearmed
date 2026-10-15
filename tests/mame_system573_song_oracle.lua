@@ -7,6 +7,11 @@ local trace_path = assert(os.getenv("PCSX_PF4_TRACE"), "missing PCSX_PF4_TRACE")
 -- Native menu retries can arrive after MAME has already started its song.
 -- Optional control: stop navigation there, without changing any pad events.
 local stop_boot_at_song = os.getenv("PCSX_PF4_STOP_BOOT_AT_SONG") == "1"
+local pad_tick_offset_text = os.getenv("PCSX_PF4_PAD_TICK_OFFSET")
+local pad_tick_offset = pad_tick_offset_text and assert(tonumber(pad_tick_offset_text), "invalid pad tick offset") or 0
+assert(pad_tick_offset == math.floor(pad_tick_offset) and math.abs(pad_tick_offset) <= 16,
+       "pad tick offset must be an integer from -16 through 16")
+print("PAD_TICK_OFFSET", pad_tick_offset)
 local function field(tag, mask)
     for _, value in pairs(machine.ioport.ports[tag].fields) do
         if value.mask == mask then return value end
@@ -27,9 +32,9 @@ for line in io.lines(input_path) do
         frame, value = tonumber(frame), tonumber(value)
         assert(controls[name] and (value == 0 or value == 1), line)
         if name:match("^p1button") then
-            -- Native frame 12758 observes tick 1; inputs at the next VBlank
-            -- precede that frame's game update. Preserve this boundary phase.
-            pads[#pads+1] = {frame-12758, name, value}
+            -- Keep the historical callback conversion as offset zero.
+            -- Actual IN2 read traces establish offset +1 for native parity.
+            pads[#pads+1] = {frame-12758+pad_tick_offset, name, value}
         else
             boot[#boot+1] = {frame, name, value}
         end
