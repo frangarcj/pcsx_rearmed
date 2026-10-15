@@ -79,6 +79,9 @@ void ata_storage_reset(ata_storage_t *ata);
  * INT64_MAX rather than wrapping. */
 int ata_storage_run_until(ata_storage_t *ata, uint64_t monotonic_ns);
 uint64_t ata_storage_now(const ata_storage_t *ata);
+/* Read-only scheduler deadline; UINT64_MAX means no active source timer.
+ * Owners can split CPU execution at this deadline without polling guesses. */
+uint64_t ata_storage_next_event_ns(const ata_storage_t *ata);
 
 /* Native IDE buses preserve SET FEATURES-selected transfer width. PC Card
  * adapters pass 0/1 to override it according to their byte-lane bridge. */

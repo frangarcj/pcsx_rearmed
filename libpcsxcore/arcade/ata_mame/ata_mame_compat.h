@@ -119,6 +119,13 @@ public:
     return true;
   }
   uint64_t now() const { return uint64_t(now_ns); }
+  uint64_t next_event_ns() const {
+    uint64_t next = std::numeric_limits<uint64_t>::max();
+    for (const auto &timer : timers)
+      if (timer->active && uint64_t(timer->due_ns) < next)
+        next = uint64_t(timer->due_ns);
+    return next;
+  }
 
 private:
   friend class emu_timer;

@@ -25,6 +25,8 @@ struct Bus {
     unsigned critical_write_attempts = 0;
     bool tried_reentry = false;
     int64_t nested_run_result = 0;
+    int limit_delay = -1;
+    uint64_t limit_deadline = 0;
 };
 
 static bool read_word(void *opaque, M68kSpace space, uint32_t address,
@@ -62,6 +64,15 @@ static bool write_word(void *opaque, M68kSpace space, uint32_t address,
                        uint16_t data, uint16_t mask)
 {
     Bus *bus = static_cast<Bus *>(opaque);
+    if (bus->owner && address == 0x400 && bus->limit_delay >= 0) {
+        uint64_t before,after;
+        assert(bus->owner->current_cycle(before));
+        assert(!bus->owner->limit_run_to_cycle(before-1));
+        bus->limit_deadline=before+bus->limit_delay;
+        assert(bus->owner->limit_run_to_cycle(bus->limit_deadline));
+        assert(bus->owner->current_cycle(after) && after==before);
+        bus->limit_delay=-1;
+    }
     if (bus->owner) {
         uint64_t cycle = 0;
         if (bus->owner->current_cycle(cycle)) bus->accesses.push_back({cycle,address,mask,true});
@@ -388,6 +399,28 @@ static void test_callback_microcode_cycle_timestamps()
     assert(end.current_cycle(cycle) && cycle == UINT64_MAX);
 }
 
+static void test_dynamic_scheduler_deadline()
+{
+    for (int delay : {0,11,2000}) {
+        Bus bulk,limited;
+        for (auto *bus : {&bulk,&limited}) {
+            load_reset_vectors(*bus);bus->tried_reentry=true;
+            put16(*bus,0x100,0x33fc);put16(*bus,0x102,0x1234);put32(*bus,0x104,0x400);
+            put16(*bus,0x108,0x4e72);put16(*bus,0x10a,0x2700);
+        }
+        M68000 a=make_cpu(bulk),b=make_cpu(limited);bulk.owner=&a;limited.owner=&b;
+        limited.limit_delay=delay;assert(!b.limit_run_to_cycle(1));
+        assert(a.run(1000)==1000);const int64_t consumed=b.run(1000);
+        assert(consumed==int64_t(b.total_cycles()) && consumed>0 && consumed<=1000);
+        if(delay<2000)assert(uint64_t(consumed)==limited.limit_deadline);
+        else assert(consumed==1000); // A later deadline cannot extend the slice.
+        assert(b.run(uint32_t(1000-consumed))==1000-consumed);
+        assert(b.total_cycles()==1000 && a.pc()==b.pc() && a.sr()==b.sr());
+        assert(bulk.memory==limited.memory && bulk.accesses==limited.accesses);
+        assert(!a.callback_fault() && !b.callback_fault());
+    }
+}
+
 int main()
 {
     test_reset_alu_mmio_and_slice_equivalence();
@@ -398,6 +431,7 @@ int main()
     test_critical_stack_bus_error_literal_path();
     test_callback_guards_and_cycle_overflow();
     test_callback_microcode_cycle_timestamps();
+    test_dynamic_scheduler_deadline();
     std::puts("MAME MC68000 reset/ALU/bus/IRQ/STOP tests PASS");
     return 0;
 }

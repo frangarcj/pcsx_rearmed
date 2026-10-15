@@ -24,6 +24,16 @@ TwinkleBoard::TwinkleBoard(const Config &cfg)
         error_ = ARGUMENT;
         return;
     }
+    spu_dsw_ = cfg.spu_dsw;
+    if (cfg.hdd) {
+        auto hdd = *cfg.hdd;
+        hdd.device_kind = ATA_STORAGE_DEVICE_IDE_HDD;
+        hdd.line_opaque = this;hdd.irq = ata_irq;hdd.dmarq = ata_dmarq;
+        hdd.dasp = nullptr;hdd.pdiag = nullptr;
+        if (ata_storage_create(&hdd,&ata_) != ATA_STORAGE_OK) {
+            error_ = ARGUMENT;return;
+        }
+    }
 
     rf_config_.clock_hz = RF5C400_DEFAULT_CLOCK;
     rf_config_.cycle_origin = 0;
@@ -66,6 +76,7 @@ TwinkleBoard::~TwinkleBoard()
 {
     cpu_.reset();
     if (rf_) rf5c400_destroy(rf_);
+    ata_storage_destroy(ata_);
 }
 
 int64_t TwinkleBoard::run(uint32_t cycles)
@@ -87,6 +98,7 @@ int64_t TwinkleBoard::run(uint32_t cycles)
     };
     while (remaining) {
         uint64_t now = cpu_->total_cycles();
+        if (!sync_devices_to_cpu(now)) { busy_ = false;return error_ = DEVICE_ERROR; }
         if (now >= next_irq1_cycle_) {
             if (!advance_irq_deadline()) {
                 busy_ = false;
@@ -97,6 +109,12 @@ int64_t TwinkleBoard::run(uint32_t cycles)
             continue;
         }
         uint64_t step64 = std::min<uint64_t>(remaining, next_irq1_cycle_ - now);
+        const uint64_t deadline = ata_storage_next_event_ns(ata_);
+        if (deadline != UINT64_MAX) {
+            /* ceil(ns * 16 MHz / 1 GHz), without overflowing a product. */
+            const uint64_t at = (deadline / 125) * 2 + ((deadline % 125) * 2 + 124) / 125;
+            if (at > now) step64 = std::min(step64,at-now);
+        }
         const uint32_t step = uint32_t(step64);
         const int64_t consumed = cpu_->run(step);
         if (consumed < 0) {
@@ -120,7 +138,7 @@ int64_t TwinkleBoard::run(uint32_t cycles)
         irq1_ = true;
         cpu_->set_irq(1, true);
     }
-    if (!sync_rf_to_cpu(now)) {
+    if (!sync_devices_to_cpu(now)) {
         busy_ = false;
         return TIME_OVERFLOW;
     }
@@ -148,6 +166,7 @@ int TwinkleBoard::read16(uint32_t address, uint16_t mask, uint16_t *value)
     const bool ok = read_internal(address, mask, value);
     busy_ = false;
     if (ok) return OK;
+    if (error_ != OK) return error_;
     return address >= 0x300000 && address <= 0x30000f ? UNSUPPORTED : UNMAPPED;
 }
 
@@ -158,6 +177,7 @@ int TwinkleBoard::write16(uint32_t address, uint16_t data, uint16_t mask)
     busy_ = true;
     const bool ok = write_internal(address, data, mask);
     busy_ = false;
+    if (!ok && error_ != OK) return error_;
     return ok ? OK : (address >= 0x300000 && address <= 0x30000f ? UNSUPPORTED : UNMAPPED);
 }
 
@@ -171,6 +191,7 @@ uint64_t TwinkleBoard::rf_cycles() const
 uint32_t TwinkleBoard::cpu_pc() const { return cpu_ ? cpu_->pc() : 0; }
 uint16_t TwinkleBoard::cpu_sr() const { return cpu_ ? cpu_->sr() : 0; }
 bool TwinkleBoard::callback_fault() const { return callback_fault_ || (cpu_ && cpu_->callback_fault()); }
+bool TwinkleBoard::cpu_bus_error() const { return cpu_ && cpu_->bus_error(); }
 
 int TwinkleBoard::main_dpram_read(uint16_t offset, uint8_t *value)
 {
@@ -201,13 +222,19 @@ int TwinkleBoard::main_dpram_write(uint16_t offset, uint8_t value)
 bool TwinkleBoard::bus_read(void *opaque, M68kSpace, uint32_t address,
                             uint16_t mask, uint16_t *value)
 {
-    return static_cast<TwinkleBoard *>(opaque)->read_internal(address, mask, value);
+    auto *b=static_cast<TwinkleBoard *>(opaque);
+    const bool ok=b->read_internal(address,mask,value);
+    if(!ok)b->last_bus_error_address_=address;
+    return ok;
 }
 
 bool TwinkleBoard::bus_write(void *opaque, M68kSpace, uint32_t address,
                              uint16_t data, uint16_t mask)
 {
-    return static_cast<TwinkleBoard *>(opaque)->write_internal(address, data, mask);
+    auto *b=static_cast<TwinkleBoard *>(opaque);
+    const bool ok=b->write_internal(address,data,mask);
+    if(!ok)b->last_bus_error_address_=address;
+    return ok;
 }
 
 uint16_t TwinkleBoard::wave_read(void *opaque, uint32_t address)
@@ -232,6 +259,11 @@ bool TwinkleBoard::sync_rf_to_cpu(uint64_t cycles)
     const uint64_t r = cycles % RF_DEN;
     if (q > (UINT64_MAX - (r * RF_NUM) / RF_DEN) / RF_NUM) return false;
     const uint64_t target = q * RF_NUM + (r * RF_NUM) / RF_DEN;
+    return sync_rf_to_tick(target);
+}
+
+bool TwinkleBoard::sync_rf_to_tick(uint64_t target)
+{
     /* The 68K shim reports microcycle timestamps inside callbacks. They can
        be a few clocks ahead of the completed run budget; never rewind the
        sound stream when reconciling that budget afterward. */
@@ -239,6 +271,53 @@ bool TwinkleBoard::sync_rf_to_cpu(uint64_t cycles)
     if (rf5c400_advance_to_cycle(rf_, target) != RF5C400_OK) return false;
     rf_cycle_ = target;
     return true;
+}
+
+void TwinkleBoard::ata_irq(void *opaque,int state)
+{
+    auto &b = *static_cast<TwinkleBoard *>(opaque);
+    if (state && (b.spu_control_ & 0x0400)) b.set_irq(6,true);
+}
+void TwinkleBoard::ata_dmarq(void *opaque,int state)
+{ static_cast<TwinkleBoard *>(opaque)->ata_dmarq_ = state != 0; }
+
+bool TwinkleBoard::service_ata_dma()
+{
+    if (!ata_ || !ata_dmarq_) return true;
+    ata_storage_set_dmack(ata_,1);
+    while (ata_dmarq_) {
+        const uint64_t word = uint64_t(wave_bank_) * 0x400000u + spu_ata_dma_;
+        if (word >= WAVE_RAM_BYTES/2) {
+            ata_storage_set_dmack(ata_,0);error_ = DEVICE_ERROR;return false;
+        }
+        /* Source increments a word index and stores native ATA words without
+         * byte swapping. Bounds failure never consumes an unstoreable word. */
+        wave_[word] = ata_storage_dma_r(ata_);
+        spu_ata_dma_++;ata_dma_words_++;
+    }
+    ata_storage_set_dmack(ata_,0);return true;
+}
+
+bool TwinkleBoard::sync_devices_to_cpu(uint64_t cycle)
+{
+    if (ata_) {
+        if (cycle > UINT64_MAX/125) return false;
+        const uint64_t ns = cycle*125/2;
+        uint64_t deadline;
+        while ((deadline=ata_storage_next_event_ns(ata_)) <= ns) {
+            const uint64_t tick=(deadline/1000000000)*RF5C400_DEFAULT_CLOCK +
+                ((deadline%1000000000)*RF5C400_DEFAULT_CLOCK)/1000000000;
+            if (!sync_rf_to_tick(tick) || ata_storage_run_until(ata_,deadline) || !service_ata_dma()) return false;
+        }
+        if (ns >= ata_storage_now(ata_) && ata_storage_run_until(ata_,ns)) return false;
+        if (!service_ata_dma()) return false;
+        deadline=ata_storage_next_event_ns(ata_);
+        if (cpu_ && deadline != UINT64_MAX) {
+            const uint64_t at=(deadline/125)*2+((deadline%125)*2+124)/125;
+            if (at>cycle) cpu_->limit_run_to_cycle(at);
+        }
+    }
+    return sync_rf_to_cpu(cycle);
 }
 
 void TwinkleBoard::set_irq(unsigned level, bool asserted)
@@ -288,7 +367,7 @@ bool TwinkleBoard::read_internal(uint32_t address, uint16_t mask, uint16_t *valu
 {
     if (!value || !cpu_) return false;
     uint64_t cycle = 0;
-    if (!cpu_->current_cycle(cycle) || !sync_rf_to_cpu(cycle)) return false;
+    if (!cpu_->current_cycle(cycle) || !sync_devices_to_cpu(cycle)) return false;
     address &= 0x00ffffff;
     if (address & 1) return false;
     if (address <= 0x07fffe) {
@@ -302,18 +381,26 @@ bool TwinkleBoard::read_internal(uint32_t address, uint16_t mask, uint16_t *valu
     }
     if (address >= 0x280000 && address <= 0x2807fe) {
         const uint16_t off = uint16_t((address - 0x280000) >> 1);
-        *value = 0xffff;
+        *value = 0; // Source address-space default for the unmapped high lane.
         if (mask & 0x00ff) {
             dpram_left_read(off);
-            *value = uint16_t(0xff00 | dpram_[off]);
+            *value = dpram_[off];
         }
         return true;
     }
-    if (address >= 0x300000 && address <= 0x30000f) return false; // ATA CS0 needs real ATA backend
+    if (address == 0x200000) { *value = spu_dsw_;return true; }
+    if (address >= 0x300000 && address <= 0x30000f) {
+        if (!ata_) return false;
+        *value=ata_storage_command_r(ata_,(address-0x300000)>>1,mask,ATA_STORAGE_SOURCE_TRANSFER_MODE);
+        return service_ata_dma();
+    }
     if (address >= 0x400000 && address <= 0x400ffe) {
         return rf5c400_read(rf_, (address - 0x400000) >> 1, mask, value) == RF5C400_OK;
     }
-    if (address == 0x34000e) { *value = 0xffff; return true; } // MAME nopw, open-bus read
+    if ((address >= 0x240000 && address <= 0x240002) ||
+        (address >= 0x250000 && address <= 0x250002) || address == 0x260000 || address == 0x34000e) {
+        *value = 0;return true; // Source nopr / unmapped read defaults to zero.
+    }
     if (address >= 0x800000 && address <= 0xfffffe) {
         const uint32_t offset_words = (address - 0x800000) >> 1;
         const uint64_t word = uint64_t(wave_bank_) * 0x400000u + offset_words;
@@ -328,7 +415,7 @@ bool TwinkleBoard::read_internal(uint32_t address, uint16_t mask, uint16_t *valu
 bool TwinkleBoard::write_internal(uint32_t address, uint16_t data, uint16_t mask)
 {
     uint64_t cycle = 0;
-    if (!cpu_ || !cpu_->current_cycle(cycle) || !sync_rf_to_cpu(cycle)) return false;
+    if (!cpu_ || !cpu_->current_cycle(cycle) || !sync_devices_to_cpu(cycle)) return false;
     address &= 0x00ffffff;
     if (address & 1) return false;
     if (address >= 0x100000 && address <= 0x13fffe) {
@@ -365,7 +452,11 @@ bool TwinkleBoard::write_internal(uint32_t address, uint16_t data, uint16_t mask
         if (mask & 0x00ff) dpram_left_write(off, uint8_t(data));
         return true;
     }
-    if (address >= 0x300000 && address <= 0x30000f) return false; // ATA CS0
+    if (address >= 0x300000 && address <= 0x30000f) {
+        if (!ata_) return false;
+        ata_storage_command_w(ata_,(address-0x300000)>>1,data,mask,ATA_STORAGE_SOURCE_TRANSFER_MODE);
+        return sync_devices_to_cpu(cycle);
+    }
     if (address == 0x34000e) return true; // explicitly nopw in source
     if (address >= 0x400000 && address <= 0x400ffe) {
         return rf5c400_write(rf_, (address - 0x400000) >> 1, data, mask) == RF5C400_OK;

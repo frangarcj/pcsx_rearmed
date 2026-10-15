@@ -90,7 +90,7 @@ void m68000_device::execute_run(int cycles)
         m_count_before_instruction_step = -m_icount;
         m_icount = 0;
     }
-    m_total_cycles += static_cast<u64>(cycles);
+    m_total_cycles += static_cast<u64>(m_slice_cycles);
     m_running = false;
 }
 
@@ -100,6 +100,19 @@ bool m68000_device::current_cycle(u64 &cycle) const
     const u64 elapsed = m_running ? static_cast<u64>(static_cast<int64_t>(m_slice_cycles) - remaining) : 0;
     if (elapsed > UINT64_MAX - m_total_cycles) return false;
     cycle = m_total_cycles + elapsed;
+    return true;
+}
+
+bool m68000_device::limit_run_to_cycle(u64 deadline)
+{
+    u64 current;
+    if (!m_running || !current_cycle(current) || deadline < current) return false;
+    if (deadline - m_total_cycles >= u64(m_slice_cycles)) return true;
+    const int budget = int(deadline - m_total_cycles);
+    const int drop = m_slice_cycles - budget;
+    if (m_post_run) m_post_run_cycles -= drop;
+    else m_icount -= drop;
+    m_slice_cycles = budget;
     return true;
 }
 
@@ -274,7 +287,10 @@ int64_t M68000::run(uint32_t cycles)
     const uint32_t requested = cycles;
     while (cycles) {
         const uint32_t slice = std::min<uint32_t>(cycles, 0x7fffffff);
+        const uint64_t before = impl_->total_cycles();
         impl_->execute_run(static_cast<int>(slice));
+        const uint64_t actual = impl_->total_cycles() - before;
+        if (actual < slice) return requested - cycles + actual;
         cycles -= slice;
     }
     return requested;
@@ -306,3 +322,4 @@ bool M68000::bus_error() const { return impl_->bus_error(); }
 bool M68000::callback_fault() const { return impl_->callback_fault(); }
 uint64_t M68000::total_cycles() const { return impl_->total_cycles(); }
 bool M68000::current_cycle(uint64_t &cycle) const { return impl_->current_cycle(cycle); }
+bool M68000::limit_run_to_cycle(uint64_t deadline) { return impl_->limit_run_to_cycle(deadline); }

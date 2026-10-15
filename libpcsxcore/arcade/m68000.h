@@ -37,6 +37,10 @@ public:
        run(). Partial handlers can issue accesses beyond a short budget; the
        following runs pay that cycle debt. False means u64 time overflow. */
     bool current_cycle(uint64_t &cycle) const;
+    /* Scheduler-only: shorten the current run to an absolute CPU deadline.
+       Safe in a bus callback, preserves its current timestamp and instruction
+       debt. Never extends a slice or accepts a deadline before current time. */
+    bool limit_run_to_cycle(uint64_t deadline);
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;

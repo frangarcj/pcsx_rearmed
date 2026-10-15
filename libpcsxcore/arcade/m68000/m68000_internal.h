@@ -104,6 +104,7 @@ public:
     bool bus_error() const { return m_bus_error; }
     u64 total_cycles() const { return m_total_cycles; }
     bool current_cycle(u64 &cycle) const;
+    bool limit_run_to_cycle(u64 deadline);
     bool callback_active() const { return m_callback_depth != 0; }
     bool callback_fault() const { return m_callback_fault; }
     void note_callback_fault() { m_callback_fault = true; }

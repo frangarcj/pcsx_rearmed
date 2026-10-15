@@ -266,9 +266,13 @@ void test_ide_hdd_rotation_index_via_public_api() {
 
 void finish_power_on_reset(ata_storage_t *ata, bool expect_ready) {
   assert(ata_storage_status(ata) & kBsy);
+  assert(ata_storage_next_event_ns(nullptr) == UINT64_MAX);
+  assert(ata_storage_next_event_ns(ata) == 2'000'000);
   assert(ata_storage_run_until(ata, 2'000'000) == ATA_STORAGE_OK);
   assert(ata_storage_status(ata) & kBsy); // device detection starts diagnostics.
+  assert(ata_storage_next_event_ns(ata) == 4'000'000);
   assert(ata_storage_run_until(ata, 4'000'000) == ATA_STORAGE_OK);
+  assert(ata_storage_next_event_ns(ata) == UINT64_MAX);
   assert(!(ata_storage_status(ata) & kBsy));
   if (expect_ready)
     assert(ata_storage_status(ata) & kDrdy);

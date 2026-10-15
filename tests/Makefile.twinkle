@@ -6,10 +6,18 @@ INCLUDES := -I$(GEN) -Ilibpcsxcore/arcade -Ilibpcsxcore/arcade/m68000
 SOURCES := libpcsxcore/arcade/m68000.cpp $(GEN)/m68000-decode.cpp \
            $(GEN)/m68000-sdf.cpp $(GEN)/m68000-sdp.cpp \
            libpcsxcore/arcade/rf5c400.cpp libpcsxcore/arcade/twinkle_board.cpp \
+           libpcsxcore/arcade/ata_storage.cpp libpcsxcore/arcade/ata_mame/atahle_port.cpp \
+           libpcsxcore/arcade/ata_mame/atastorage_port.cpp libpcsxcore/arcade/gnet_pccard.cpp \
+           libpcsxcore/arcade/rf5c296.cpp \
            tests/test_twinkle_board.cpp
 COMMON := -std=c++20 -g -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable $(INCLUDES)
 TARGET := $(BUILD)/test-twinkle
 SAN_TARGET := $(BUILD)/test-twinkle-sanitize
+HEADERS := libpcsxcore/arcade/twinkle_board.h libpcsxcore/arcade/rf5c400.h \
+           libpcsxcore/arcade/m68000.h libpcsxcore/arcade/m68000/m68000_internal.h \
+           libpcsxcore/arcade/m68000/m68000_compat.h libpcsxcore/arcade/ata_storage.h \
+           libpcsxcore/arcade/ata_mame/atahle_port.h libpcsxcore/arcade/ata_mame/atastorage_port.h \
+           libpcsxcore/arcade/ata_mame/ata_mame_compat.h
 
 .PHONY: test sanitize clean
 $(GEN)/m68000-sdf.cpp: libpcsxcore/arcade/m68000/m68000.lst libpcsxcore/arcade/m68000/m68000gen.py
@@ -25,10 +33,10 @@ $(GEN)/m68000-head.h: libpcsxcore/arcade/m68000/m68000.lst libpcsxcore/arcade/m6
 	@mkdir -p $(GEN)
 	$(PYTHON) libpcsxcore/arcade/m68000/m68000gen.py header $< $@
 
-$(TARGET): $(SOURCES) $(GEN)/m68000-head.h
+$(TARGET): $(SOURCES) $(HEADERS) $(GEN)/m68000-head.h
 	@mkdir -p $(BUILD)
 	$(CXX) $(COMMON) -O2 $(SOURCES) -o $@
-$(SAN_TARGET): $(SOURCES) $(GEN)/m68000-head.h
+$(SAN_TARGET): $(SOURCES) $(HEADERS) $(GEN)/m68000-head.h
 	@mkdir -p $(BUILD)
 	$(CXX) $(COMMON) -O1 -fsanitize=address,undefined -fno-omit-frame-pointer $(SOURCES) -o $@
 test: $(TARGET)

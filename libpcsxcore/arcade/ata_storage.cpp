@@ -29,6 +29,7 @@ struct ata_storage {
   virtual void set_pdiag_input(int state) = 0;
   virtual int advance(uint64_t ns) = 0;
   virtual uint64_t now() const = 0;
+  virtual uint64_t next_event_ns() const = 0;
   virtual uint8_t status() const = 0;
   virtual uint8_t error() const = 0;
   virtual uint16_t sector_count() const = 0;
@@ -199,6 +200,7 @@ public:
     return valid ? ATA_STORAGE_OK : ATA_STORAGE_ARGUMENT;
   }
   uint64_t now() const override { return device_t::now(); }
+  uint64_t next_event_ns() const override { return device_t::next_event_ns(); }
   uint8_t status() const override { return m_status; }
   uint8_t error() const override { return m_error; }
   uint16_t sector_count() const override { return m_sector_count; }
@@ -419,6 +421,9 @@ extern "C" int ata_storage_run_until(ata_storage_t *ata, uint64_t ns) {
 }
 extern "C" uint64_t ata_storage_now(const ata_storage_t *ata) {
   return ata ? ata->now() : 0;
+}
+extern "C" uint64_t ata_storage_next_event_ns(const ata_storage_t *ata) {
+  return ata ? ata->next_event_ns() : UINT64_MAX;
 }
 extern "C" uint16_t ata_storage_command_r(ata_storage_t *ata, uint32_t offset,
                                             uint16_t mask, int eight_bit) {
