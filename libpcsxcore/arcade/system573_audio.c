@@ -1,11 +1,16 @@
-/* GPL-2.0-or-later. Gain-1 speaker routes from MAME ksys573.cpp. Legacy
- * integer paths stay exact; digital floats join before final saturation.
- * Timestamped buffering is host output plumbing. */
+/* GPL-2.0-or-later. Timestamped host speaker buffering. System573 defaults
+ * to source gain-1 routes; GV selects SPU gain 0.75 and swapped channels.
+ * Fractional routes join before final saturation; integer defaults stay exact. */
 #include "system573_audio.h"
 #include <string.h>
 #include <limits.h>
 #include <math.h>
-void system573_audio_init(System573Audio *a){memset(a,0,sizeof(*a));}
+void system573_audio_init(System573Audio *a){memset(a,0,sizeof(*a));a->spu_gain=1;}
+int system573_audio_spu_route(System573Audio *a,float gain,unsigned swap){
+    if(!a || a->started || a->cd_inputs || a->spu_inputs || a->digital_inputs ||
+       !isfinite(gain) || gain<0 || gain>1 || swap>1)return -1;
+    a->spu_gain=gain;a->spu_swap=swap;return 0;
+}
 int system573_audio_enable_digital(System573Audio *a){
     if(!a || a->started || a->cd_inputs || a->spu_inputs || a->digital_inputs)return -1;
     a->digital_enabled=1;return 0;
@@ -22,9 +27,11 @@ static void deliver(System573Audio *a,int force){
         unsigned n=ready>256?256:(unsigned)ready;int16_t data[512];
         for(unsigned i=0;i<n;i++,a->next++)for(unsigned ch=0;ch<2;ch++){
             unsigned slot=a->next%SYSTEM573_AUDIO_RING;
-            int value=(int)a->spu[slot][ch]+a->cd[slot][ch];
-            if(a->digital_enabled){
-                float sum=(float)value+a->digital[slot][ch]*32768.0f;
+            int spu=a->spu[slot][ch^a->spu_swap];
+            int value=spu+a->cd[slot][ch];
+            if(a->digital_enabled || a->spu_gain!=1){
+                float sum=(float)spu*a->spu_gain+a->cd[slot][ch];
+                if(a->digital_enabled)sum+=a->digital[slot][ch]*32768.0f;
                 if(sum>INT16_MAX){sum=INT16_MAX;a->clipped++;}
                 if(sum<INT16_MIN){sum=INT16_MIN;a->clipped++;}
                 value=(int)sum; /* Same truncation as source float -> PCM output. */

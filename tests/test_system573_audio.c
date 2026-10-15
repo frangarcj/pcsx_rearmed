@@ -64,5 +64,16 @@ int main(void){
     assert(!system573_audio_spu(a,0,quiet,1));
     for(unsigned i=0;i<SYSTEM573_AUDIO_RING;i++)assert(!system573_audio_digital(a,i,0,0));
     assert(system573_audio_digital(a,SYSTEM573_AUDIO_RING,0,0)==-1 && a->faults==8);
-    free(a);puts("System573 gain-1 SPU/CDDA/digital clock sum, float cancellation, saturation, source deferral and history rejection PASS");return 0;
+    /* GV's source swaps SPU only, at 0.75; CDDA retains its channel order.
+     * Fractional SPU values must survive until the final cancellation. */
+    system573_audio_init(a);used=0;assert(!system573_audio_spu_route(a,.75f,1));system573_audio_set_sink(a,sink,NULL);
+    int16_t gv[4]={1,-1,32767,-32768};assert(!system573_audio_spu(a,0,gv,2));
+    assert(!system573_audio_cd(a,0,1,-1));assert(!system573_audio_cd(a,1,-10000,10000));
+    assert(!system573_audio_flush(a) && used==2);
+    assert(output[0][0]==0 && output[0][1]==0);
+    assert(output[1][0]==-32768 && output[1][1]==32767 && a->clipped==2);
+    assert(system573_audio_spu_route(a,1,0)==-1);
+    system573_audio_init(a);assert(system573_audio_spu_route(a,NAN,0)==-1);
+    assert(system573_audio_spu_route(a,.75f,2)==-1);
+    free(a);puts("System573/GV timestamped source routes, float cancellation, saturation, source deferral and history rejection PASS");return 0;
 }

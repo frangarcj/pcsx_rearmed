@@ -18,6 +18,9 @@ int systemgv_active(void);
 void systemgv_mem_reset(void);
 void systemgv_reset(void);
 int systemgv_sync(uint32_t psx_cycle);
+void systemgv_set_audio_output(void (*sink)(void *,const int16_t *,unsigned),void *opaque);
+int systemgv_audio_spu_output(const int16_t *stereo,unsigned frames,uint32_t end_cycle);
+int systemgv_audio_flush_output(void);
 int systemgv_read(uint32_t address, unsigned width, uint32_t *value);
 int systemgv_write(uint32_t address, unsigned width, uint32_t value,
                    uint32_t mem_mask);

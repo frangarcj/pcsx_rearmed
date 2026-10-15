@@ -64,8 +64,10 @@ make -f Makefile.mac-harness BUILD=build/mac-harness-gv-drc \
 ```
 
 Authentic ARM64 DRC still routes Sony serial MMIO through console handlers and
-does not pass Hyper Athlete startup. CDDA mixing, source timing comparison,
-special game peripherals and Vita integration remain unverified.
+does not pass Hyper Athlete startup. Source timing comparison, remaining
+special game peripherals and Vita integration remain unverified. The native
+SPU/CDDA speaker mix now has original Hyper Athlete evidence in
+`konamigv-mac.md`.
 
 ## Authentic Mac startup follow-up
 
@@ -80,6 +82,8 @@ word and dword routing, GPU info type and the default EEPROM's exported bytes.
 
 The additional DMA write fix now lets the native interpreter/GL enter a P1
 running event with exercised inputs, nonzero SPU PCM and zero board faults. Mac `--nvram` uses
-128-byte runtime EEPROM images for GV; `--audio` captures SPU. CDDA mixing remains
-pending. See [the player evidence](konamigv-mac.md) and
+128-byte runtime EEPROM images for GV; `--audio` captures SPU, while
+`--mixed-audio` captures source-swapped gain-0.75 SPU plus gain-1 CDDA. This
+route now passes original Hyper Athlete GL/NEON checks. See
+[the player evidence](konamigv-mac.md) and
 [the ongoing board validation matrix](arcade-mac-validation.md).

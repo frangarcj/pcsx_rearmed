@@ -1,4 +1,4 @@
-/* GPL-2.0-or-later. Gain-1 speaker routes at a shared 44.1 kHz output epoch.
+/* GPL-2.0-or-later. PSX speaker routes at a shared 44.1 kHz output epoch.
  * Digital float input is already resampled by its CPU/DAC clock bridge. */
 #ifndef PCSX_SYSTEM573_AUDIO_H
 #define PCSX_SYSTEM573_AUDIO_H
@@ -13,9 +13,14 @@ typedef struct System573Audio {
     unsigned peak,faults;
     uint64_t digital_next,digital_inputs,digital_nonzero;
     int started,digital_enabled;
+    float spu_gain;
+    unsigned spu_swap;
     system573_audio_sink_t sink;void *opaque;
 } System573Audio;
 void system573_audio_init(System573Audio *a);
+/* Shared host mixer: GV uses source SPU gain 0.75 with swapped channels.
+ * Configure before source data; gain remains float until the final sum. */
+int system573_audio_spu_route(System573Audio *a,float gain,unsigned swap);
 void system573_audio_set_sink(System573Audio *a,system573_audio_sink_t sink,void *opaque);
 /* Enable only at initial epoch, before any source data. */
 int system573_audio_enable_digital(System573Audio *a);

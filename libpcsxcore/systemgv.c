@@ -13,6 +13,7 @@
 #include "new_dynarec/new_dynarec.h"
 #endif
 #include "arcade/chd_cd.h"
+#include "arcade/system573_audio.h"
 #include "arcade/konamigv.h"
 #include "arcade/simpbowl_io.h"
 #include "arcade/tokimeki_io.h"
@@ -88,6 +89,9 @@ typedef struct GvBoard {
     KonamiGV *device;
     psx_sio_t *sio[2];
     ChdCd *cd;
+    System573Audio audio;
+    uint64_t cdda_frames,cdda_nonzero;
+    unsigned cdda_peak;
     SimpBowlIO *simp;
     TokimekiIO *tok;
     BtChampIO *btc;
@@ -576,10 +580,23 @@ static int sync_devices(uint64_t now_ns)
 
 static int advance_cd_media(void *opaque,uint64_t ns)
 {(void)opaque;return chd_cd_advance_to(board.cd,ns);}
+static void cd_pcm(void *opaque,int16_t left,int16_t right,uint64_t index,int playing)
+{
+    (void)opaque;
+    if(system573_audio_cd(&board.audio,index,left,right))board.fault=1;
+    if(playing){
+        board.cdda_frames++;board.cdda_nonzero+=left!=0 || right!=0;
+        unsigned a=left<0?-left:left,b=right<0?-right:right;
+        if(a>board.cdda_peak)board.cdda_peak=a;if(b>board.cdda_peak)board.cdda_peak=b;
+    }
+}
 static int activate_device(const nscsi_cd_media_ops_t *media)
 {
     konamigv_config_t config;
     size_t i;
+    system573_audio_init(&board.audio);
+    if(system573_audio_spu_route(&board.audio,.75f,1) ||
+       !chd_cd_set_clocked_pcm_sink(board.cd,cd_pcm,NULL))return -1;
     for (i = 0; i < 3; i++) board.inputs[i] = UINT32_MAX;
     memset(&config, 0, sizeof(config));
     config.opaque = &board;
@@ -1208,6 +1225,25 @@ int systemgv_sync(uint32_t psx_cycle)
     return board.fault ? -1 : 0;
 }
 
+void systemgv_set_audio_output(void (*sink)(void *,const int16_t *,unsigned),void *opaque)
+{system573_audio_set_sink(&board.audio,sink,opaque);}
+int systemgv_audio_spu_output(const int16_t *stereo,unsigned frames,uint32_t end_cycle)
+{
+    if(!board.active || !board.audio.sink || !frames)return 0;
+    if(systemgv_sync(psxRegs.cycle))return -1;
+    int64_t end=(int64_t)board.sio_cycles+(int32_t)(end_cycle-board.last_cycle);
+    if(end<0 || (uint64_t)end<(uint64_t)frames*768){board.fault=1;return -1;}
+    uint64_t first=((uint64_t)end-(uint64_t)frames*768)/768;
+    if(board.audio.started && first!=board.audio.spu_next)
+        fprintf(stderr,"SystemGV SPU clock discontinuity: expected=%"PRIu64" first=%"PRIu64" frames=%u end_cycle=%u cpu_cycle=%u\n",board.audio.spu_next,first,frames,end_cycle,psxRegs.cycle);
+    if(system573_audio_spu(&board.audio,first,stereo,frames)){board.fault=1;return -1;}return 0;
+}
+int systemgv_audio_flush_output(void)
+{
+    if(!board.active)return 0;
+    if(systemgv_sync(psxRegs.cycle) || system573_audio_flush(&board.audio)){board.fault=1;return -1;}return 0;
+}
+
 int systemgv_read(uint32_t address, unsigned width, uint32_t *value)
 {
     int result;
@@ -1497,6 +1533,9 @@ void systemgv_report(FILE *out)
             board.dma_requests, status.dma_bytes_remaining, status.eeprom_busy,
             status.faults, board.fault);
     fprintf(out, "SystemGV: CD_DMA_words=%u\n", board.cd_dma_words);
+    fprintf(out,"SystemGV CDDA: decoded_frames=%"PRIu64" nonzero_frames=%"PRIu64" peak=%u\n",board.cdda_frames,board.cdda_nonzero,board.cdda_peak);
+    fprintf(out,"SystemGV speaker: rate=44100 SPU_gain=0.75 SPU_channels=swapped CDDA_gain=1 frames=%"PRIu64" SPU_inputs=%"PRIu64" SPU_nonzero=%"PRIu64" CDDA_clock=%"PRIu64" CDDA_nonzero=%"PRIu64" clipped=%"PRIu64" peak=%u pending_SPU=%"PRIu64" faults=%u\n",
+        board.audio.frames,board.audio.spu_inputs,board.audio.spu_nonzero,board.audio.cd_inputs,board.audio.cd_nonzero,board.audio.clipped,board.audio.peak,board.audio.spu_next>board.audio.next?board.audio.spu_next-board.audio.next:0,board.audio.faults);
     fprintf(out,"SystemGV: NCR command=%02x status=%02x int=%02x seq=%02x fifo=%u phase=%u count=%u/%u\n",
         status.ncr.command,status.ncr.status,status.ncr.interrupt_status,status.ncr.sequence,
         status.ncr.fifo_count,status.ncr.phase,status.ncr.transfer_count,status.ncr.transfer_counter);

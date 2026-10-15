@@ -88,8 +88,8 @@ GL and NEON reach the same PC `80030e40`, 3170272006 CPU cycles and
 | RAM | `1a8ae3b95cbb093cdd0f91baac66389e559f8075cead010b53ad7df7b72a7512` |
 | WAV | `a446cf19f8bc5cbd151aae9f024dd70562a7a7b318763a2bd9ecf3901238127d` |
 
-SPU generates 4125216 stereo frames at 44100 Hz, peak 1102. CDDA playback
-position advances, but its PCM still has no speaker mix; this does not validate
+The earlier SPU capture generates 4125216 stereo frames at 44100 Hz, peak
+1102. At that stage CDDA position advances without a speaker mix; this does not validate
 all music/speech. Existing GV interactive source SPU routing swaps channels
 and uses gain 0.75; this particular replay captures the unscaled native SPU.
 No new live SDL output comparison is claimed.
@@ -125,7 +125,39 @@ prepared packages; new registry packages no longer list the implemented
 trackball/flash paths as unsupported. `game_execution_verified=false` remains
 a preparer provenance field, not a claim updated by executing the game.
 
-Full bowling/baseball/football games, scores, two-player sessions, CDDA mixing,
+Full bowling/baseball/football games, scores, two-player sessions,
 authentic DRC, whole-machine save states and physical Vita remain separate
 checks. Dead Eye, Metro, System 573 and Twinkle remain open in the full Mac
 board matrix. ROMs, CHDs, binaries, NVRAM and captures are not committed.
+
+## Source speaker follow-up, 2026-10-15
+
+The shared GV source-clock speaker route now mixes swapped SPU channels at
+gain 0.75 with unswapped CDDA at gain 1. See `konamigv-mac.md` for the clock
+contract, the large-DMA correction, fractional-gain tests and separate live
+Hyper Athlete validation. The preceding SPU-only paragraph and frame count
+describe the earlier implementation; CDDA mixing is no longer pending here.
+
+The original 5600-frame football replay now passes again on both GL and NEON,
+using a scratch copy of the original installed flash rather than changing the
+audited media directory. Both consume 597/597 inputs, finish at PC `80030e40`
+with 3170272006 cycles / 234804902 blocks, retain `track=708/120,123/456`,
+complete 3008 CD DMA requests and report zero device/peripheral/mixer faults.
+The RAM SHA256 still matches the preceding baseline exactly. GL and NEON
+also produce byte-identical raw SPU and complete speaker WAVs:
+
+| Evidence | Result |
+| --- | --- |
+| Speaker | 4,127,958 frames at 44.1 kHz, peak 18456, zero clipping or pending SPU |
+| Raw SPU | 4,127,958 frames, peak 1102 |
+| Original CDDA | 2,268,976 decoded frames, 2,251,308 nonzero frames, peak 18456 |
+| Raw SPU WAV SHA256 | `772a192647cf9e54a12cceb41e1e570f74dc0057946e086f461089452d1ccb33` |
+| Speaker WAV SHA256 | `4112c967099e203df41e7148bc05bcb61bd3b7f9f0628ac1b95701e424a01b33` |
+
+Add `--mixed-audio /tmp/btchamp-speaker.wav` to the player command, using
+the current GL or NEON harness. Evidence is retained under ignored
+`artifacts/boards-mac-20261015/konamigv/hyperath-audio` alongside the shared
+GV checks. This follow-up verifies original CDDA reaching the speaker during
+football; a complete event, scored goal, P2 game and the operator's spoken
+left/right sound-test procedure remain separate checks. Source BAD_DUMP and
+MACHINE_NOT_WORKING annotations are unchanged.

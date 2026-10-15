@@ -41,7 +41,8 @@ def main() -> int:
                              stderr=subprocess.STDOUT, timeout=45)
         if run.returncode:
             raise RuntimeError(f"GV fixture failed ({run.returncode}):\n{run.stdout}")
-        expected = ("SystemGV selftest: PASS", "SystemGV MIPS fixture: PASS",
+        expected = ("KonamiGV large SPU DMA clock: PASS bytes=524288",
+                    "SystemGV selftest: PASS", "SystemGV MIPS fixture: PASS",
                     "SystemGV DMA write fixture: PASS CHCR=01000201 block_size=512 remaining=0",
                     "DMA5_pending=1048576 CHCR_completed=1 IRQ10=1",
                     "IRQ10=1 DRQ=0 DMA=3 requests remaining=1048576",

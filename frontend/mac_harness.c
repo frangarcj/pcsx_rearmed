@@ -224,43 +224,61 @@ static int load_system12(const char *path)
  * emulated chip or resampling its 768-main-cycle sample cadence. */
 static const char *mixed_audio_path;
 #ifdef PCSX_SYSTEM573
-static PcmWav system573_speaker_wav;
-static void (*system573_headless_feed)(void *,int);
-static int system573_speaker_error;
-static void harness_system573_spu_pcm(void *data,int bytes){
-  if(bytes<0 || (bytes&3) || system573_audio_spu_output(data,(unsigned)bytes/4,dfsound_output_end_cycle()))
-    system573_speaker_error=1;
+static PcmWav cd_speaker_wav;
+static void (*cd_headless_feed)(void *,int);
+static int cd_speaker_error;
+static int cd_speaker_flush(void){
+#ifdef PCSX_SYSTEM_GV
+  if(selected_board->family==102)return systemgv_audio_flush_output();
+#endif
+  return system573_audio_flush_output();
 }
-static void harness_system573_speaker_pcm(void *opaque,const int16_t *samples,unsigned frames){
+static void cd_speaker_sink(void (*sink)(void *,const int16_t *,unsigned),void *opaque){
+#ifdef PCSX_SYSTEM_GV
+  if(selected_board->family==102){systemgv_set_audio_output(sink,opaque);return;}
+#endif
+  system573_set_audio_output(sink,opaque);
+}
+static int cd_speaker_spu(const int16_t *pcm,unsigned frames,u32 cycle){
+#ifdef PCSX_SYSTEM_GV
+  if(selected_board->family==102)return systemgv_audio_spu_output(pcm,frames,cycle);
+#endif
+  return system573_audio_spu_output(pcm,frames,cycle);
+}
+static void harness_cd_spu_pcm(void *data,int bytes){
+  if(bytes<0 || (bytes&3) || cd_speaker_spu(data,(unsigned)bytes/4,dfsound_output_end_cycle()))
+    cd_speaker_error=1;
+}
+static void harness_cd_speaker_pcm(void *opaque,const int16_t *samples,unsigned frames){
   (void)opaque;int16_t four[256*4]={0};
   while(frames){unsigned n=frames>256?256:frames;
     for(unsigned i=0;i<n;i++){four[4*i]=samples[2*i];four[4*i+1]=samples[2*i+1];}
-    if(pcm_wav_append4(&system573_speaker_wav,four,n))system573_speaker_error=1;
+    if(pcm_wav_append4(&cd_speaker_wav,four,n))cd_speaker_error=1;
     samples+=2*n;frames-=n;
   }
 }
-static int open_system573_speaker_audio(const char *path){
-  if(!system573_has_cd() || !out_current || pcm_wav_open(&system573_speaker_wav,path,44100))return -1;
-  system573_headless_feed=out_current->feed;out_current->feed=harness_system573_spu_pcm;
-  system573_set_audio_output(harness_system573_speaker_pcm,NULL);return 0;
+static int open_cd_speaker_audio(const char *path){
+  if((selected_board->family!=102 && !system573_has_cd()) || !out_current || pcm_wav_open(&cd_speaker_wav,path,44100))return -1;
+  cd_headless_feed=out_current->feed;out_current->feed=harness_cd_spu_pcm;
+  cd_speaker_sink(harness_cd_speaker_pcm,NULL);return 0;
 }
-static int harness_system573_large_spu_dma_fixture(void){
+static int harness_cd_large_spu_dma_fixture(void){
   const u32 cycle=psxRegs.cycle;
   /* A complete 512 KiB transfer used by the original BIOS exceeded the
    * console renderer's desync threshold with its speculative size delay. */
   SPU_writeRegister(0x1f801da6,0,cycle);
   SPU_writeDMAMem((unsigned short *)(psxRegs.ptrs.psxM+0x20000),0x40000,cycle);
   u32 end=dfsound_output_end_cycle();int ok=(int32_t)(end-cycle)<=768;
-  fprintf(stderr,"System573 large SPU DMA clock: %s bytes=524288 CPU_cycle=%u PCM_end=%u future=%d\n",ok?"PASS":"FAIL",cycle,end,(int32_t)(end-cycle));
+  fprintf(stderr,"%s large SPU DMA clock: %s bytes=524288 CPU_cycle=%u PCM_end=%u future=%d\n",selected_board->name,ok?"PASS":"FAIL",cycle,end,(int32_t)(end-cycle));
   return ok?0:-1;
 }
-static int close_system573_speaker_audio(void){
-  if(!system573_headless_feed)return system573_speaker_error;
+static int close_cd_speaker_audio(void){
+  if(!cd_headless_feed)return cd_speaker_error;
   if(SPU_async)SPU_async(psxRegs.cycle,1);
-  if(system573_audio_flush_output())system573_speaker_error=1;
-  system573_set_audio_output(NULL,NULL);out_current->feed=system573_headless_feed;system573_headless_feed=NULL;
-  fprintf(stderr,"System573 speaker WAV: rate=44100 frames=%"PRIu64" error=%d\n",system573_speaker_wav.bytes/4,system573_speaker_error);
-  if(pcm_wav_close(&system573_speaker_wav))system573_speaker_error=1;return system573_speaker_error;
+  if(cd_speaker_flush())cd_speaker_error=1;
+  cd_speaker_sink(NULL,NULL);out_current->feed=cd_headless_feed;cd_headless_feed=NULL;
+  fprintf(stderr,"%s speaker WAV: rate=44100 frames=%"PRIu64" error=%d\n",selected_board->name,cd_speaker_wav.bytes/4,cd_speaker_error);
+  if(pcm_wav_close(&cd_speaker_wav))cd_speaker_error=1;return cd_speaker_error;
 }
 #endif
 static PcmWav spu_wav;
@@ -929,7 +947,7 @@ static void interactive_spu_pcm(void *data, int bytes)
 }
 
 #ifdef PCSX_SYSTEM573
-static void interactive_system573_speaker(void *opaque,const int16_t *pcm,unsigned frames){
+static void interactive_cd_speaker(void *opaque,const int16_t *pcm,unsigned frames){
   (void)opaque;int16_t samples[512];interactive_zn_spu_frames+=frames;
   while(frames){unsigned n=frames>256?256:frames;
     for(unsigned i=0;i<2*n;i++){
@@ -1013,19 +1031,18 @@ static int open_interactive_audio(void)
     else fprintf(stderr, "Interactive %s audio: SPU=%u/768 Hz gain=0.3 Zoom=25000000/768 Hz gain=1 output=44100 Hz\n", selected_board->family == 105 ? "FX1Z" : "G-Net", PSXCLK);
   }
 #ifdef PCSX_SYSTEM573
-  else if(selected_board->family==115 && system573_has_cd()){
-    interactive_spu_feed=out_current->feed;out_current->feed=harness_system573_spu_pcm;
-    system573_set_audio_output(interactive_system573_speaker,NULL);
-    fprintf(stderr,"Interactive System573 CD audio: SPU=44100 Hz gain=1 CDDA=44100 Hz gain=1 timestamped speaker output=44100 Hz\n");
-    if(system573_has_digital())fprintf(stderr,"Interactive System573 digital audio: source MPEG rate, gain=1, CPU-clocked resampling to 44100 Hz\n");
+  else if(selected_board->family==102 || (selected_board->family==115 && system573_has_cd())){
+    interactive_spu_feed=out_current->feed;out_current->feed=harness_cd_spu_pcm;
+    cd_speaker_sink(interactive_cd_speaker,NULL);
+    fprintf(stderr,"Interactive %s CD audio: SPU=44100 Hz gain=%s CDDA=44100 Hz gain=1 timestamped speaker output=44100 Hz\n",selected_board->name,selected_board->family==102?"0.75 channels=swapped":"1");
+    if(selected_board->family==115 && system573_has_digital())fprintf(stderr,"Interactive System573 digital audio: source MPEG rate, gain=1, CPU-clocked resampling to 44100 Hz\n");
   }
 #endif
   else if (source_spu_speaker_board()) {
     interactive_spu_feed = out_current->feed;
     interactive_spu_cycle = psxRegs.cycle;
     out_current->feed = interactive_zn_spu_pcm;
-    if(selected_board->family==102)fprintf(stderr,"Interactive GV audio: SPU=44100 Hz gain=0.75 channels=swapped output=44100 Hz; CDDA mix pending\n");
-    else if(selected_board->family==115)fprintf(stderr,"Interactive System 573 audio: SPU=44100 Hz gain=1 output=44100 Hz\n");
+    if(selected_board->family==115)fprintf(stderr,"Interactive System 573 audio: SPU=44100 Hz gain=1 output=44100 Hz\n");
     else fprintf(stderr, "Interactive %s audio: SPU=44100 Hz gain=0.35 output=44100 Hz\n", selected_board->family == 115 ? "System 573" : selected_board->family == 114 ? "Metro ZN" : selected_board->family == 112 ? "Judge ZN" : selected_board->family == 110 ? "Primal ZN" : selected_board->family == 107 ? "Visco ZN" : "Tecmo TPS");
   } else {
     system12_set_audio_output(interactive_audio_cb, NULL);
@@ -1080,15 +1097,15 @@ static void close_interactive_audio(void)
     if (interactive_mix.error) interactive_audio_error = 1;
   }
 #ifdef PCSX_SYSTEM573
-  else if(selected_board->family==115 && system573_has_cd()){
+  else if(selected_board->family==102 || (selected_board->family==115 && system573_has_cd())){
     if(SPU_async)SPU_async(psxRegs.cycle,1);
-    if(system573_audio_flush_output())interactive_audio_error=1;
-    system573_set_audio_output(NULL,NULL);
-    if(spu_original_feed==harness_system573_spu_pcm)spu_original_feed=interactive_spu_feed;
-    if(out_current->feed==harness_system573_spu_pcm)out_current->feed=interactive_spu_feed;
+    if(cd_speaker_flush())interactive_audio_error=1;
+    cd_speaker_sink(NULL,NULL);
+    if(spu_original_feed==harness_cd_spu_pcm)spu_original_feed=interactive_spu_feed;
+    if(out_current->feed==harness_cd_spu_pcm)out_current->feed=interactive_spu_feed;
     interactive_spu_feed=NULL;
-    if(system573_speaker_error)interactive_audio_error=1;
-    fprintf(stderr,"Interactive System573 speaker: frames=%"PRIu64" nonzero=%"PRIu64" peak=%u error=%d\n",interactive_zn_spu_frames,interactive_zn_spu_nonzero,interactive_zn_spu_peak,interactive_audio_error);
+    if(cd_speaker_error)interactive_audio_error=1;
+    fprintf(stderr,"Interactive %s speaker: frames=%"PRIu64" nonzero=%"PRIu64" peak=%u error=%d\n",selected_board->name,interactive_zn_spu_frames,interactive_zn_spu_nonzero,interactive_zn_spu_peak,interactive_audio_error);
   }
 #endif
   else if (source_spu_speaker_board()) {
@@ -1627,7 +1644,7 @@ int main(int argc, char **argv)
     fprintf(stderr,"--gnet-jp1 requires an authentic G-Net profile\n"); return 2;
   }
 #ifdef PCSX_SYSTEM12
-  if (mixed_audio_path && ((!interactive && board_family!=115) || (board_family != 102 && board_family != 103 && board_family != 104 && board_family != 105 && board_family != 106 && board_family != 107 && board_family != 108 && board_family != 109 && board_family != 110 && board_family != 111 && board_family != 112 && board_family != 113 && board_family != 114 && board_family != 115) ||
+  if (mixed_audio_path && ((!interactive && board_family!=115 && board_family!=102) || (board_family != 102 && board_family != 103 && board_family != 104 && board_family != 105 && board_family != 106 && board_family != 107 && board_family != 108 && board_family != 109 && board_family != 110 && board_family != 111 && board_family != 112 && board_family != 113 && board_family != 114 && board_family != 115) ||
       !strcmp(mixed_audio_path, output) ||
       (audio_path && !strcmp(mixed_audio_path, audio_path)) ||
       (nvram_path && !strcmp(mixed_audio_path, nvram_path)) ||
@@ -2017,7 +2034,7 @@ int main(int argc, char **argv)
     if ((board_family == 101 || board_family == 102 || board_family == 104 || board_family == 105 || board_family == 106 || board_family == 107 || board_family == 108 || board_family == 109 || board_family == 110 || board_family == 111 || board_family == 112 || board_family == 114 || board_family == 115) &&
         harness_source_spu_dma_fixture(selected_board->name, 33868800, 24000)) result = 1;
 #ifdef PCSX_SYSTEM573
-    if(board_family==115 && harness_system573_large_spu_dma_fixture())result=1;
+    if((board_family==115 || board_family==102) && harness_cd_large_spu_dma_fixture())result=1;
 #endif
   }
 #ifdef PCSX_SYSTEM_GV
@@ -2204,8 +2221,8 @@ int main(int argc, char **argv)
   }
 #endif
 #ifdef PCSX_SYSTEM573
-  if(!interactive && mixed_audio_path && open_system573_speaker_audio(mixed_audio_path)){
-    fprintf(stderr,"--mixed-audio requires an original System573 CD profile and writable output\n");result=1;
+  if(!interactive && mixed_audio_path && open_cd_speaker_audio(mixed_audio_path)){
+    fprintf(stderr,"--mixed-audio requires a supported CD board profile and writable output\n");result=1;
   }
 #endif
   if (!result && load_state_path) {
@@ -2468,7 +2485,7 @@ int main(int argc, char **argv)
     result = 1;
   }
 #ifdef PCSX_SYSTEM573
-  if(!interactive && mixed_audio_path && close_system573_speaker_audio())result=1;
+  if(!interactive && mixed_audio_path && close_cd_speaker_audio())result=1;
 #endif
   free(input_events);
 #endif
