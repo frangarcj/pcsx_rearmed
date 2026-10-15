@@ -44,7 +44,7 @@ CFLAGS += -DPCSX_NATIVE_VITA_PATH=1 -DGPU_VITA_CTR $(SDL3_CFLAGS) $(LIBPNG_CFLAG
   -DGL_SILENCE_DEPRECATION -Iplugins/gpu_vita_ctr/include
 SOURCES += plugins/gpu_vita_ctr/gpulib_if.c plugins/gpu_vita_ctr/native_gpu.c \
   plugins/gpu_vita_ctr/native_renderer.c plugins/gpu_vita_ctr/mac_vita_compat.c \
-  frontend/mac_harness_gpu.c frontend/arcade_audio_mixer.c
+  frontend/mac_harness_gpu.c frontend/arcade_audio_mixer.c frontend/mac_twinkle_controls.c
 GPU_LIBS += $(SDL3_LIBS) $(LIBPNG_LIBS) -framework OpenGL
 # The interactive pause menu (arcade-shelf, its own ImGui).
 SHELF_LIB := deps/arcade-shelf/build/libarcadeshelf.a
@@ -168,6 +168,15 @@ ifeq ($(HAVE_CHD),1)
 	python3 tests/check_twinkle_harness.py --harness $(TARGET)
 else
 	python3 tests/check_twinkle_harness.py --harness $(TARGET) --reject-chd
+endif
+ifeq ($(GPU)$(BOARD)$(HAVE_CHD),vitagl-like11)
+$(BUILD)/test-mac-twinkle-controls: tests/test_mac_twinkle_controls.c frontend/mac_twinkle_controls.c frontend/mac_twinkle_controls.h
+	@mkdir -p $(dir $@)
+	$(CC) -arch arm64 -O2 -std=c99 -Wall -Wextra -Werror $(SDL3_CFLAGS) tests/test_mac_twinkle_controls.c frontend/mac_twinkle_controls.c $(SDL3_LIBS) -o $@
+.PHONY: twinkle-live-test
+twinkle-live-test: $(TARGET) $(BUILD)/test-mac-twinkle-controls
+	$(BUILD)/test-mac-twinkle-controls
+	python3 tests/check_twinkle_harness.py --harness $(TARGET) --live
 endif
 .PHONY: system573-test
 system573-test: $(TARGET)

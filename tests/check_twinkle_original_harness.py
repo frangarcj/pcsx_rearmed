@@ -29,7 +29,7 @@ def inputs():
     return '\n'.join(rows)+'\n'
 
 
-def verify(root):
+def verify(root,live=False):
     assert (root/'target-note.csv').read_text()==inputs(),'input replay differs'
     result={}
     for suffix in ['ram','vram','nv','speaker.wav']:
@@ -63,6 +63,18 @@ def verify(root):
             pcm=array.array('h',wav.readframes(wav.getnframes()))
             if sys.byteorder!='little':pcm.byteswap()
             assert any(pcm) and max(map(abs,pcm))==int(re.search(r' peak=(\d+)',speaker)[1])
+    if live:
+        for suffix in ['ram','vram','nv','speaker.wav']:
+            baseline=root/('target-gl-speaker.wav' if suffix=='speaker.wav' else f'target-gl.{suffix}')
+            actual=root/('live-speaker.wav' if suffix=='speaker.wav' else f'live.{suffix}')
+            assert baseline.read_bytes()==actual.read_bytes(),f'live/headless {suffix} differ'
+        log=(root/'live.log').read_text()
+        assert 'cpu=interpreter frames=7896' in log and 'Arcade inputs: consumed=6687/6687' in log
+        speaker=next(line for line in log.splitlines() if line.startswith('Interactive SystemTwinkle speaker:'))
+        assert 'error=0' in speaker and int(re.search(r'nonzero=(\d+)',speaker)[1])>0
+        assert 'media=SOURCE_SHA_VERIFIED' in log
+        assert 'Twinkle live controls: keyboard_events=0 table_updates=0 positions=0/0 errors=0 replay=1' in log
+        result['live_headless_equal']=True
     result.update(score=score,score_address='8017e1a8',frames=7896,input_rows=6687)
     return result
 
@@ -71,6 +83,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--evidence-dir',type=Path,required=True)
     p.add_argument('--verify-only',action='store_true')
+    p.add_argument('--live',action='store_true',help='also run and compare the SDL speaker/presentation path')
     p.add_argument('--neon',type=Path);p.add_argument('--gl',type=Path)
     p.add_argument('--profile',type=Path);p.add_argument('--nvram-seed',type=Path)
     args=p.parse_args();root=args.evidence_dir.resolve()
@@ -90,7 +103,15 @@ def main():
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             futures=[pool.submit(run,'neon',args.neon),pool.submit(run,'gl',args.gl)]
             for task in futures:task.result()
-    print(json.dumps(verify(root),indent=2))
+        if args.live:
+            shutil.copyfile(args.nvram_seed,root/'live.nv')
+            command=[str(args.gl.resolve()),'--twinkle',str(args.profile.resolve()),'--interactive','--frames','7896',
+                     '--nvram',str(root/'live.nv'),'--inputs',str(root/'target-note.csv'),
+                     '--mixed-audio',str(root/'live-speaker.wav'),'--dump-ram',str(root/'live.ram'),
+                     '--dump-vram',str(root/'live.vram'),'--capture-gl','--output',str(root/'live.ppm')]
+            with (root/'live.log').open('w') as log:
+                subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=600)
+    print(json.dumps(verify(root,args.live),indent=2))
     print('Original IIDX2 timed note, source audio, 32-bit cycle wrap and GL/NEON equality PASS')
 
 if __name__=='__main__':main()

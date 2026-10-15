@@ -8,6 +8,8 @@ extern "C" {
 #endif
 
 enum { MAC_PAUSE_RESUME, MAC_PAUSE_RESTART, MAC_PAUSE_CLOSE };
+/* Set the renderer and the pause option together before the first frame. */
+void mac_pause_set_aspect_mode(int mode);
 
 /* Runs until the player resumes, restarts or closes; game: the header.
  * art: where "Use as cabinet art" saves the frame (snap/<set>.png), or NULL.

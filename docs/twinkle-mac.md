@@ -278,6 +278,75 @@ The recorded original runs pass the verifier; both positive-score captures
 have been visually inspected. `--verify-only` reads already captured evidence
 without launching either emulator.
 
+## Interactive Mac controls and speaker
+
+The GL harness now accepts `--twinkle ... --interactive`. SDL receives the
+same clocked 44.1 kHz speaker mix used by the WAV path. An original 7,896-frame
+interactive replay takes 133.678 seconds on this Mac and again scores 1,204.
+Its RAM, VRAM, NVRAM and speaker WAV are byte-identical to the headless runs
+in the table above, including the 32-bit main-cycle wrap. The speaker sends
+5,820,421 frames to SDL with zero audio/device faults. This establishes the
+software playback path; it does not constitute a listening-quality review.
+
+The cabinet defaults to source anamorphic 16:9 presentation, with no GTE
+projection hook. The original source declares `set_physical_aspect(16, 9)`.
+The 1920×1088 window capture presents the game across the 1920×1080 viewport;
+the small remaining bars belong to the window aspect. Guest VRAM and timing
+remain identical to NEON. The pause aspect setting reflects this default.
+
+| Control | Mac keyboard / mouse |
+| --- | --- |
+| 1P seven keys | A, S, D, Space, F, G, H |
+| 2P seven keys | Z, X, C, V, B, N, M |
+| Coin / Start | 5 / 1 or 2 |
+| 1P turntable | Left/Right or mouse wheel |
+| 2P turntable | J/L |
+| Test / Service | T / 9 |
+| VEFX / Effect | Q / E |
+| Pause | Escape |
+
+Each gamepad maps South/East/West/North, left/right shoulder and left-stick
+press to its seven keys, Start to its own player, Back to the shared coin
+line, and right-stick X or D-pad Left/Right to turntable movement. Keyboard
+and gamepad aliases are ORed. Turntables wrap at 8 bits, advance once per
+actual video frame and retain their physical position through focus loss.
+The mouse wheel accumulates fractional movement. Focus loss and pause clear
+held keyboard keys. CSV replay retains its own exact inputs and bypasses
+live cabinet controls.
+
+A separate original-media run exercises the real Mac keyboard without a
+CSV, including the pause menu's Restart action. It re-enters BIOS and returns
+to the title/tutorial with source runtime backup preserved. The live adapter
+records 97 keyboard transitions and 15 turntable updates (final counter 226/0),
+and the speaker sends 10,969,091 frames with zero host audio errors. The user
+confirms that the interactive controls/audio work. This run ends early at
+14,879 total video frames with exit status 1 and zero board/serial/disk/RTC/audio
+faults; it is retained as interactive/restart evidence, not as a completed
+18,000-frame run or a full-song clear. Its log/capture are `live/keyboard.*`.
+
+SDL virtual-gamepad tests cover merged aliases, the distinct seventh key
+and coin line, wrapping counters and focus release under O2 and ASan/UBSan.
+They exercise SDL's actual virtual joystick API; no physical controller has
+been validated. The generated MIPS live regression exercises the real pause
+Restart action, retains current RTC/EEPROM NVRAM and continues WAV/SDL output.
+Restart power-cycles the source devices and SPU epoch while retaining the
+host audio stream; this is distinct from the still-pending source watchdog
+reset sequencing.
+
+```sh
+make -f Makefile.mac-harness GPU=vitagl-like twinkle-live-test
+build/mac-harness-vitagl-like/pcsx-harness --twinkle roms/prepared/bmiidx2 \
+  --interactive --nvram /path/to/native-runtime.nv --frames 18000 \
+  --mixed-audio /tmp/iidx2-live.wav --capture-gl --output /tmp/iidx2-live.ppm
+```
+
+`tests/check_twinkle_original_harness.py --live` additionally runs the original
+SDL replay and compares it against both headless renderers. The collected
+original live evidence passes `--verify-only --live` in
+`live/original-check`; this directory hardlinks the existing headless and
+new live artifacts without changing their contents. The complete combined
+runner has not been rerun as one command.
+
 Generated MIPS tests separately check upper 4 MiB RAM, mapped/unmapped byte
 lanes, mailbox, RTC paging, button/turntable/volume values, Sony SIO register
 access, a real CHD sector through NCR/SCSI/DMA5, M24C02 pin writes/readback,
@@ -289,8 +358,7 @@ GV SCSI/DMA and the normal MIPS/GPU smoke regression also pass. Shared SPU
 DMA timing/large-payload acceptance also runs with this board selected.
 
 Remaining native work is a full-song clear/result, additional player/mode
-coverage, live SDL audio/interactive cabinet controls/presentation and watchdog reset
-sequencing. DVD video decoding is absent in the pinned JVC reference too; the
+coverage and watchdog reset sequencing. DVD video decoding is absent in the pinned JVC reference too; the
 control protocol follows that source and is tracked separately from video.
 Unused floppy/parallel controller implementation remains explicit unsupported
 scope. The full board matrix remains open.

@@ -14,7 +14,7 @@ import re
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'scripts'))
 from prepare_twinkle_board import configuration
 
-def guest(fault=None):
+def guest(fault=None,display=False):
     words=[]
     def li(r,v): words.extend([0x3c000000|r<<16|v>>16,0x34000000|r<<21|r<<16|v&65535])
     def store(v,a,w=4):
@@ -25,6 +25,11 @@ def guest(fault=None):
         li(11,n);words.extend([0x256bffff,0x1560fffe,0])
     def ncr(r,v): store(v,0xbf200000+r*2,1)
     li(10,0x80000000)
+    if display:
+        for command in [0,0x03000000,0x08000001,0x05000000,0x06c60260,0x07040010]:
+            store(command,0xbf801814)
+        for command in [0xe1000000,0xe3000000,0xe403bd3f,0xe5000000,0xe6000000]:
+            store(command,0xbf801810)
     store(0xff,0xbf210001,1);read(0xbf210001,30,1)
     store(0x5a,0xbf2105fe,1);read(0xbf2105fe,31,2);read(0xbf2105ff,32,1);read(0xbf2105fc,33,1)
     store(0x1234,0x803ff000);read(0x803ff000,0)
@@ -62,22 +67,26 @@ def guest(fault=None):
         for i in range(8):
             pins(1,1);read(0xbf280000,16+i);pins(0,1)
         pins(0,1);pins(1,1);pins(0,1);stop()
-    words.extend([0x1000ffff,0])
+    if display:
+        loop=0xbfc00000+len(words)*4
+        for command in [0x02402010,0,0x00f00140]:store(command,0xbf801810)
+        wait(20000);words.extend([0x08000000|((loop>>2)&0x03ffffff),0])
+    else:words.extend([0x1000ffff,0])
     return struct.pack('<'+'I'*len(words),*words)
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--harness',required=True,type=pathlib.Path)
-    p.add_argument('--reject-chd',action='store_true');args=p.parse_args();binary=args.harness.resolve()
+    p.add_argument('--reject-chd',action='store_true');p.add_argument('--live',action='store_true');args=p.parse_args();binary=args.harness.resolve()
     with tempfile.TemporaryDirectory(prefix='pcsx-twinkle-native-') as temp:
         root=pathlib.Path(temp);(root/'board.ini').write_text(''.join(f'{k}={v}\n' for k,v in configuration().items()))
         def bios(fault=None):
-            program=guest(fault);(root/'bios.bin').write_bytes(program+bytes(524288-len(program)))
+            program=guest(fault,display=args.live);(root/'bios.bin').write_bytes(program+bytes(524288-len(program)))
         bios();sound=bytearray(524288);struct.pack_into('>II',sound,0,0x140000,8);sound[8:10]=bytes.fromhex('60fe')
         (root/'soundcpu.bin').write_bytes(sound);(root/'security.bin').write_bytes(bytes(range(256)))
         state=root/'state.nv'
         def run(selector='--twinkle-fixture',extra=()):
             return subprocess.run([str(binary),selector,str(root),'--frames','3','--inputs',str(root/'inputs.csv'),
-                '--dump-ram',str(root/'ram.bin'),'--output',str(root/'out.ppm'),*extra],capture_output=True,text=True,timeout=30)
+                '--dump-ram',str(root/'ram.bin'),'--output',str(root/'out.ppm'),*(['--interactive','--capture-gl'] if args.live else []),*extra],capture_output=True,text=True,timeout=30)
         (root/'inputs.csv').write_text('frame,control,pressed\n0,p1start,1\n0,coin1,1\n0,p1button1,1\n0,p1table,123\n0,p2table,45\n0,volume1,10\n')
         if args.reject_chd:
             r=run();assert r.returncode==2 and 'HAVE_CHD=1' in r.stderr,r.stderr
@@ -89,6 +98,17 @@ def main():
         (root/'hd.bin').write_bytes(bytes(512*32))
         subprocess.run(['chdman','createhd','-i',str(root/'hd.bin'),'-o',str(root/'985hdda01.chd'),'-chs','1,1,32','-ss','512','-c','none'],check=True,capture_output=True)
         r=run(extra=('--nvram',str(state),'--audio',str(root/'spu.wav'),'--mixed-audio',str(root/'speaker.wav')));out=r.stdout+r.stderr;assert not r.returncode,out
+        if args.live:
+            assert 'source=OpenGL-back-buffer-before-swap' in out,out
+            magic,dimensions,maximum,pixels=(root/'out.ppm').read_bytes().split(b'\n',3)
+            width,height=map(int,dimensions.split());assert magic==b'P6' and maximum==b'255'
+            assert len(pixels)==width*height*3
+            lit=[y for y in range(height) if any(pixels[y*width*3:(y+1)*width*3])]
+            visible_height=lit[-1]-lit[0]+1
+            assert abs(visible_height-width*9/16)<=2,(width,height,lit[0],lit[-1])
+            assert abs(lit[0]-(height-visible_height)/2)<=1
+            assert all(pixels[y*width*3:y*width*3+3]!=b'\0\0\0' and
+                       pixels[(y+1)*width*3-3:(y+1)*width*3]!=b'\0\0\0' for y in lit)
         with wave.open(str(root/'speaker.wav'),'rb') as wav:
             assert wav.getframerate()==44100 and wav.getnchannels()==2 and wav.getsampwidth()==2
             assert 2000<wav.getnframes()<2500 and set(wav.readframes(wav.getnframes()))=={0}
@@ -110,6 +130,19 @@ def main():
         r=run(extra=('--nvram',str(state)));assert not r.returncode,r.stdout+r.stderr
         actual=struct.unpack_from('<16I',(root/'ram.bin').read_bytes(),0x100)
         assert actual[3]==0xc7 and actual[5]==0x80,(actual,r.stdout+r.stderr)
+        if args.live:
+            r=run(extra=('--nvram',str(state),'--mixed-audio',str(root/'restart-speaker.wav'),
+                '--audio',str(root/'restart-spu.wav'),'--frames','20','--pause-at','10','--pause-script','D,X'))
+            live=r.stdout+r.stderr;assert not r.returncode,live
+            assert 'Twinkle restart: cold devices, preserved 4440-byte NVRAM' in live,live
+            assert 'Interactive SystemTwinkle speaker:' in live and 'error=0' in live,live
+            after=(root/'ram.bin').read_bytes();assert struct.unpack_from('<I',after,0x10c)[0]==0xc7
+            with wave.open(str(root/'restart-speaker.wav'),'rb') as wav:
+                assert wav.getframerate()==44100 and wav.getnframes()>10000
+                mixed_frames=wav.getnframes()
+            with wave.open(str(root/'restart-spu.wav'),'rb') as wav:
+                assert abs(wav.getnframes()-mixed_frames)<=4
+            print(live,end='');print('Twinkle SDL playback and pause restart with native NVRAM retention PASS');return
         corrupt=bytearray(nv);corrupt[200]^=1;state.write_bytes(corrupt)
         r=run(extra=('--nvram',str(state)));assert r.returncode and 'rejected SystemTwinkle board NVRAM payload' in r.stderr,r.stderr
         assert state.read_bytes()==corrupt

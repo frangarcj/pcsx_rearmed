@@ -500,6 +500,12 @@ static void usage(const char *name)
 }
 
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
+#ifdef PCSX_SYSTEM_TWINKLE
+#include "mac_twinkle_controls.h"
+static MacTwinkleControls twinkle_controls;
+static int twinkle_input_error;
+static int twinkle_emit(void *opaque,const char *name,int value){(void)opaque;return systemtwinkle_set_input(name,value);}
+#endif
 static const struct { SDL_Scancode key; const char *control; } interactive_keys[] = {
   {SDL_SCANCODE_5, "coin1"}, {SDL_SCANCODE_1, "p1start"},
   {SDL_SCANCODE_UP, "p1up"}, {SDL_SCANCODE_DOWN, "p1down"},
@@ -600,6 +606,12 @@ static float interactive_gv_mouse_remainder[2];
 #endif
 static void poll_interactive_analog(void)
 {
+#ifdef PCSX_SYSTEM_TWINKLE
+  if(selected_board && selected_board->family==116){
+    if(!interactive_replay && mac_twinkle_controls_update(&twinkle_controls,frame_counter,interactive_focused,interactive_pads,twinkle_emit,NULL))twinkle_input_error=1;
+    return;
+  }
+#endif
 #ifdef PCSX_SYSTEM_GV
   if(interactive_gv_guns() && !interactive_replay && interactive_focused){
     for(unsigned p=0;p<2;p++)if(interactive_pads[p] && (p || !interactive_judge_mouse_aim)){
@@ -675,6 +687,11 @@ int mac_pause_interrupted(void)
 static void release_interactive_input(void)
 {
   if (interactive_replay) return; /* preserve replay state across pause/focus */
+#ifdef PCSX_SYSTEM_TWINKLE
+  if(selected_board && selected_board->family==116){
+    if(mac_twinkle_controls_release(&twinkle_controls,twinkle_emit,NULL))twinkle_input_error=1;return;
+  }
+#endif
   memset(interactive_key_down, 0, sizeof(interactive_key_down));
   interactive_mouse_trigger = interactive_mouse_sensor = 0;interactive_judge_mouse_aim=0;
   for (unsigned i = 0; i < sizeof(interactive_keys) / sizeof(interactive_keys[0]); i++)
@@ -802,6 +819,11 @@ static void poll_interactive_input(void)
       }
       continue;
     }
+#ifdef PCSX_SYSTEM_TWINKLE
+    if(selected_board && selected_board->family==116 && event.type==SDL_EVENT_MOUSE_WHEEL){
+      if(mac_twinkle_controls_wheel(&twinkle_controls,event.wheel.y))twinkle_input_error=1;
+    }
+#endif
 #ifdef PCSX_SYSTEM_GNET
     if (selected_board && selected_board->family == 103) {
       if (event.type == SDL_EVENT_MOUSE_MOTION) {
@@ -873,6 +895,12 @@ static void poll_interactive_input(void)
       pause_requested = 1;
       pcsx_menu_backdrop_request = 1;
     }
+#ifdef PCSX_SYSTEM_TWINKLE
+    if(selected_board && selected_board->family==116){
+      if(mac_twinkle_controls_key(&twinkle_controls,event.key.scancode,event.type==SDL_EVENT_KEY_DOWN))twinkle_input_error=1;
+      continue;
+    }
+#endif
     for (unsigned i = 0; i < sizeof(interactive_keys) / sizeof(interactive_keys[0]); i++)
       if (event.key.scancode == interactive_keys[i].key) {
         interactive_key_down[i] = event.type == SDL_EVENT_KEY_DOWN;
@@ -1005,7 +1033,7 @@ static void interactive_zn_spu_pcm(void *data, int bytes)
 
 static int open_interactive_audio(void)
 {
-  const SDL_AudioSpec spec = { SDL_AUDIO_S16, 2, selected_board->family == 113 ? 48000 : selected_board->family == 102 || selected_board->family == 103 || selected_board->family == 104 || selected_board->family == 105 || selected_board->family == 106 || selected_board->family == 107 || selected_board->family == 108 || selected_board->family == 109 || selected_board->family == 110 || selected_board->family == 111 || selected_board->family == 112 || selected_board->family == 114 || selected_board->family == 115 ? 44100 : 88200 };
+  const SDL_AudioSpec spec = { SDL_AUDIO_S16, 2, selected_board->family == 113 ? 48000 : selected_board->family == 102 || selected_board->family == 103 || selected_board->family == 104 || selected_board->family == 105 || selected_board->family == 106 || selected_board->family == 107 || selected_board->family == 108 || selected_board->family == 109 || selected_board->family == 110 || selected_board->family == 111 || selected_board->family == 112 || selected_board->family == 114 || selected_board->family == 115 || selected_board->family == 116 ? 44100 : 88200 };
   if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) return -1;
   interactive_audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
       &spec, NULL, NULL);
@@ -1048,10 +1076,11 @@ static int open_interactive_audio(void)
     else fprintf(stderr, "Interactive %s audio: SPU=%u/768 Hz gain=0.3 Zoom=25000000/768 Hz gain=1 output=44100 Hz\n", selected_board->family == 105 ? "FX1Z" : "G-Net", PSXCLK);
   }
 #ifdef PCSX_SYSTEM573
-  else if(selected_board->family==102 || (selected_board->family==115 && system573_has_cd())){
+  else if(selected_board->family==102 || selected_board->family==116 || (selected_board->family==115 && system573_has_cd())){
     interactive_spu_feed=out_current->feed;out_current->feed=harness_cd_spu_pcm;
     cd_speaker_sink(interactive_cd_speaker,NULL);
-    fprintf(stderr,"Interactive %s CD audio: SPU=44100 Hz gain=%s CDDA=44100 Hz gain=1 timestamped speaker output=44100 Hz\n",selected_board->name,selected_board->family==102?"0.75 channels=swapped":"1");
+    fprintf(stderr,"Interactive %s CD audio: SPU=44100 Hz gain=%s CDDA=44100 Hz gain=1 timestamped speaker output=44100 Hz\n",selected_board->name,selected_board->family==102?"0.75 channels=swapped":selected_board->family==116?"0.75 channels=direct":"1");
+    if(selected_board->family==116)fprintf(stderr,"Interactive Twinkle RF: source/output=44100 Hz gain=1 effects=unrouted\n");
     if(selected_board->family==115 && system573_has_digital())fprintf(stderr,"Interactive System573 digital audio: source MPEG rate, gain=1, CPU-clocked resampling to 44100 Hz\n");
   }
 #endif
@@ -1114,7 +1143,7 @@ static void close_interactive_audio(void)
     if (interactive_mix.error) interactive_audio_error = 1;
   }
 #ifdef PCSX_SYSTEM573
-  else if(selected_board->family==102 || (selected_board->family==115 && system573_has_cd())){
+  else if(selected_board->family==102 || selected_board->family==116 || (selected_board->family==115 && system573_has_cd())){
     if(SPU_async)SPU_async(psxRegs.cycle,1);
     if(cd_speaker_flush())interactive_audio_error=1;
     cd_speaker_sink(NULL,NULL);
@@ -1122,6 +1151,9 @@ static void close_interactive_audio(void)
     if(out_current->feed==harness_cd_spu_pcm)out_current->feed=interactive_spu_feed;
     interactive_spu_feed=NULL;
     if(cd_speaker_error)interactive_audio_error=1;
+#ifdef PCSX_SYSTEM_TWINKLE
+    if(selected_board->family==116)fprintf(stderr,"Twinkle live controls: keyboard_events=%"PRIu64" table_updates=%"PRIu64" positions=%u/%u errors=%d replay=%d\n",twinkle_controls.key_events,twinkle_controls.table_updates,twinkle_controls.table[0],twinkle_controls.table[1],twinkle_input_error,interactive_replay);
+#endif
     fprintf(stderr,"Interactive %s speaker: frames=%"PRIu64" nonzero=%"PRIu64" peak=%u error=%d\n",selected_board->name,interactive_zn_spu_frames,interactive_zn_spu_nonzero,interactive_zn_spu_peak,interactive_audio_error);
   }
 #endif
@@ -1137,6 +1169,32 @@ static void close_interactive_audio(void)
   SDL_DestroyAudioStream(interactive_audio);
   interactive_audio = NULL;
 }
+#ifdef PCSX_SYSTEM_TWINKLE
+/* Restart game is a cold board restart with the current battery-backed data.
+ * Preserve the open host recording/SDL stream, but start each device's epoch
+ * and the SPU plugin afresh instead of mixing pre-reset source history. */
+static int restart_twinkle(const char *directory,int fixture)
+{
+  size_t size=systemtwinkle_nvram_size();unsigned char *nv=malloc(size);
+  if(!nv)return -1;
+  if(SPU_async)SPU_async(psxRegs.cycle,1);
+  if(cd_speaker_flush() || systemtwinkle_nvram_export(nv,size)){free(nv);return -1;}
+  cd_speaker_sink(NULL,NULL);systemtwinkle_unload();
+  int error=fixture?systemtwinkle_test_load(directory):systemtwinkle_load(directory);
+  if(!error)error=systemtwinkle_nvram_import(nv,size);free(nv);
+  if(error)return -1;
+  if(SPU_close() || SPU_shutdown() || SPU_init())return -1;
+  SPU_registerCallback(SPUirq);SPU_registerScheduleCb(SPUschedule);
+  if(SPU_open())return -1;
+  GPU_writeStatus(0);psxReset();
+  cd_speaker_sink(interactive_cd_speaker,NULL);
+  out_current->feed=spu_original_feed?capture_spu_pcm:harness_cd_spu_pcm;
+  interactive_spu_cycle=psxRegs.cycle;
+  fprintf(stderr,"Twinkle restart: cold devices, preserved %zu-byte NVRAM, fresh SPU epoch, host speaker stream retained\n",size);
+  return 0;
+}
+#endif
+
 #endif
 
 #ifdef PCSX_SYSTEM12
@@ -1626,8 +1684,8 @@ int main(int argc, char **argv)
     else if (!strcmp(argv[i], "--gpu-thread")) gpu_thread = 1;
     else { usage(argv[0]); return 2; }
   }
-  if (board && board_family==116 && (exe || use_drc || interactive || save_state_path || load_state_path || reset_at_cycle)) {
-    fprintf(stderr,"Twinkle bring-up requires headless interpreter execution without savestates or reset injection\n");return 2;
+  if (board && board_family==116 && (exe || use_drc || save_state_path || load_state_path || reset_at_cycle)) {
+    fprintf(stderr,"Twinkle requires interpreter execution without savestates or reset injection\n");return 2;
   }
 #ifndef PCSX_SYSTEM_TWINKLE
   if(twinkle_fixture || (board && board_family==116)){fprintf(stderr,"Rebuild with BOARD=1 and HAVE_CHD=1 for Twinkle.\n");return 2;}
@@ -1662,7 +1720,7 @@ int main(int argc, char **argv)
   }
   if (interactive) {
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
-    if (!board || (board_family != 12 && board_family != 102 && board_family != 103 && board_family != 104 && board_family != 105 && board_family != 106 && board_family != 107 && board_family != 108 && board_family != 109 && board_family != 110 && board_family != 111 && board_family != 112 && board_family != 113 && board_family != 114 && board_family != 115) || (board_test && system573_fixture!=2)) {
+    if (!board || (board_family != 12 && board_family != 102 && board_family != 103 && board_family != 104 && board_family != 105 && board_family != 106 && board_family != 107 && board_family != 108 && board_family != 109 && board_family != 110 && board_family != 111 && board_family != 112 && board_family != 113 && board_family != 114 && board_family != 115 && board_family != 116) || (board_test && system573_fixture!=2)) {
       fprintf(stderr, "interactive mode requires a supported arcade board without board-test options\n");
       return 2;
     }
@@ -1864,6 +1922,7 @@ int main(int argc, char **argv)
     fprintf(stderr,"High Octane resolution=%s GPU_worker=%d\n",
       pcsx_vita_gl_hd ? "HD" : "1x",gpu_thread);
     if (widescreen) VitaCtrNativeRenderer_SetAspectMode(2);
+    else if(board && board_family==116){mac_pause_set_aspect_mode(1);fprintf(stderr,"Twinkle cabinet presentation: source anamorphic 16:9, GTE hook disabled\n");}
   }
 #endif
   Config.cycle_multiplier = CYCLE_MULT_DEFAULT;
@@ -2214,6 +2273,9 @@ int main(int argc, char **argv)
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
   if (interactive) {
     interactive_replay = inputs_path != NULL;
+#ifdef PCSX_SYSTEM_TWINKLE
+    if(selected_board->family==116)mac_twinkle_controls_init(&twinkle_controls);
+#endif
     SDL_InitSubSystem(SDL_INIT_GAMEPAD);
     refresh_interactive_gamepads();
     interactive_started_ns = SDL_GetTicksNS();
@@ -2240,6 +2302,8 @@ int main(int argc, char **argv)
 #endif
       fprintf(stderr,"GV controls: 5/6 coin, 1/2/3/4 Start, A/S/D buttons, Escape pause\n");
     }
+    else if (selected_board->family==116)
+      fprintf(stderr,"IIDX controls: 5 Coin, 1/2 Start; P1 A/S/D/Space/F/G/H, P2 Z/X/C/V/B/N/M; arrows left/right or mouse wheel P1 table, J/L P2 table; gamepad face/shoulders/left-stick press keys, right stick table, Back coin; T test, 9 service, Q VEFX, E effect, Escape pause\n");
     else if (selected_board->family==110)
       fprintf(stderr,"Primal controls: 5/6 coin, 1/2 Start, P1 arrows + A/S/D/Space/F/H, P2 I/K/J/L + Z/X/C/V/B/N, gamepad face buttons/shoulders, Escape pause\n");
     else if (selected_board->family==113)
@@ -2311,7 +2375,11 @@ int main(int argc, char **argv)
     unsigned int steps = 0;
 #if defined(PCSX_NATIVE_VITA_PATH) && defined(PCSX_SYSTEM12)
     if (interactive) {
-      if (interactive_audio_error || interactive_mix.error) { result = 1; break; }
+      if (interactive_audio_error || interactive_mix.error
+#ifdef PCSX_SYSTEM_TWINKLE
+          || twinkle_input_error
+#endif
+         ) { result = 1; break; }
       /* At 50 MHz a whole video frame exceeds dfsound's 914-sample work
        * buffer. Service silent SPU intervals as well as its IRQ/MMIO paths,
        * so Zoom and SPU retain the same source-clock epoch. */
@@ -2341,6 +2409,10 @@ int main(int argc, char **argv)
         if (choice == MAC_PAUSE_CLOSE) interrupted = 1;
         if (choice == MAC_PAUSE_RESTART) {
           unsigned int elapsed_frames = frame_counter - start_frame;
+#ifdef PCSX_SYSTEM_TWINKLE
+          if(selected_board->family==116){if(restart_twinkle(board,twinkle_fixture)){result=1;break;}}
+          else
+#endif
           psxReset();
           if (interactive_mixing) {
             if(selected_board->family!=111)arcade_mix_reset(&interactive_mix); interactive_spu_cycle = psxRegs.cycle;

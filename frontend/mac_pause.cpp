@@ -76,6 +76,11 @@ static void set_option(void *, const char *key, const char *value)
 	}
 }
 
+extern "C" void mac_pause_set_aspect_mode(int mode)
+{
+    set_option(NULL,"vita_aspect_ratio",mode==1?"16:9_stretched":mode==2?"16:9_unstretched":"4:3");
+}
+
 /* Arrows; Enter or Z = cross; Escape, X or Backspace = circle (resume,
  * back). */
 static unsigned keyboard_buttons(void)

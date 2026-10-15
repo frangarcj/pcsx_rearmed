@@ -181,7 +181,12 @@ int load(const char *directory,bool fixture){
     if(b.ncr && chd_cd_get_media_ops(b.cd,&media)){cd.media=media;b.target=nscsi_cdrom_create(&cd);}
     for(unsigned i=0;i<2 && b.target;i++){psx_sio_callbacks_t cb{};cb.opaque=reinterpret_cast<void *>(uintptr_t(i));cb.irq=sio_irq;
         if(psx_sio_create(i?PSX_SIO1:PSX_SIO0,&cb,&b.sio[i]))break;}
-    if(!b.ncr || !b.target || !b.sio[0] || !b.sio[1] || !flush() || gpu_set_model(2) || gpu_set_vram_height(1024)){
+    /* A host power cycle can reuse an already allocated GPU of this exact
+     * model/geometry. The setters reject any call after GPUinit, even when
+     * the requested configuration is unchanged. Never resize a live GPU. */
+    if(!b.ncr || !b.target || !b.sio[0] || !b.sio[1] || !flush() ||
+       (gpu_get_model()!=2 && gpu_set_model(2)) ||
+       (gpu_get_vram_height()!=1024 && gpu_set_vram_height(1024))){
         systemtwinkle_unload();return -1;
     }
     b.old_ram=psxRamSize;b.old_rom=psxRomSize;psxRamSize=0x400000;psxRomSize=0x80000;

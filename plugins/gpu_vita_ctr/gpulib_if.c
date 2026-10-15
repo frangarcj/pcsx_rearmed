@@ -903,8 +903,9 @@ static int init_context(void)
     NativeGpu_BeginFrontendFrame();
     s_frame_started = 1;
     s_context_ready = 1;
-    SysPrintf("pcsx-vita: GPU = CTR High Octane native, VRAM=%ux%u, 4:3 725x544 target\n",
-        (unsigned)VRAM_WIDTH, g_nativeVramHeight);
+    SysPrintf("pcsx-vita: GPU = CTR High Octane native, VRAM=%ux%u, presentation=%s\n",
+        (unsigned)VRAM_WIDTH, g_nativeVramHeight,
+        VitaCtrNativeRenderer_GetAspectMode() ? "16:9" : "4:3");
     return 1;
 }
 
