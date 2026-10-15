@@ -2,6 +2,7 @@
 #ifndef PCSX_SYSTEM573_H
 #define PCSX_SYSTEM573_H
 #include "psxcommon.h"
+#include "arcade/system573_digital.h"
 #include <stddef.h>
 #include <stdio.h>
 int system573_load(const char *directory);
@@ -21,6 +22,8 @@ int system573_dma5(u32 madr,u32 bcr,u32 chcr);
 size_t system573_nvram_size(void);
 int system573_has_cd(void);
 int system573_has_digital(void);
+/* Pure diagnostic copy; does not advance clocks or read mapped registers. */
+int system573_get_digital_status(System573DigitalStatus *status, uint16_t *inputs);
 unsigned system573_players(void);
 void system573_set_audio_output(void (*sink)(void *,const int16_t *,unsigned),void *opaque);
 int system573_audio_spu_output(const int16_t *stereo,unsigned frames,u32 end_cycle);

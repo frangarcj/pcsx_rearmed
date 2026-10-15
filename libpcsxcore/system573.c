@@ -515,6 +515,12 @@ int system573_dma5(u32 madr,u32 bcr,u32 chcr){
 #endif
     return 0;
 }
+int system573_get_digital_status(System573DigitalStatus *status,uint16_t *inputs){
+    if(!board.active || !board.digital || !status)return -1;
+    system573_digital_get_status(board.digital,status);
+    if(inputs)*inputs=board.bus.input[2]&0xffff;
+    return 0;
+}
 void system573_report(FILE *out){
     if(!board.active || !out)return;
     fprintf(out,"System573: profile=%s RAM=4194304 VRAM=2097152 bank=%u control=%04x security=%04x faults=%u media=%s H8_response=%s H8_firmware=NO_DUMP cassette_seed=%s CDROM=%s NVRAM=%s\n",board.digital?"pcnfrk4mk":board.cd_profile?"ddr2m":"hyperbbc",board.bus.control&63,board.bus.control,board.bus.security,board.fault|board.bus.faults,board.synthetic?"SYNTHETIC_FIXTURE":"SOURCE_CRC_VERIFIED",board.synthetic?"GENERATED":"SOURCE_DUMP",board.digital?board.synthetic?"SYNTHETIC_FIXTURE":"SOURCE_DUMP":board.cd_profile?"SOURCE_BAD_DUMP":"SOURCE_FACTORY_DEFAULT",board.synthetic==2?"EMPTY_FIXTURE_DRIVE":board.cd_profile?"SOURCE_BAD_DUMP":"ABSENT",board.nvram_loaded?"RESTORED":"SOURCE_SEED");

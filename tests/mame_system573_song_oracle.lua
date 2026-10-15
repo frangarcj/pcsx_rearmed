@@ -36,12 +36,53 @@ assert(#boot == 19 and #pads == 1476, "requires the recorded 1495-event replay")
 local memory = machine.devices[":maincpu"].spaces["program"]
 local addresses = {0x803493f8,0x803493fc,0x80349408,0x80349414,0x80349424,
                    0x80349428,0x8034942c,0x80349514,0x80349520,0x80349538}
+local dio=machine.devices[":k573dio"]
+local fpga=machine.devices[":k573dio:k573fpga"]
+-- Device names contain I/O; luaengine.cpp splits at the first slash, so
+-- device.items omits these fields. Match the pinned source save layout instead.
+-- Discover the unique source-sorted save-item layout instead of fixed indices.
+local metadata={}
+for i=0,30000 do
+ local v=emu.item(i)
+ if v.size==0 then break end
+ metadata[#metadata+1]={index=i,size=v.size,count=v.count}
+end
+local function find_layout(sizes,counts)
+ local found={}
+ for i=1,#metadata-#sizes+1 do
+  local same=true
+  for j,size in ipairs(sizes) do
+   local v=metadata[i+j-1]
+   if v.size~=size or v.count~=(counts[j] or 1) then same=false end
+  end
+  if same then found[#found+1]=metadata[i].index end
+ end
+ assert(#found==1,"source save layout is not unique: "..#found)
+ return found[1]
+end
+assert(#metadata<30001,"save registry discovery bound exceeded")
+local fpga_base=find_layout({8,4,8,4,8,2,2,2,2,1,1,2,1,1,8,4,4,4,4,2,4,4,4,4,2},{})
+local dio_base=find_layout({2,4,1,8,4,2,1,4,4},{[7]=8})
+assert(emu.item(dio_base+4):read(0)==19660800,"source digital oscillator")
+print("SOURCE_LAYOUT",fpga_base,dio_base)
+local fpga_offsets={mp3_frame_counter=21,mp3_start_addr=23,mp3_end_addr=20,mp3_cur_addr=16,fpga_status=11,mpeg_status=24}
+local function item(device,name)
+ if device==dio then assert(name=="fpga_counter");return emu.item(dio_base+1) end
+ return emu.item(fpga_base+assert(fpga_offsets[name],name))
+end
+local frame_item=item(fpga,"mp3_frame_counter")
+local counter_item=item(dio,"fpga_counter")
+local start_item=item(fpga,"mp3_start_addr")
+local end_item=item(fpga,"mp3_end_addr")
+local current_item=item(fpga,"mp3_cur_addr")
+local fpga_item=item(fpga,"fpga_status")
+local mpeg_item=item(fpga,"mpeg_status")
 local trace = assert(io.open(trace_path, "w"))
 trace:write("time,frame,boot_rows,pad_rows")
 for _, address in ipairs(addresses) do
     trace:write(string.format(",ram_%08x", address))
 end
-trace:write("\n")
+trace:write(",s573_mpeg_frames,s573_latched_samples,s573_start,s573_end,s573_current,s573_pad_bits,s573_fpga,s573_mpeg_state\n")
 emu.register_stop(function() trace:close() end)
 local nextboot, nextpad = 1, 1
 emu.register_frame_done(function()
@@ -65,7 +106,7 @@ emu.register_frame_done(function()
     for _, address in ipairs(addresses) do
         trace:write(string.format(",%08x",memory:read_u32(address)))
     end
-    trace:write("\n")
+    trace:write(string.format(",%d,%d,%08x,%08x,%08x,%04x,%04x,%04x\n",frame_item:read(0)%65536,counter_item:read(0),start_item:read(0),end_item:read(0),current_item:read(0),machine.ioport.ports[":IN2"]:read(),fpga_item:read(0),mpeg_item:read(0)))
     if tick >= 1042 then
         assert(nextboot == #boot+1 and nextpad == #pads+1, "unconsumed replay")
         machine.video:snapshot()

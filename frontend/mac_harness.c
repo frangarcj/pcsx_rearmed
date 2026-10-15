@@ -1889,6 +1889,12 @@ int main(int argc, char **argv)
     for (i = 0; i < 32; i++) fprintf(snapshots, ",r%d", i);
     for (i = 0; i < (int)snapshot_ram_count; i++)
       fprintf(snapshots, ",ram_%08x", snapshot_ram[i]);
+#ifdef PCSX_SYSTEM573
+    /* Profile selection is known before board loading. Digital presence is
+     * checked again when recording; analog/base profiles leave cells empty. */
+    if (board_family == 115)
+      fputs(",s573_mpeg_frames,s573_latched_samples,s573_start,s573_end,s573_current,s573_pad_bits,s573_fpga,s573_mpeg_state", snapshots);
+#endif
     fputc('\n', snapshots);
   }
   if (bus_trace_path) {
@@ -2599,6 +2605,17 @@ int main(int argc, char **argv)
         memcpy(&value, psxRegs.ptrs.psxM + (snapshot_ram[r] & 0x1fffffffu), sizeof(value));
         fprintf(snapshots, ",%08x", SWAP32(value));
       }
+#ifdef PCSX_SYSTEM573
+      if (board_family == 115) {
+        System573DigitalStatus status;
+        uint16_t inputs;
+        if (!system573_get_digital_status(&status, &inputs))
+          fprintf(snapshots, ",%u,%u,%08x,%08x,%08x,%04x,%04x,%04x",
+            status.frame_counter, status.latched_counter, status.start, status.end,
+            status.current, inputs, status.fpga_control, status.mpeg_status);
+        else fputs(",,,,,,,,", snapshots);
+      }
+#endif
       fputc('\n', snapshots);
       snapshot_count++;
       do {

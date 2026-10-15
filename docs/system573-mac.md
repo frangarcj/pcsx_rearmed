@@ -10,6 +10,10 @@ original-media cold installation and bounded scored P1 gameplay with live SDL
 playback. Rhythm judgement alignment against MAME remains open. Independent
 MAME 0.287 captures are separate reference evidence.
 
+Raw audio/RAM/VRAM/frame intermediates were pruned during the October 15 disk
+cleanup. Run results below are historical; retained observations can be checked
+with `check_system573_mpeg_observation.py` without recreating those captures.
+
 The full family validation still requires three distinct configurations:
 
 | Representative | Coverage | Current evidence |
@@ -390,6 +394,66 @@ not successful audio evidence. Two temporary CHD copies were removed only
 after full SHA256 equality with the preserved prepared originals was confirmed;
 `verified-temporary-cleanup.json` records the paths, sizes and hashes. Neither
 original media nor prior unique validation evidence was discarded.
+
+## Retained original MPEG observations
+
+The original GL/NEON replays recorded before the disk cleanup now have a pure
+status observer. `system573_get_digital_status` copies the existing FPGA/MAS
+status and current input latch without advancing time, rendering audio or
+calling mapped-register reads. System 573 cycle-snapshot CSVs append eight
+fields: decoded MPEG frame counter, guest-latched sample timer, stream
+start/end/current addresses, raw IN2 bits and FPGA/MPEG control states. Analog
+and base profiles leave those cells empty.
+
+The MAME oracle observes the same saved device fields rather than reading
+clock registers. In MAME 0.287, the human device names contain `I/O`, while
+Lua's `device.items` code splits save names at their first slash. Those two
+devices therefore lack named Lua entries. The oracle finds their unique
+source-sorted size/count layouts, validates the digital oscillator and reads
+those items; it neither assumes fixed global indices nor writes save items.
+
+The retained `mpeg-neon.csv` and `mpeg-gl.csv` contain 1,822 rows apiece and
+are byte-identical, SHA256
+`7cf3a31d94828db604da0aeb29dfdb91afe6caa8a21532072b06b5f1caaf8da0`.
+Their original logs complete 13,800 frames / 1,495 events with zero faults and
+1,150 points. Across the **599 common decoded MPEG frame numbers**, native and
+MAME have exactly the same encrypted-source byte cursor for every frame.
+This checks stream consumption boundaries, not original-game PCM equality
+against MAME or complete rhythm-judgement accuracy.
+
+For the selected song stream (`00000000..00187014`), the first sampled MPEG
+frame 1 occurs at native song tick 108 and MAME tick 104. Among 745 later
+same-song-tick observations, the MAME-minus-native guest-latched timer has two
+ranges: 2,424–2,426 samples (about 55 ms) and 1,687–1,688 samples (about 38 ms).
+The samples come from different CPU/video callback phases; grouping by the
+native frame/song-tick offset alone does not explain every timer observation.
+No samples are adjusted or discarded to manufacture clock equality, and these
+records do not prove a running-clock drift or its absence.
+
+Two measured-offset reference probes retain the original boot/menu sequence
+and all 1,476 pad transitions. Advancing pads four song ticks (the sampled
+MPEG onset difference) gives MAME 6,900 points. Advancing them three ticks
+(the nearest whole tick to the dominant 55 ms timer difference) gives 350.
+Both end at tick 1,042; native remains 1,150. Neither probe is selected as a
+passing judgement match. Exact input-poll/audio-phase comparison remains open;
+no emulated clock, chart or program timing is changed for these probes.
+
+The original status-observed GL/NEON WAVs matched the earlier headless captures
+before removal. Their SHA256 values remain in the cleanup manifest; their raw
+files were deliberately discarded under [the storage policy](build-storage.md).
+The new verifier reads only retained logs/CSVs and those historical hashes:
+
+```sh
+python3 scripts/check_validation_storage.py --reserve-mib 1
+python3 tests/check_system573_mpeg_observation.py \
+  --evidence-dir artifacts/boards-mac-20261015/system573/pcnfrk4mk
+```
+
+It checks all 599 cursor pairs, equal renderer status rows, event consumption,
+chart identity, score results and unmodified timer distributions. Output
+explicitly says `fresh_audio_verification=false` and
+`judgement_equivalence=OPEN`. The earlier raw-artifact verifiers require their
+removed captures and must not be rerun merely to recreate those files.
 
 ## Hyper Bishi Bashi media
 
