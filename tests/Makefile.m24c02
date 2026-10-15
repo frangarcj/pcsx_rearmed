@@ -1,0 +1,15 @@
+CXX ?= c++
+BUILD ?= build/m24c02-tests
+SOURCES := tests/test_m24c02.cpp libpcsxcore/arcade/m24c02.cpp
+HEADERS := libpcsxcore/arcade/m24c02.h libpcsxcore/arcade/m24c02_mame.inc
+.PHONY: test sanitize
+$(BUILD)/m24c02: $(SOURCES) $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CXX) -std=c++17 -O2 -Wall -Wextra -Werror -Ilibpcsxcore/arcade $(SOURCES) -o $@
+$(BUILD)/m24c02-sanitize: $(SOURCES) $(HEADERS)
+	@mkdir -p $(BUILD)
+	$(CXX) -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Werror -Ilibpcsxcore/arcade $(SOURCES) -o $@
+test: $(BUILD)/m24c02
+	$(BUILD)/m24c02
+sanitize: $(BUILD)/m24c02-sanitize
+	ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 $(BUILD)/m24c02-sanitize
