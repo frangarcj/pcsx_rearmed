@@ -28,6 +28,9 @@
 #include "system12.h"
 #include "systemtaito.h"
 #include "systemzn.h"
+#ifdef PCSX_SYSTEM_TWINKLE
+#include "systemtwinkle.h"
+#endif
 #ifdef PCSX_SYSTEM573
 #include "system573.h"
 #endif
@@ -52,6 +55,14 @@ void psxDma5(u32 madr, u32 bcr, u32 chcr)
 			DMA_INTERRUPT(5);
 		}
 	}
+#ifdef PCSX_SYSTEM_TWINKLE
+    else if (systemtwinkle_active()) {
+        if (!systemtwinkle_dma5(madr,bcr,chcr)) {
+            psxHu32ref(0x10d8) &= SWAPu32(~0x11000000u);
+            DMA_INTERRUPT(5);
+        }
+    }
+#endif
 #ifdef PCSX_SYSTEM_GV
 	else if (systemgv_active()) {
 		/* MAME's PSX DMA device calls dma_finished immediately after the
@@ -96,6 +107,9 @@ void psxDma5(u32 madr, u32 bcr, u32 chcr)
 #endif
 int psxSourceSpuDmaActive(void)
 {
+#ifdef PCSX_SYSTEM_TWINKLE
+    if(systemtwinkle_active())return 1;
+#endif
 #ifdef PCSX_SYSTEM573
     if(system573_active())return 1;
 #endif

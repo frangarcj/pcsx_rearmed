@@ -111,7 +111,9 @@ CXXSOURCES += libpcsxcore/arcade/adsp2181.cpp libpcsxcore/arcade/rax_sound.cpp l
   libpcsxcore/arcade/ncr53cf96.cpp \
   libpcsxcore/arcade/nscsi_bus.cpp libpcsxcore/arcade/nscsi_target.cpp
 ifeq ($(HAVE_CHD),1)
-CFLAGS += -DPCSX_SYSTEM_GV -DPCSX_SYSTEM_GNET -DPCSX_SYSTEM_GQ
+CFLAGS += -DPCSX_SYSTEM_GV -DPCSX_SYSTEM_GNET -DPCSX_SYSTEM_GQ -DPCSX_SYSTEM_TWINKLE
+CXXSOURCES += libpcsxcore/systemtwinkle.cpp libpcsxcore/arcade/twinkle_board.cpp libpcsxcore/arcade/rtc65271.cpp libpcsxcore/arcade/rf5c400.cpp libpcsxcore/arcade/m24c02.cpp
+$(BUILD)/libpcsxcore/systemtwinkle.o $(BUILD)/libpcsxcore/arcade/twinkle_board.o: CXX_STANDARD = c++20
 SOURCES += libpcsxcore/arcade/tokimeki_io.c libpcsxcore/arcade/upd4701.c libpcsxcore/arcade/simpbowl_io.c libpcsxcore/arcade/btchamp_io.c libpcsxcore/arcade/kdeadeye_io.c libpcsxcore/systemgv.c libpcsxcore/systemgnet.c libpcsxcore/systemgq.c libpcsxcore/arcade/k056800.c libpcsxcore/arcade/k054539.c
 CFLAGS += -DPCSX_SYSTEM12_CDXA
 CXXSOURCES += libpcsxcore/arcade/sh2.cpp libpcsxcore/arcade/system12_cdxa.cpp
@@ -158,6 +160,14 @@ CXX_STANDARD = c++17
 .PHONY: all clean smoke board-test system11-test system10-test systemgv-test tecmo-tps-test raizing-zn-test visco-zn-test atlus-zn-test cbaj-tps-test taito-fx1z-test capcom-zn-test taito-fx1-test systemgnet-test gpu-type1-test devices-test FORCE
 .PHONY: jdredd-zn-test
 .PHONY: metro-zn-test
+.PHONY: twinkle-test
+twinkle-test: $(TARGET)
+ifeq ($(HAVE_CHD),1)
+	$(MAKE) -f tests/Makefile.m24c02 test
+	python3 tests/check_twinkle_harness.py --harness $(TARGET)
+else
+	python3 tests/check_twinkle_harness.py --harness $(TARGET) --reject-chd
+endif
 .PHONY: system573-test
 system573-test: $(TARGET)
 	$(MAKE) -f tests/Makefile.system573 BUILD=$(BUILD)/system573-tests test

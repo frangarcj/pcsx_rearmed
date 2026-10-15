@@ -38,6 +38,9 @@
 #include "../libpcsxcore/system573.h"
 #endif
 #include "../libpcsxcore/systemtaito.h"
+#ifdef PCSX_SYSTEM_TWINKLE
+#include "../libpcsxcore/systemtwinkle.h"
+#endif
 #ifdef PCSX_SYSTEM_GV
 #include "../libpcsxcore/systemgv.h"
 #endif
@@ -331,6 +334,11 @@ static int close_spu_audio(void)
 }
 
 static const HarnessBoard boards[] = {
+#ifdef PCSX_SYSTEM_TWINKLE
+  {116, "SystemTwinkle", systemtwinkle_load, systemtwinkle_unload, systemtwinkle_sync,
+    systemtwinkle_set_input, systemtwinkle_selftest, systemtwinkle_report,
+    open_spu_audio, close_spu_audio, systemtwinkle_nvram_import, systemtwinkle_nvram_export},
+#endif
 #ifdef PCSX_SYSTEM573
   {115,"System573",system573_load,system573_unload,system573_sync,system573_set_input,system573_selftest,system573_report,open_spu_audio,close_spu_audio,system573_nvram_import,system573_nvram_export},
 #endif
@@ -469,7 +477,7 @@ void SysRunGui(void) { interrupted = 1; }
 
 static void usage(const char *name)
 {
-  fprintf(stderr, "usage: %s (--exe PS-X-EXE | --system12 REGION-DIR | --system11 REGION-DIR | --system10 REGION-DIR | --capcom-zn REGION-DIR | --tecmo-tps REGION-DIR | --raizing-zn REGION-DIR | --visco-zn REGION-DIR | --atlus-zn REGION-DIR | --jdredd-zn REGION-DIR | --metro-zn REGION-DIR | --system573 REGION-DIR | --nbajam-zn REGION-DIR | --primal-zn REGION-DIR | --cbaj-tps REGION-DIR | --taito-fx1 REGION-DIR | --taito-fx1z REGION-DIR | --system-gv REGION-DIR | --system-gq REGION-DIR | --system-gnet REGION-DIR | --system-gnet-fixture) "
+  fprintf(stderr, "usage: %s (--exe PS-X-EXE | --system12 REGION-DIR | --system11 REGION-DIR | --system10 REGION-DIR | --capcom-zn REGION-DIR | --tecmo-tps REGION-DIR | --raizing-zn REGION-DIR | --visco-zn REGION-DIR | --atlus-zn REGION-DIR | --jdredd-zn REGION-DIR | --metro-zn REGION-DIR | --system573 REGION-DIR | --nbajam-zn REGION-DIR | --primal-zn REGION-DIR | --cbaj-tps REGION-DIR | --taito-fx1 REGION-DIR | --taito-fx1z REGION-DIR | --system-gv REGION-DIR | --system-gq REGION-DIR | --system-gnet REGION-DIR | --twinkle REGION-DIR | --system-gnet-fixture) "
     "[--frames N] [--output FRAME.ppm] [--capture-gl] [--dump-vram FILE] [--dump-ram FILE] [--board-test] [--verify-smoke] "
     "[--inputs FILE.csv] [--printer-dir DIR] [--audio FILE.wav] [--mixed-audio FILE.wav] [--nvram FILE] [--gnet-jp1 on|off] "
     "[--audio-test-fixture] "
@@ -1125,6 +1133,9 @@ static void close_interactive_audio(void)
 #ifdef PCSX_SYSTEM12
 static size_t nvram_size(void)
 {
+#ifdef PCSX_SYSTEM_TWINKLE
+  if(selected_board->family==116)return systemtwinkle_nvram_size();
+#endif
 #ifdef PCSX_SYSTEM573
   if(selected_board->family==115)return system573_nvram_size();
 #endif
@@ -1172,6 +1183,9 @@ typedef struct harness_input_event {
 static unsigned input_analog_max(const char *name)
 {
   if (!selected_board) return 0;
+#ifdef PCSX_SYSTEM_TWINKLE
+  if(selected_board->family==116)return systemtwinkle_analog_max(name);
+#endif
   if(selected_board->family==112 && strlen(name)==6 && name[0]=='p' && (name[1]=='1' || name[1]=='2') && !strncmp(name+2,"gun",3) && (name[5]=='x' || name[5]=='y'))return 65535;
 #ifdef PCSX_SYSTEM_GV
   if(selected_board->family==102)return systemgv_analog_max(name);
@@ -1363,6 +1377,7 @@ int main(int argc, char **argv)
   unsigned long blocks = 0, trace_blocks = 1000, max_blocks = 1000000000;
   int i, board_test = 0, audio_test_fixture = 0, verify = 0, result = 0, gpu_type1_test = 0;
   int gq_fixture = 0;
+  int twinkle_fixture = 0;
   int gv_fixture = 0;
   int gv_dead_fixture = 0;
   int gv_simp_fixture = 0;
@@ -1413,6 +1428,9 @@ int main(int argc, char **argv)
     else if (!strcmp(argv[i],"--disc") && i+1<argc) disc=argv[++i];
     else if (!strcmp(argv[i],"--bios") && i+1<argc) bios_path=argv[++i];
     else if (!strcmp(argv[i],"--gl-1x")) gl_native_resolution=1;
+    else if(!strcmp(argv[i],"--twinkle-fixture") && i+1<argc){
+      if(board){usage(argv[0]);return 2;}board=argv[++i];board_family=116;twinkle_fixture=1;
+    }
     else if(!strcmp(argv[i],"--system-gv-kdeadeye-fixture") && i+1<argc){board=argv[++i];board_family=102;gv_dead_fixture=1;}
     else if(!strcmp(argv[i],"--system-gv-tokimeki-fixture") && i+1<argc){board=argv[++i];board_family=102;gv_tok_fixture=1;}
     else if (!strcmp(argv[i], "--system-gv-simpbowl-fixture") && i+1<argc){board=argv[++i];board_family=102;gv_simp_fixture=1;}
@@ -1490,9 +1508,9 @@ int main(int argc, char **argv)
         !strcmp(argv[i], "--system10") || !strcmp(argv[i], "--capcom-zn") ||
         !strcmp(argv[i], "--tecmo-tps") || !strcmp(argv[i], "--raizing-zn") || !strcmp(argv[i], "--visco-zn") || !strcmp(argv[i], "--atlus-zn") || !strcmp(argv[i], "--cbaj-tps") || !strcmp(argv[i], "--primal-zn") || !strcmp(argv[i], "--nbajam-zn") || !strcmp(argv[i],"--jdredd-zn") || !strcmp(argv[i],"--metro-zn") || !strcmp(argv[i],"--system573") ||
         !strcmp(argv[i], "--taito-fx1") || !strcmp(argv[i], "--taito-fx1z") || !strcmp(argv[i], "--system-gv") || !strcmp(argv[i],"--system-gq") ||
-        !strcmp(argv[i], "--system-gnet")) && i + 1 < argc) {
+        !strcmp(argv[i], "--system-gnet") || !strcmp(argv[i], "--twinkle")) && i + 1 < argc) {
       if (board) { usage(argv[0]); return 2; }
-      board_family = !strcmp(argv[i], "--system11") ? 11 :
+      board_family = !strcmp(argv[i], "--twinkle") ? 116 : !strcmp(argv[i], "--system11") ? 11 :
         !strcmp(argv[i], "--system10") ? 10 : !strcmp(argv[i], "--capcom-zn") ? 100 :
         !strcmp(argv[i],"--system-gq") ? 113 : !strcmp(argv[i], "--taito-fx1") ? 101 : !strcmp(argv[i], "--system-gv") ? 102 :
         !strcmp(argv[i], "--system-gnet") ? 103 : !strcmp(argv[i], "--tecmo-tps") ? 104 : !strcmp(argv[i], "--taito-fx1z") ? 105 : !strcmp(argv[i], "--raizing-zn") ? 106 : !strcmp(argv[i], "--visco-zn") ? 107 : !strcmp(argv[i], "--atlus-zn") ? 108 : !strcmp(argv[i], "--cbaj-tps") ? 109 : !strcmp(argv[i], "--primal-zn") ? 110 : !strcmp(argv[i], "--nbajam-zn") ? 111 : !strcmp(argv[i],"--jdredd-zn") ? 112 : !strcmp(argv[i],"--metro-zn") ? 114 : !strcmp(argv[i],"--system573") ? 115 : 12;
@@ -1599,6 +1617,12 @@ int main(int argc, char **argv)
     else if (!strcmp(argv[i], "--gpu-thread")) gpu_thread = 1;
     else { usage(argv[0]); return 2; }
   }
+  if (board && board_family==116 && (exe || use_drc || interactive || save_state_path || load_state_path || reset_at_cycle)) {
+    fprintf(stderr,"Twinkle bring-up requires headless interpreter execution without savestates or reset injection\n");return 2;
+  }
+#ifndef PCSX_SYSTEM_TWINKLE
+  if(twinkle_fixture || (board && board_family==116)){fprintf(stderr,"Rebuild with BOARD=1 and HAVE_CHD=1 for Twinkle.\n");return 2;}
+#endif
   if (source_step) {
 #ifdef PCSX_SYSTEM12
     if (!board || board_family != 12 || board_test || interactive || use_drc || gpu_type1_test) {
@@ -1879,6 +1903,10 @@ int main(int argc, char **argv)
       if (trace) fclose(trace);
       return 2;
     }
+#ifdef PCSX_SYSTEM_TWINKLE
+    if(twinkle_fixture){board_load_result=systemtwinkle_test_load(board);}
+    else
+#endif
 #ifdef PCSX_SYSTEM573
     if(system573_fixture){board_load_result=system573_fixture==2?system573_test_load_digital(board):system573_test_load(board);}
     else
@@ -2031,10 +2059,10 @@ int main(int argc, char **argv)
     extern int harness_gpu_type1_selftest(void);
     if (selected_board->selftest() || (gpu_get_model() == 1 ? harness_gpu_type1_selftest() :
         harness_gpu_vram_selftest())) result = 1;
-    if ((board_family == 101 || board_family == 102 || board_family == 104 || board_family == 105 || board_family == 106 || board_family == 107 || board_family == 108 || board_family == 109 || board_family == 110 || board_family == 111 || board_family == 112 || board_family == 114 || board_family == 115) &&
+    if ((board_family == 101 || board_family == 102 || board_family == 104 || board_family == 105 || board_family == 106 || board_family == 107 || board_family == 108 || board_family == 109 || board_family == 110 || board_family == 111 || board_family == 112 || board_family == 114 || board_family == 115 || board_family == 116) &&
         harness_source_spu_dma_fixture(selected_board->name, 33868800, 24000)) result = 1;
 #ifdef PCSX_SYSTEM573
-    if((board_family==115 || board_family==102) && harness_cd_large_spu_dma_fixture())result=1;
+    if((board_family==115 || board_family==102 || board_family==116) && harness_cd_large_spu_dma_fixture())result=1;
 #endif
   }
 #ifdef PCSX_SYSTEM_GV

@@ -25,6 +25,9 @@
 #ifdef PCSX_SYSTEM573
 extern int system573_active(void);
 #endif
+#ifdef PCSX_SYSTEM_TWINKLE
+extern int systemtwinkle_active(void);
+#endif
 #ifdef PCSX_SYSTEM_GV
 extern int systemgv_active(void);
 #endif
@@ -85,6 +88,9 @@ void CALLBACK SPUwriteDMAMem(unsigned short *pusPSXMem, int iSize,
 #ifdef PCSX_SYSTEM_GV
  // GV uses the same source PSX SPU DMA copy at the current timer edge.
  if (systemgv_active()) render_cycle = cycles;
+#endif
+#ifdef PCSX_SYSTEM_TWINKLE
+ if (systemtwinkle_active()) render_cycle = cycles;
 #endif
  do_samples_if_needed(render_cycle, 1, 2);
  irq_after = (irq_addr - addr) & 0x7ffff;

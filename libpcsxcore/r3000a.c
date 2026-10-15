@@ -30,6 +30,9 @@
 #include "system11.h"
 #include "system10.h"
 #include "systemzn.h"
+#ifdef PCSX_SYSTEM_TWINKLE
+#include "systemtwinkle.h"
+#endif
 #ifdef PCSX_SYSTEM573
 #include "system573.h"
 #endif
@@ -111,6 +114,9 @@ void psxReset() {
 
 	padReset();
 	psxHwReset();
+#ifdef PCSX_SYSTEM_TWINKLE
+	if(systemtwinkle_active()){systemtwinkle_reset();return;}
+#endif
 #ifdef PCSX_SYSTEM573
 	if(system573_active()){system573_reset();return;}
 #endif

@@ -4,9 +4,10 @@ The representative is original beatmania IIDX 2nd style GC985 JAA (`bmiidx2`),
 machine/input `twinklei`, parent BIOS `gq863`. Pinned MAME
 `deb2f54fe7300e7a192690318beb860159bfd52a`, `konami/twinkle.cpp`, marks it
 `MACHINE_IMPERFECT_SOUND`, without the first style's `MACHINE_NOT_WORKING`.
-This row remains open: this project has no native main-PSX Twinkle profile or
-player run yet. Original media auditing, the sound-board component and an
-independent MAME reference are separate evidence.
+This row remains open: the native interpreter now boots the original program
+into its device check, but UART/DVD integration and player validation remain
+pending. Original native execution, component vectors and the independent
+MAME reference are tracked separately.
 
 ## Original media, 2026-10-15
 
@@ -116,14 +117,80 @@ all 4 KiB backup RAM, exact update/divider scheduling, alarms/IRQ and source
 NVRAM serialization. O2/ASan/UBSan vectors preserve the pinned source's
 calendar and status quirks. Replaying the actual original-game backup-clear
 trace matches all 14,240 read responses, 35,618 writes, final registers/XRAM
-and the complete 4152-byte MAME NVRAM exactly. The native main-board wiring
-is still pending; a trace replay does not establish native PSX execution.
+and the complete 4152-byte MAME NVRAM exactly. This component evidence is
+separate from the native PSX execution described below.
 
-The remaining native work includes the 4 MiB main PSX profile, 2 MiB VRAM,
-NCR/SCSI DMA and program CD, panel/turntable inputs, RTC65271 wiring, watchdog,
-FDC37C665GT/UART/DVD control, original I2C security and complete speaker
-integration. Original boot, installation, warm state, playable notes and music
-must then be validated on GL/NEON. The full board matrix remains open.
+## Native main-board bring-up
+
+`--twinkle REGION-DIR` accepts only the exact reviewed IIDX2 configuration,
+three original chip identities and three original CHD identities. The separate
+`--twinkle-fixture` selector accepts generated chips for regression coverage.
+Both require BOARD=1/HAVE_CHD=1, ARCADE_TIMING=1 and interpreter execution.
+The shared source clock profile selects 67.7376 MHz input, 33.8688 MHz core
+cycles, multiplier 200 and the existing source-derived GPU cadence. Source 4 MiB RAM,
+2 MiB VRAM/type-2 GPU, low-byte mailbox/RTC lanes, panel/turntable/volume
+inputs, SIO0/1, original HDD-backed sound board, and NCR53CF96/XM-5401 CD
+transport are now connected. DMA5 completes its PSX channel immediately as in
+source while the payload remains gated by actual NCR DRQ. Original media is
+opened read-only. The video CD is audited/opened but DVD presentation is not
+implemented. LED and source video-mixer serial shift latches are retained.
+
+The M24C02-W pin state machine is extracted from the pinned `i2cmem.cpp`,
+with its original 16-byte page buffer, STOP commit, device select, sequential
+read and write protection. Port fields update SDA before SCL, following the
+source ioport field-mask order. No security response or initialized backup is
+invented. An independently observed original MAME boot supplies 3,709 port
+transactions (2,422 reads); replay matches every read and all 256 final EEPROM
+bytes under O2 and ASan/UBSan. The generator verifies both source SHA256s.
+
+Board persistence is an exact 4,440-byte file: a 32-byte tagged, little-endian
+length/CRC header, 4,152-byte source RTC image and 256 mutable EEPROM bytes.
+It is cold-start NVRAM, not CPU/timer/sample-RAM save state. Malformed or corrupt
+images are rejected atomically. The configured 1.2-second watchdog is armed
+and rearmed by real writes; expiry stops explicitly until full machine-reset
+sequencing is implemented. FDC37C665GT/NS16550 accesses on mapped byte lanes
+also stop explicitly; unmapped upper lanes remain source zero.
+
+```sh
+python3 scripts/prepare_twinkle_board.py --mame-source ../mamedev --rompath roms \
+  --output-dir roms/prepared/bmiidx2
+make -f Makefile.mac-harness twinkle-test
+make -f tests/Makefile.m24c02 test sanitize
+python3 libpcsxcore/arcade/m24c02_generate.py ../mamedev --check
+build/mac-harness/pcsx-harness --twinkle roms/prepared/bmiidx2 --frames 7200 \
+  --output /tmp/iidx2.ppm
+```
+
+The original BIOS displays `TWINKLE BOOT PROGRAM`, passes ROM/memory/video
+checks, loads and executes the original CD program, and reaches `GC985JA
+DEVICE CHECK` with SCSI/CD-ROM OK. With the EEPROM connected, the first
+unimplemented access is UART2 at physical `1f2105f8`, main PC `8005341c`,
+CPU cycle 943,717,072 (about 27.864 emulated seconds). At this stop: 62 real
+SCSI DMA requests / 833,720 bytes, 2,901 successful HDD sector reads and
+606,208 ATA DMA words in sample RAM; NCR, target, RTC and sound CPU report
+zero device faults; 655 real watchdog writes keep the timer armed. GL and
+NEON stop at the same CPU cycle/PC, with identical 4 MiB RAM (SHA256
+`737a85f1054b4b8173f0cf43cdc7c61fd116bd7b81255936048d9e13f4600e5e`)
+and synchronized 2 MiB VRAM dump files (16-byte header plus pixels, SHA256
+`ce5fafd18f4d66277905b10038bf89382c7a45e9305489f8d2c53234bb661221`).
+Both captures visibly show the device check. RF output is still silent.
+This proves partial original native
+boot and sample transfer, not complete installation, music, player acceptance,
+or a playable board. No MAME NVRAM is imported into the native run.
+
+Generated MIPS tests separately check upper 4 MiB RAM, mapped/unmapped byte
+lanes, mailbox, RTC paging, button/turntable/volume values, Sony SIO register
+access, a real CHD sector through NCR/SCSI/DMA5, M24C02 pin writes/readback,
+checksummed cold/warm NVRAM, corrupt-image retention, original-chip rejection,
+DMA bounds, watchdog expiry and explicit unsupported UART failure. The same
+vectors pass on GL/NEON; the HAVE_CHD=0 build rejects the profile. Existing
+GV SCSI/DMA and the normal MIPS/GPU smoke regression also pass. Shared SPU
+DMA timing/large-payload acceptance also runs with this board selected.
+
+Remaining native work is FDC37C665GT/NS16550/JVC DVD control, complete speaker
+mixing, watchdog reset sequencing and cabinet presentation, followed by actual
+backup initialization/warm boot, playable notes and music on GL/NEON. The
+full board matrix remains open.
 
 Evidence is retained under ignored
 `artifacts/boards-mac-20261015/twinkle/bmiidx2`; ROMs, CHDs, mutable state,

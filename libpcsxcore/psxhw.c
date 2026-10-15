@@ -22,6 +22,9 @@
 */
 
 #include "psxhw.h"
+#ifdef PCSX_SYSTEM_TWINKLE
+#include "systemtwinkle.h"
+#endif
 #ifdef PCSX_SYSTEM573
 #include "system573.h"
 #endif
@@ -55,6 +58,9 @@ void psxHwReset() {
 void psxHwWriteIstat(u32 value)
 {
 	u32 stat = psxHu16(0x1070) & value;
+#ifdef PCSX_SYSTEM_TWINKLE
+    if(systemtwinkle_active())stat &= psxHu16(0x1074);
+#endif
 #ifdef PCSX_SYSTEM573
     if(system573_active())stat &= psxHu16(0x1074);
 #endif
