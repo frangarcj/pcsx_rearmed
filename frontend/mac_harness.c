@@ -36,6 +36,34 @@
 #include "../libpcsxcore/systemzn.h"
 #ifdef PCSX_SYSTEM573
 #include "../libpcsxcore/system573.h"
+typedef struct HarnessPadReadTrace {
+  FILE *file;
+  uint64_t start_cycle;
+  unsigned start_frame, count, watch_count;
+  uint32_t watch[16];
+  int overflow;
+} HarnessPadReadTrace;
+static void harness_system573_pad_read(void *opaque, u32 address, unsigned width,
+    u32 value, u32 reported_pc, uint64_t cycles)
+{
+  HarnessPadReadTrace *trace = opaque;
+  System573DigitalStatus status;
+  if (cycles < trace->start_cycle) return;
+  if (trace->count == 100000) { trace->overflow = 1; return; }
+  trace->count++;
+  fprintf(trace->file, "%" PRIu64 ",%u,%08x,%u,%08x,%08x", cycles,
+      frame_counter - trace->start_frame, address, width, value, reported_pc);
+  for (unsigned i = 0; i < trace->watch_count; i++) {
+    uint32_t word;
+    memcpy(&word, psxRegs.ptrs.psxM + (trace->watch[i] & 0x1fffffffu), sizeof(word));
+    fprintf(trace->file, ",%08x", SWAP32(word));
+  }
+  if (!system573_get_digital_status(&status, NULL))
+    fprintf(trace->file, ",%u,%u,%08x,%08x,%08x", status.frame_counter,
+        status.latched_counter, status.start, status.end, status.current);
+  else fputs(",,,,,", trace->file);
+  fputc('\n', trace->file);
+}
 #endif
 #include "../libpcsxcore/systemtaito.h"
 #ifdef PCSX_SYSTEM_TWINKLE
@@ -493,6 +521,7 @@ static void usage(const char *name)
     "[--reset-at-cycle N] "
     "[--trace FILE --trace-blocks N --trace-start CYCLES] [--cycle-snapshots FILE "
     "--snapshot-start CYCLES --snapshot-interval N --snapshot-ram ADDRESS...] "
+    "[--system573-pad-reads FILE --trace-start CYCLES] "
     "[--board-bus-trace FILE] [--system12-edge-trace FILE] [--system12-trace-shared-writes | --system12-trace-shared-accesses] "
     "[--max-blocks N] [--icache] [--widescreen] [--borderless] [--gpu-thread] [--save-state-at FRAME FILE] [--load-state FILE] [--drc] [--metro-cabinet generic|dedicated] [--interactive [--art-dir DIR] [--pause-at N [--pause-script STEPS] [--pause-shot FILE.ppm]]...] [--system12-vblank-sync-only] [--system12-source-step] [--frontend-loop]\n"
     "       %s (--gpu-type1-test | --gpu-type1-test-1m)\n", name, name);
@@ -1425,6 +1454,10 @@ int main(int argc, char **argv)
   const char *trace_path = NULL;
   FILE *trace = NULL;
   const char *snapshot_path = NULL;
+  const char *pad_read_path = NULL;
+#ifdef PCSX_SYSTEM573
+  HarnessPadReadTrace pad_reads = {0};
+#endif
   FILE *snapshots = NULL;
   uint32_t snapshot_ram[16];
   unsigned snapshot_ram_count = 0;
@@ -1631,6 +1664,7 @@ int main(int argc, char **argv)
     else if (!strcmp(argv[i], "--frontend-loop")) frontend_loop = 1;
     else if (!strcmp(argv[i], "--trace") && i + 1 < argc) trace_path = argv[++i];
     else if (!strcmp(argv[i], "--cycle-snapshots") && i + 1 < argc) snapshot_path = argv[++i];
+    else if (!strcmp(argv[i], "--system573-pad-reads") && i + 1 < argc) pad_read_path = argv[++i];
     else if (!strcmp(argv[i], "--snapshot-ram") && i + 1 < argc) {
       char *tail; unsigned long value;
       const char *arg = argv[++i];
@@ -1797,7 +1831,7 @@ int main(int argc, char **argv)
       (gpu_type1_test && (exe || board || verify || trace_path)) || (board_test && !board) ||
       ((inputs_path || audio_path) && !board && !disc) ||
       ((audio_test_fixture || nvram_path) && !board) ||
-      (snapshot_path && !board) || (snapshot_ram_count && !snapshot_path) ||
+      (snapshot_path && !board) || (snapshot_ram_count && !snapshot_path && !pad_read_path) ||
       (bus_trace_path && (!board || board_family != 12)) ||
       (edge_trace_path && (!board || board_family != 12 || board_test)) ||
       (trace_shared_flags && !edge_trace_path) ||
@@ -1833,6 +1867,27 @@ int main(int argc, char **argv)
     }
 #ifndef PCSX_SYSTEM12
     fprintf(stderr, "Rebuild with BOARD=1 for System12 edge tracing.\n");
+    return 2;
+#endif
+  }
+  if (pad_read_path) {
+    const char *paths[] = {exe, output, inputs_path, audio_path, nvram_path,
+                          ram_path, vram_path, trace_path, snapshot_path,
+                          bus_trace_path, edge_trace_path};
+    if (!board || board_family != 115 || use_drc || interactive || board_test) {
+      fprintf(stderr, "--system573-pad-reads requires a System 573 interpreter replay\n");
+      return 2;
+    }
+    for (unsigned p = 0; p < sizeof(paths)/sizeof(paths[0]); p++)
+      if (paths[p] && !strcmp(paths[p], pad_read_path)) {
+        fprintf(stderr, "--system573-pad-reads must use a separate output path\n");
+        return 2;
+      }
+#ifdef PCSX_SYSTEM12
+    if (mixed_audio_path && !strcmp(mixed_audio_path, pad_read_path)) return 2;
+#endif
+#ifndef PCSX_SYSTEM573
+    fprintf(stderr, "Rebuild with BOARD=1 for System 573 pad tracing\n");
     return 2;
 #endif
   }
@@ -2378,6 +2433,23 @@ int main(int argc, char **argv)
     }
   }
   start_frame = frame_counter; prev_cycle = psxRegs.cycle;
+#ifdef PCSX_SYSTEM573
+  if (pad_read_path && !result) {
+    pad_reads.file = fopen(pad_read_path, "w");
+    if (!pad_reads.file) { perror(pad_read_path); result = 1; }
+    else {
+      pad_reads.start_cycle = trace_start;
+      pad_reads.start_frame = start_frame;
+      pad_reads.watch_count = snapshot_ram_count;
+      memcpy(pad_reads.watch, snapshot_ram, snapshot_ram_count*sizeof(snapshot_ram[0]));
+      fputs("cycles,frame,address,width,data,reported_pc", pad_reads.file);
+      for (unsigned w = 0; w < snapshot_ram_count; w++)
+        fprintf(pad_reads.file, ",ram_%08x", snapshot_ram[w]);
+      fputs(",s573_mpeg_frames,s573_latched_samples,s573_start,s573_end,s573_current\n", pad_reads.file);
+      system573_set_pad_read_trace(harness_system573_pad_read, &pad_reads);
+    }
+  }
+#endif
   if (harness_configure_gl_capture(capture_gl, start_frame + frames - 1)) {
     fprintf(stderr, "failed to configure GL capture\n");
     result = 1;
@@ -2653,6 +2725,17 @@ int main(int argc, char **argv)
 #endif
   if (trace && fclose(trace)) result = 1;
   if (snapshots && fclose(snapshots)) result = 1;
+#ifdef PCSX_SYSTEM573
+  if (pad_reads.file) {
+    system573_set_pad_read_trace(NULL, NULL);
+    if (pad_reads.overflow || ferror(pad_reads.file)) {
+      fprintf(stderr, "System573 pad-read trace truncated or write failed\n");
+      result = 1;
+    }
+    if (fclose(pad_reads.file)) result = 1;
+    fprintf(stderr, "System573 pad reads: %u\n", pad_reads.count);
+  }
+#endif
 #ifdef PCSX_SYSTEM12
   if (edge_trace.file) {
     system12_set_edge_trace(NULL, NULL);

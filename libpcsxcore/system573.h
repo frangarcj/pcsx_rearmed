@@ -24,6 +24,10 @@ int system573_has_cd(void);
 int system573_has_digital(void);
 /* Pure diagnostic copy; does not advance clocks or read mapped registers. */
 int system573_get_digital_status(System573DigitalStatus *status, uint16_t *inputs);
+/* Observe completed IN2 reads. No replacement data or extra MMIO accesses. */
+typedef void (*system573_pad_read_trace_t)(void *opaque, u32 address,
+    unsigned width, u32 value, u32 reported_pc, uint64_t cycles);
+void system573_set_pad_read_trace(system573_pad_read_trace_t trace, void *opaque);
 unsigned system573_players(void);
 void system573_set_audio_output(void (*sink)(void *,const int16_t *,unsigned),void *opaque);
 int system573_audio_spu_output(const int16_t *stereo,unsigned frames,u32 end_cycle);

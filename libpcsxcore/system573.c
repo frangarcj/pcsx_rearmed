@@ -51,6 +51,11 @@ static struct {
     uint64_t cycles,us,fraction,reads,writes;
     int active,memory_initialized,fault,nvram_loaded,synthetic;
 } board;
+static system573_pad_read_trace_t pad_read_trace;
+static void *pad_read_trace_opaque;
+void system573_set_pad_read_trace(system573_pad_read_trace_t trace,void *opaque){
+    pad_read_trace=trace;pad_read_trace_opaque=opaque;
+}
 static const struct {const char *file;size_t bytes;uint32_t crc;} media[]={
 #include "arcade/system573_media.inc"
 };
@@ -282,6 +287,7 @@ int system573_audio_flush_output(void){
     if(system573_sync(psxRegs.cycle) || system573_audio_flush(&board.audio)){board.fault=1;return -1;}return 0;
 }
 void system573_unload(void){
+    system573_set_pad_read_trace(NULL,NULL);
     system573_flash_destroy(&board.bus);
     system573_digital_destroy(board.digital);
 #ifdef HAVE_CHD
@@ -358,7 +364,10 @@ int system573_read(u32 a,unsigned w,u32 *v){
     if(!r)r=ata_bus(a,w,v,0);
 #endif
     if(!r)r=system573_flash_read(&board.bus,a,w,v);
-    if(r<0){board.fault=1;*v=UINT32_MAX;}if(r)board.reads++;return r!=0;
+    if(r<0){board.fault=1;*v=UINT32_MAX;}if(r)board.reads++;
+    if(r>0 && pad_read_trace && a>=0x1f400008 && a+w<=0x1f40000c)
+        pad_read_trace(pad_read_trace_opaque,a,w,*v,psxRegs.pc,board.cycles);
+    return r!=0;
 }
 int system573_write(u32 a,unsigned w,u32 v){
     if(!board.active)return 0;a&=0x1fffffff;
