@@ -5,7 +5,10 @@ the native Mac interpreter. A 4800-frame NEON run reaches the animated attract
 scene with all three INSERT COIN labels, 15802 sector reads, 314 SCSI commands,
 312 DMA5 requests, nonzero source PCM audio and zero board/media faults.
 A separate 6500-frame GL/NEON replay reaches P1 gameplay, and its live SDL
-audio matches the raw native output exactly. A separate 6580-frame warm GL restart also verifies reload and retained EEPROM.
+audio matches the raw native output exactly. A separate 6580-frame warm GL restart
+verifies reload and retained EEPROM. A further 7200-frame GL/NEON replay now
+registers 2,000 original-game points and retains two hearts, compared with zero
+points and one heart in its control run.
 
 ## Original media and source
 
@@ -160,5 +163,94 @@ it is not substituted for a claim that the authentic game wrote sectors.
 Evidence includes `cryptklr-warm-gl.log`, `cryptklr-warm-gl.png`, the paired
 before/after EEPROM images and `cryptklr-player-reload.csv` in the validation
 directory. This closes bounded Mac P1 startup/shooting/reload/audio/persistence
-coverage. Scored hits, simultaneous three-player gameplay, calibration, full
-analog sound routing, DRC, save states and physical Vita remain separate work.
+coverage. Scored hits are established by the following replay. Simultaneous
+three-player gameplay, calibration, full analog sound routing, DRC, save states
+and physical Vita retain separate checks.
+
+
+## Scored P1 hit with a control run
+
+The 2026-10-15 replay extends the existing startup/reload sequence. After the
+source gun has been reloaded at frames 6,500–6,516, it sends three ordinary
+trigger pulses at 6,530, 6,600 and 6,670 (each held 16 frames), raw X=243 and
+Y=150/135/135. The source gun conversion subtracts 125 from raw X, so the
+first shot reaches screen position (118,150), over the corridor skeleton.
+An intermediate 6,580-frame capture shows the struck enemy's weapon flying
+away and a current score of 1,000 in original guest RAM.
+
+At frame 7,200, the three-shot GL and NEON runs each have **2,000 points and
+two hearts**. The NEON control executes the same first 384 events, including
+all earlier misses and the reload, and adds no later shots: it has **zero
+points and one heart** at the same frame. All 396 positive-run events and
+384 control events are consumed. The capture shows the additional heart;
+this HUD does not show the numeric score during the round.
+
+Read-only inspection of the original program identifies the P1 array at
+`802377c8` (player stride `58` hex), with lives at `802377cc` and current
+score at `802377d4`. The actual hit path adds 100 at `8003e230`; exhausted
+enemy HP adds another 900 at `8003e280`. The result rendering path also reads
+that same per-player score field. No game code, score, enemy data or initialized
+game state is modified to produce this evidence; only cabinet input events are
+supplied. The disassembly notes are retained as `score-observation.txt`.
+
+All runs execute the original BIOS/HDD and have zero board/disk/sound faults,
+26,892 HDD reads, 414 SCSI commands and 412 DMA5 requests. Both positive runs
+produce exactly 5,776,734 stereo PCM16 frames at 48 kHz, with peak 11,982,
+no clipping and no unmatched chip samples. Their complete artifacts match:
+
+| Positive-run artifact | GL/NEON SHA256 |
+| --- | --- |
+| 4 MiB main RAM | `6e44aa31f8c34a370119187e903b65a53384b7f7fd1c9cbc0185d0e4c4230653` |
+| Dual-K054539 WAV | `720a13846336389b3b4d6bbf8528bdd62b5742282a500f52e298229e40f39c7f` |
+| 128-byte EEPROM | `9fefc91150cce83d3e5ad3906eefc62f781cb234e5d7cb53a8712613744df81f` |
+
+The EEPROM remains the source factory table. Original disk writes remain zero.
+VRAM dumps differ between the two renderer paths and are retained separately;
+the equality checks above cover main RAM, EEPROM and sound. GL uses its actual
+back-buffer capture, and both renderer captures have been visually inspected.
+The earlier actual player images are `cryptklr-long-gl.png` and
+`cryptklr-long-neon.png`; `cryptklr-player-gl.png` retains the earlier failed
+entry attempt described above.
+
+`tests/check_systemgq_original_harness.py` generates both exact input streams,
+runs the normal original-media loader for a NEON control and GL/NEON positive
+runs, and checks the scores/lives, original award instructions, all inputs,
+source identity, native device/audio diagnostics, factory EEPROM and equal
+artifacts. The new original runs pass its `--verify-only` mode. The combined
+runner commands match those used for the captured runs; the combined launcher
+has not itself been rerun as one command.
+
+```sh
+python3 tests/check_systemgq_original_harness.py \
+  --neon build/mac-harness/pcsx-harness \
+  --gl build/mac-harness-vitagl-like/pcsx-harness \
+  --profile roms/prepared/cryptklr --evidence-dir /tmp/cryptklr-scored-hits
+python3 tests/check_systemgq_original_harness.py --verify-only \
+  --evidence-dir artifacts/boards-mac-20261015/gq/cryptklr
+```
+
+This closes the scored-hit gap in bounded P1 Mac validation. Gun calibration,
+three-player simultaneous coverage, analog module routing, complete game
+progression, DRC and physical Vita retain their own checks.
+
+
+### Multi-player follow-up
+
+Two further NEON 7,200-frame probes (`three-player.csv` and
+`three-player-staggered.csv`) activate P1 and P2 simultaneously. Each player
+has 1,000 current points; P1 has one heart and P2 has two. All 452/452 and
+464/464 events are consumed with zero device/audio faults. P3 still shows
+INSERT COIN and remains inactive in guest RAM. Adding separated Coin 3/Start 3
+pulses in the second probe produces identical final RAM and audio, so this
+is not counted as successful three-player validation.
+
+An independent MAME 0.287 process starts from its own source-default EEPROM
+and receives the staggered CSV through the actual source ioport fields.
+At 120.4 emulated seconds all three players are active: P1 has 4,000 points,
+P2 has 1,000 and P3 has zero, with lives 2/2/3. Its final EEPROM exactly
+matches the native source factory image. The callback uses the native
+source-derived video rate to schedule CSV frames; it does not establish
+cycle-identical input delivery between emulators. The reference Lua, log,
+snapshot and NVRAM are retained under `mame-3p`. The native/reference entry
+and progression discrepancy remains under investigation. The positive P1
+score result above and the cooperative P1/P2 run are separate evidence.
