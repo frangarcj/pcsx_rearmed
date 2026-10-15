@@ -163,9 +163,9 @@ it is not substituted for a claim that the authentic game wrote sectors.
 Evidence includes `cryptklr-warm-gl.log`, `cryptklr-warm-gl.png`, the paired
 before/after EEPROM images and `cryptklr-player-reload.csv` in the validation
 directory. This closes bounded Mac P1 startup/shooting/reload/audio/persistence
-coverage. Scored hits are established by the following replay. Simultaneous
-three-player gameplay, calibration, full analog sound routing, DRC, save states
-and physical Vita retain separate checks.
+coverage. Scored hits are established by the following replay. The following multi-player checks extend this to three active players;
+calibration, full analog sound routing, DRC, save states and physical Vita
+retain separate checks.
 
 
 ## Scored P1 hit with a control run
@@ -229,9 +229,9 @@ python3 tests/check_systemgq_original_harness.py --verify-only \
   --evidence-dir artifacts/boards-mac-20261015/gq/cryptklr
 ```
 
-This closes the scored-hit gap in bounded P1 Mac validation. Gun calibration,
-three-player simultaneous coverage, analog module routing, complete game
-progression, DRC and physical Vita retain their own checks.
+This closes the scored-hit gap in bounded P1 Mac validation. The following
+checks extend simultaneous-player coverage. Gun calibration, analog module
+routing, complete game progression, DRC and physical Vita retain their own checks.
 
 
 ### Multi-player follow-up
@@ -254,3 +254,54 @@ cycle-identical input delivery between emulators. The reference Lua, log,
 snapshot and NVRAM are retained under `mame-3p`. The native/reference entry
 and progression discrepancy remains under investigation. The positive P1
 score result above and the cooperative P1/P2 run are separate evidence.
+
+
+### Three active players with common credit
+
+A subsequent normal-cabinet replay adds four Coin 1 pulses at frames
+5,400/5,460/5,520/5,580 and P3 Start at 5,640/5,760. It activates all three
+players in native execution. A final P3 aim at raw (330,170), followed by a
+trigger at frames 7,120–7,136, proves that the game reads a distinct third-gun
+position. No game data or source devices change between these probes; the
+successful entry uses actual additional common-cabinet coin/start input.
+This is separate from validating an isolated Coin 3 entry sequence or matching
+MAME's phase of entry exactly, which remain open.
+
+The final 7,200-frame GL and NEON runs consume all **480/480 events** and
+show all three colored player HUDs with active shotguns. Original RAM has
+active state `0101` for each player and the following independent state:
+
+| Player | Current score | Lives | Last game-latched screen aim |
+| --- | --- | --- | --- |
+| P1 | 1,000 | 2 | (118,135) |
+| P2 | 1,000 | 1 | (118,150) |
+| P3 | 0 | 3 | (205,170) |
+
+The gun positions are checked in each original player structure at offset
+`14` hex from its base. A changed raw port alone does not establish that the
+guest consumed it; the final P3 shot supplies that read/latch evidence. P3
+fires into the empty sky in this bounded capture, so this check does not
+claim a successful P3 enemy hit. All three reload/trigger sequences are sent
+through the existing cabinet API.
+
+Both runs again have zero board/disk/sound faults, the same original-sector
+counts and exactly 5,776,734 stereo frames at 48 kHz. Peak is 11,607, with
+zero clipping/unmatched samples. The complete GL/NEON artifacts match:
+
+| Three-player artifact | GL/NEON SHA256 |
+| --- | --- |
+| Main RAM | `6b4680f81166fc98bf0cc8a59a803c328a97e6fac01de0faface65682e40d8b2` |
+| Dual-K054539 WAV | `bed5503270e7227d761183a6783107870a2e13b7874bcf862e1a6070ccf4f92d` |
+| EEPROM | `9fefc91150cce83d3e5ad3906eefc62f781cb234e5d7cb53a8712613744df81f` |
+
+The `three-player-final-*` captures have been visually inspected. The original
+verifier's `--three-players` option generates this exact CSV, runs both extra
+original-media replays and requires active states, all scores/lives/latched gun
+positions, diagnostics and equal RAM/WAV/EEPROM. The collected five original
+runs pass `--verify-only --three-players`. No physical three-controller setup
+or mouse/gamepad multi-player session is established by these CSV replays.
+
+```sh
+python3 tests/check_systemgq_original_harness.py --verify-only --three-players \
+  --evidence-dir artifacts/boards-mac-20261015/gq/cryptklr
+```
