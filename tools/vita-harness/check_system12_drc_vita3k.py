@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Run synthetic 4/16 MiB System12 DRC probes in an isolated Vita3K profile."""
 import argparse
+import ctypes
+import errno
+from functools import lru_cache
 import importlib.util
 import os
 from pathlib import Path
@@ -9,6 +12,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 import zipfile
@@ -24,6 +28,40 @@ EXPECTED = re.compile(
     r"smc=00001234/00005678 dma5=00003333 mmio=76543210 "
     r"half=00001357 byte=00000089 runs=1\b")
 _CHECKER = None
+
+
+@lru_cache(maxsize=1)
+def _native_clonefile():
+    if sys.platform != "darwin":
+        return None
+    try:
+        clone = ctypes.CDLL(None, use_errno=True).clonefile
+    except AttributeError:
+        return None
+    clone.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int)
+    clone.restype = ctypes.c_int
+    return clone
+
+
+def copy_runtime_file(source, destination, *, follow_symlinks=True):
+    """Independent APFS clone for private runtimes; ordinary copy elsewhere.
+
+    A clone has its own inode and permissions. Guest writes and the firmware
+    read-only chmod cannot affect the source, unlike hard links. Preserve
+    ENOSPC/permission errors instead of retrying them as a full data copy.
+    """
+    source, destination = Path(source), Path(destination)
+    if destination.is_dir():
+        destination = destination / source.name
+    clone = _native_clonefile() if follow_symlinks and source.is_file() else None
+    if clone is not None and not os.path.lexists(destination):
+        if clone(os.fsencode(source.resolve()), os.fsencode(destination), 0) == 0:
+            shutil.copystat(source, destination, follow_symlinks=True)
+            return str(destination)
+        error = ctypes.get_errno()
+        if error not in (errno.EXDEV, errno.ENOTSUP, errno.EINVAL, errno.ENOSYS):
+            raise OSError(error, os.strerror(error), str(destination))
+    return shutil.copy2(source, destination, follow_symlinks=follow_symlinks)
 
 
 def system12_result_matches(text, ram_mb):
@@ -144,7 +182,7 @@ def make_isolated_config(config_path, fs_path, firmware_fs, config_template):
         if not source.is_dir():
             raise RuntimeError(f"firmware tree is missing {name}: {source}")
         copied = fs_path / name
-        shutil.copytree(source, copied)
+        shutil.copytree(source, copied, copy_function=copy_runtime_file)
         for path in (copied, *copied.rglob("*")):
             mode = path.stat().st_mode
             if not path.is_dir():
@@ -224,7 +262,8 @@ def main():
         root = Path(tmp)
         source_bundle, binary_relative = locate_app_bundle(args.emulator)
         isolated_bundle = root / source_bundle.name
-        shutil.copytree(source_bundle, isolated_bundle, symlinks=True)
+        shutil.copytree(source_bundle, isolated_bundle, symlinks=True,
+                        copy_function=copy_runtime_file)
         emulator = isolated_bundle / binary_relative
         portable = root / "portable"
         portable.mkdir()

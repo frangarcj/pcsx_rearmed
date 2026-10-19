@@ -6947,7 +6947,16 @@ static u_int *get_source_start(u_int addr, u_int *limit)
   if (code_span_provider != NULL) {
     const unsigned int *words = NULL;
     unsigned int code_limit = 0;
-    if (code_span_provider(addr, &words, &code_limit) && words != NULL &&
+    int result = code_span_provider(addr, &words, &code_limit);
+    if (result < 0) {
+      /* An internal INTCALL decode marker, never a guest opcode. execI fetches
+       * the real opcode at execution time, preserving flash/crypto bus state.
+       * Invalidate this trampoline when the board returns to stable ROM. */
+      static const u_int live_fetch[] = { 0xffffffff, 0 };
+      *limit = addr + 4;
+      return (u_int *)live_fetch;
+    }
+    if (result > 0 && words != NULL &&
         code_limit > addr) {
       *limit = code_limit;
       return (u_int *)words;

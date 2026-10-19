@@ -52,6 +52,8 @@ void CALLBACK SPUwriteRegister(unsigned long reg, unsigned short val,
  int r = reg & 0xffe;
  int rofs = (r - 0xc00) >> 1;
  int changed = spu.regArea[rofs] != val;
+ /* Finish old-volume work before changing registers visible to the worker. */
+ spu_thread_barrier();
  spu.regArea[rofs] = val;
 
  if (!changed && (ignore_dupe[rofs >> 5] & (1u << (rofs & 0x1f))))
@@ -61,6 +63,7 @@ void CALLBACK SPUwriteRegister(unsigned long reg, unsigned short val,
   return;
 
  do_samples_if_needed(cycles, 0, 16);
+ spu_thread_barrier();
 
  if(r>=0x0c00 && r<0x0d80)                             // some channel info?
   {
@@ -377,6 +380,7 @@ unsigned short CALLBACK SPUreadRegister(unsigned long reg, unsigned int cycles)
     // this reportedly doesn't work on real hw
     case H_SPUdata:
      {
+      spu_thread_barrier();
       unsigned short s = LE16TOH(*(unsigned short *)(spu.spuMemC + spu.spuAddr));
       spu.spuAddr += 2;
       spu.spuAddr &= 0x7fffe;

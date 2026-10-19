@@ -45,6 +45,12 @@ void systemzn_set_ymz_audio_output(void (*callback)(void *, float, float, uint64
 void systemzn_set_ymf_audio_output(void (*callback)(void *, float, float, uint64_t), void *opaque);
 void systemzn_unload(void);
 int systemzn_active(void);
+/* Capcom ZN-1/ZN-2 only: banked DRC code spans and Z80/QSound worker. */
+int systemzn_capcom_active(void);
+int systemzn_board_thread_start(void);
+void systemzn_board_thread_stop(void);
+int systemzn_board_thread_active(void);
+void systemzn_audio_pump(void);
 /* Pinned MAME main CPU input clock; zero when the board is inactive. */
 unsigned int systemzn_main_clock_hz(void);
 void systemzn_mem_reset(void);

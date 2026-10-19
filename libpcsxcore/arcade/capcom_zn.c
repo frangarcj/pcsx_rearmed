@@ -424,6 +424,10 @@ void capcom_zn_get_status(const CapcomZn *board, capcom_zn_status_t *status)
     status->faults = board->faults;
     z80_get_status(board->sound_cpu, &z80_status);
     status->z80_cycles = z80_status.cycles - board->z80_cycle_origin;
+    status->z80_instructions = z80_status.instructions;
+    status->z80_unsupported = z80_status.unsupported_operations;
+    status->z80_nmis = z80_status.nmis;
+    status->z80_pc = z80_status.pc;
     status->z80_cycle_debt = z80_status.cycle_debt;
     status->qsound_sound_cycles = board->qsound_sound_cycles;
     status->qsound_cycles = board->qsound_cycles;

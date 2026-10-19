@@ -484,9 +484,11 @@ extern "C" int chd_cd_advance_to(ChdCd *cd, uint64_t now_ns) {
   uint64_t delta = now_ns - cd->last_ns;
   cd->last_ns = now_ns;
   if (!cd->clocked_sink && (!cd->audio.active || cd->audio.paused)) return 1;
-  __uint128_t total = __uint128_t(delta) * 44100 + cd->sample_remainder;
-  uint64_t samples = uint64_t(total / kNsPerSecond);
-  cd->sample_remainder = uint64_t(total % kNsPerSecond);
+  // Exact quotient/remainder scaling also works on 32-bit ARM, which has
+  // no __uint128_t. The fractional product is bounded by 44100 * 1e9.
+  uint64_t fraction = (delta % kNsPerSecond) * 44100 + cd->sample_remainder;
+  uint64_t samples = (delta / kNsPerSecond) * 44100 + fraction / kNsPerSecond;
+  cd->sample_remainder = fraction % kNsPerSecond;
   while (samples--) {
     bool playing = cd->audio.active && !cd->audio.paused;
     if (!playing && !cd->clocked_sink) break;

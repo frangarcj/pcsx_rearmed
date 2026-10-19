@@ -106,7 +106,7 @@ sthread_t *pcsxr_sthread_create(void (*thread_func)(void *),
 	 * renderer its own thread has core 1, so the GPU thread (building frame
 	 * packets) shares core 2 with the board. */
 #ifdef GPU_VITA_CTR
-	if (h && (type == PCSXRT_GPU || type == PCSXRT_BOARD))
+	if (h && (type == PCSXRT_GPU || type == PCSXRT_BOARD || type == PCSXRT_SPU))
 		sceKernelChangeThreadCpuAffinityMask(h->id,
 			type == PCSXRT_GPU && pcsxr_gpu_core >= 0 && pcsxr_gpu_core <= 3
 			? SCE_KERNEL_CPU_MASK_USER_0 << pcsxr_gpu_core
@@ -120,7 +120,7 @@ sthread_t *pcsxr_sthread_create(void (*thread_func)(void *),
 		sceKernelChangeThreadPriority(h->id, prio > 191 ? 191 : prio);
 	}
 #else
-	if (h && (type == PCSXRT_GPU || type == PCSXRT_BOARD))
+	if (h && (type == PCSXRT_GPU || type == PCSXRT_BOARD || type == PCSXRT_SPU))
 		sceKernelChangeThreadCpuAffinityMask(h->id, type == PCSXRT_GPU
 			? SCE_KERNEL_CPU_MASK_USER_1 : SCE_KERNEL_CPU_MASK_USER_2);
 #endif

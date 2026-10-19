@@ -130,6 +130,8 @@ class CapturedGuest:
                  b"vitaGL-shutdown stage=")
     FORWARDED = re.compile(rb"Dynarmic forwarding EXC_BAD_ACCESS outside JIT registry pc=(0x[0-9a-fA-F]+)\s*$")
     RECOVERED = re.compile(rb"Vita3K recovered protected access pc=(0x[0-9a-fA-F]+) addr=0x[0-9a-fA-F]+ write=[01]\s*$")
+    NATIVE_ACCESS = re.compile(rb"^Unhandled EXC_BAD_ACCESS at pc (0x[0-9a-fA-F]+)\s*$")
+    VALID_PROTECTION = b"[handle_access_violation]: Unhandled write protected region was valid. Address="
 
     def __init__(self, process, log: Path, label: str, expected_tokens=()):
         self.process = process
@@ -150,6 +152,9 @@ class CapturedGuest:
         self.pending_faults = Counter()
         self.forwarded_faults = 0
         self.matched_faults = 0
+        self.pending_native_faults = deque()
+        self.recovered_native_faults = 0
+        self.native_faults_followed_by_progress = 0
         self.live_diagnostic_lines = 0
         self.thread = threading.Thread(target=self._pump, daemon=True)
         self.thread.start()
@@ -157,6 +162,24 @@ class CapturedGuest:
     def _record(self, raw_line: bytes):
         line = raw_line.decode("utf-8", errors="replace").rstrip("\r")
         encoded = raw_line
+        native_access = self.NATIVE_ACCESS.search(encoded)
+        valid_protection = self.VALID_PROTECTION in encoded
+        if native_access:
+            self.pending_native_faults.append(native_access[1].decode('ascii'))
+        if valid_protection:
+            # This Vita3K handler unprotects a valid host page and returns true.
+            # Its critical log label is not a guest crash. Keep the evidence,
+            # pair the native signal, and require subsequent guest completion.
+            if self.pending_native_faults:
+                self.pending_native_faults.popleft()
+            self.recovered_native_faults += 1
+        if (b"pcsx-vita: system12-progress " in encoded or
+                b"pcsx-vita: system12-report PASS" in encoded):
+            # Native DRC write traps can also be resumed by the host without
+            # its diagnostic recovery hook. Later guest execution/reporting
+            # proves that these signals did not terminate execution.
+            self.native_faults_followed_by_progress += len(self.pending_native_faults)
+            self.pending_native_faults.clear()
         self.lines_seen += 1
         if (b"pcsx-vita: PERF frames=" in encoded or
                 b"pcsx-vita: cpu_driver=" in encoded or
@@ -202,6 +225,8 @@ class CapturedGuest:
             if marker in encoded:
                 self.markers.add(marker.decode("ascii"))
         for marker in self.ISSUE_MARKERS:
+            if (native_access and marker == b"Unhandled EXC_") or (valid_protection and marker == b"|C|"):
+                continue
             if marker in encoded:
                 key = marker.decode("ascii", errors="replace")
                 self.issue_counts[key] += 1
@@ -248,7 +273,7 @@ class CapturedGuest:
                 return False
             matches = all(token in self.expected_tokens_seen for token in self.expected_tokens)
             idle = "Stopping -> Idle" in self.markers
-            if matches and (idle or not require_idle) and not any(self.pending_faults.values()):
+            if matches and (idle or not require_idle) and not any(self.pending_faults.values()) and not self.pending_native_faults:
                 if stable_at is None:
                     stable_at = time.monotonic()
                 if time.monotonic() - stable_at >= stable:
@@ -262,6 +287,11 @@ class CapturedGuest:
 
     def close(self):
         self.thread.join(timeout=10)
+        if self.pending_native_faults:
+            key = "Unresolved native EXC_BAD_ACCESS"
+            self.issue_counts[key] = len(self.pending_native_faults)
+            self.issue_examples[key] = ", ".join(f"{pc} count={count}"
+                for pc, count in Counter(self.pending_native_faults).items())
         unresolved = sum(self.pending_faults.values())
         if unresolved:
             key = "Unresolved forwarded EXC_BAD_ACCESS"
@@ -277,6 +307,10 @@ class CapturedGuest:
             if self.forwarded_faults:
                 out.write(f"forwarded faults={self.forwarded_faults} matched recoveries={self.matched_faults} "
                           f"unresolved={unresolved}\n")
+            if self.recovered_native_faults:
+                out.write(f"valid-page protected accesses resumed={self.recovered_native_faults}\n")
+            if self.native_faults_followed_by_progress:
+                out.write(f"native signals followed by guest progress={self.native_faults_followed_by_progress}\n")
             for key, count in self.issue_counts.items():
                 if count:
                     out.write(f"diagnostic count={count} marker={key}\n")
@@ -465,7 +499,8 @@ def read_cli(base, args):
     starter = load_module("system12_drc_helper", DRC_CHECK)
     source_bundle, binary_relative = starter.locate_app_bundle(args.emulator)
     isolated_bundle = base / source_bundle.name
-    shutil.copytree(source_bundle, isolated_bundle, symlinks=True)
+    shutil.copytree(source_bundle, isolated_bundle, symlinks=True,
+                    copy_function=starter.copy_runtime_file)
     emulator = isolated_bundle / binary_relative
 
     portable = base / "portable"

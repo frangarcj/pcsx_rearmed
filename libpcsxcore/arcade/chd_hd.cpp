@@ -1,6 +1,9 @@
 /* Native CHD hard-disk backing, SPDX-License-Identifier: GPL-2.0-or-later.
  * Uses libchdr's pinned read-only decoder and a separate sector overlay.
  * Original host adaptation; no MAME hard-disk algorithms are copied here. */
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "chd_hd.h"
 #include <libchdr/chd.h>
 #include <zlib.h>
@@ -8,6 +11,7 @@
 #include <array>
 #include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <map>

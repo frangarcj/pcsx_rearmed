@@ -40,6 +40,15 @@ endif
 ifeq ($(ARCADE_SYSTEM12),1)
 CFLAGS += -DARCADE_SYSTEM12 -DPCSX_SYSTEM12 -DPCSX_SYSTEM12_SOURCE_TIMING \
 	-DPCSX_ARCADE_SOURCE_TIMING
+# ZN/FX1 share their sound and storage devices with the optional G-Net board.
+# The device graph is needed even when the G-Net frontend is disabled.
+ARCADE_GENERATED_DIR ?= build/vita-arcade/generated
+GNET_GENERATED_DIR ?= $(ARCADE_GENERATED_DIR)
+CFLAGS += -I$(GNET_GENERATED_DIR) -Ilibpcsxcore/arcade/tms57002 \
+	-I$(ARCADE_GENERATED_DIR) -Ilibpcsxcore/arcade/m68000
+ifeq ($(HAVE_CHD),1)
+CFLAGS += -DPCSX_SYSTEM12_CDXA
+endif
 # The board (H8 + C352) can run on its own thread; the core option decides.
 SYSTEM12_BOARD_THREAD ?= 1
 ifeq ($(SYSTEM12_BOARD_THREAD),1)
@@ -52,7 +61,6 @@ endif
 endif
 
 ifeq ($(ARCADE_SYSTEM_GNET),1)
-GNET_GENERATED_DIR ?= build/vita-gnet/gnet-generated
 CFLAGS += -DARCADE_SYSTEM_GNET -DPCSX_SYSTEM_GNET \
 	-I$(GNET_GENERATED_DIR) -Ilibpcsxcore/arcade/tms57002
 endif
@@ -152,6 +160,9 @@ ifneq ($(GIT_VERSION)," unknown")
 	CFLAGS += -DGIT_VERSION=\"$(GIT_VERSION)\"
 endif
 ifneq ($(USE_MINIZ),1)
+LIBZ := -lz
+else ifeq ($(ARCADE_SYSTEM12)$(HAVE_CHD),11)
+# CHD disk overlays use the system zlib CRC API even with miniz enabled.
 LIBZ := -lz
 endif
 LIBPTHREAD := -lpthread
@@ -749,20 +760,33 @@ OBJS += libpcsxcore/system12.o libpcsxcore/system11.o libpcsxcore/system10.o \
 	libpcsxcore/arcade/z80.o libpcsxcore/arcade/qsound_hle.o \
 	libpcsxcore/arcade/ym2610.o libpcsxcore/arcade/ymfm/ymfm_opn.o \
 	libpcsxcore/arcade/ymfm/ymfm_ssg.o libpcsxcore/arcade/ymfm/ymfm_adpcm.o
+OBJS += libpcsxcore/arcade/mb89371.o libpcsxcore/arcade/i8251.o \
+	libpcsxcore/arcade/eeprom93c46.o libpcsxcore/arcade/fifo7200.o \
+	libpcsxcore/arcade/tecmo_link.o libpcsxcore/arcade/vt83c461.o \
+	libpcsxcore/arcade/primal_zn_bus.o libpcsxcore/arcade/nbajam_zn_bus.o \
+	libpcsxcore/arcade/jdredd_zn_bus.o libpcsxcore/arcade/metro_zn_bus.o \
+	libpcsxcore/arcade/adsp2181.o libpcsxcore/arcade/rax_sound.o \
+	libpcsxcore/arcade/cbaj_sound.o libpcsxcore/arcade/ymz280b.o \
+	libpcsxcore/arcade/atlus_sound.o libpcsxcore/arcade/ymf271.o \
+	libpcsxcore/arcade/raizing_sound.o libpcsxcore/arcade/m68000.o \
+	libpcsxcore/arcade/zsg2.o libpcsxcore/arcade/zoom_board.o \
+	libpcsxcore/arcade/mn10200.o libpcsxcore/arcade/tms57002.o \
+	libpcsxcore/arcade/tms57002/tms57002_core.o \
+	libpcsxcore/arcade/tms57002/tms57kdec.o libpcsxcore/arcade/tms57002/tmsops.o \
+	libpcsxcore/arcade/ata_storage.o libpcsxcore/arcade/ata_mame/atahle_port.o \
+	libpcsxcore/arcade/ata_mame/atastorage_port.o libpcsxcore/arcade/gnet_pccard.o
+M68000_GENERATED := $(addprefix $(ARCADE_GENERATED_DIR)/,m68000-decode.cpp m68000-sdf.cpp m68000-sdp.cpp)
+M68000_OBJECTS := $(M68000_GENERATED:.cpp=.o)
+OBJS += $(M68000_OBJECTS)
+ifeq ($(HAVE_CHD),1)
+OBJS += libpcsxcore/arcade/chd_hd.o libpcsxcore/arcade/chd_cd.o \
+	libpcsxcore/arcade/sh2.o libpcsxcore/arcade/system12_cdxa.o
+endif
 endif
 
 ifeq ($(ARCADE_SYSTEM_GNET),1)
-OBJS += libpcsxcore/systemgnet.o libpcsxcore/arcade/zsg2.o \
-	libpcsxcore/arcade/gnet_zoom.o libpcsxcore/arcade/rf5c296.o \
-	libpcsxcore/arcade/gnet_pccard.o \
-	libpcsxcore/arcade/ata_storage.o \
-	libpcsxcore/arcade/ata_mame/atahle_port.o \
-	libpcsxcore/arcade/ata_mame/atastorage_port.o \
-	libpcsxcore/arcade/zoom_board.o \
-	libpcsxcore/arcade/mn10200.o libpcsxcore/arcade/tms57002.o \
-	libpcsxcore/arcade/tms57002/tms57002_core.o \
-	libpcsxcore/arcade/tms57002/tms57kdec.o \
-	libpcsxcore/arcade/tms57002/tmsops.o
+OBJS += libpcsxcore/systemgnet.o \
+	libpcsxcore/arcade/gnet_zoom.o libpcsxcore/arcade/rf5c296.o
 ifeq ($(HAVE_CHD),1)
 OBJS += libpcsxcore/arcade/gnet_storage.o
 endif
@@ -778,7 +802,7 @@ endif
 
 include Makefile
 
-ifeq ($(ARCADE_SYSTEM_GNET),1)
+ifeq ($(ARCADE_SYSTEM12),1)
 GNET_TMS_HEADER := $(GNET_GENERATED_DIR)/tms57002.hxx
 $(GNET_TMS_HEADER): libpcsxcore/arcade/tms57002/tmsinstr.lst libpcsxcore/arcade/tms57002/tmsmake.py
 	@mkdir -p $(dir $@)
@@ -786,14 +810,48 @@ $(GNET_TMS_HEADER): libpcsxcore/arcade/tms57002/tmsinstr.lst libpcsxcore/arcade/
 libpcsxcore/arcade/tms57002/tms57002_core.o \
 libpcsxcore/arcade/tms57002/tms57kdec.o \
 libpcsxcore/arcade/tms57002/tmsops.o: $(GNET_TMS_HEADER)
+
+$(ARCADE_GENERATED_DIR)/m68000-head.h: libpcsxcore/arcade/m68000/m68000.lst libpcsxcore/arcade/m68000/m68000gen.py
+	@mkdir -p $(dir $@)
+	python3 libpcsxcore/arcade/m68000/m68000gen.py header $< $@
+$(M68000_GENERATED): $(ARCADE_GENERATED_DIR)/m68000-%.cpp: libpcsxcore/arcade/m68000/m68000.lst libpcsxcore/arcade/m68000/m68000gen.py
+	@mkdir -p $(dir $@)
+	python3 libpcsxcore/arcade/m68000/m68000gen.py $* $< $@
+libpcsxcore/arcade/m68000.o $(M68000_OBJECTS): $(ARCADE_GENERATED_DIR)/m68000-head.h
+$(M68000_OBJECTS): $(ARCADE_GENERATED_DIR)/%.o: $(ARCADE_GENERATED_DIR)/%.cpp
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(AUTODEPFLAGS) -c $< -o $@
+.SECONDARY: $(M68000_GENERATED)
 endif
 
 ifeq ($(ARCADE_SYSTEM12),1)
 # Ensure the final link provides the C++ runtime for the board CPU/devices.
 CC_LINK = $(CXX)
 CXXFLAGS += -std=c++17
+# Source-derived CPU adapters use C++20 bit operations.
+libpcsxcore/arcade/adsp2181.o libpcsxcore/arcade/ymf271.o \
+libpcsxcore/arcade/m68000.o $(M68000_OBJECTS): CXXFLAGS += -std=c++20
+ifeq ($(platform),vita)
+# GCC's -Ofast optimisation of the generated instruction dispatch consumes
+# several GiB per translation unit. Keep the device source intact and bound
+# cross-compiler memory; the requested PSX/Capcom CPUs keep their normal flags.
+$(M68000_OBJECTS): CXXFLAGS += -O1
+endif
 endif
 
 # no special AS needed for gpu_neon
 plugins/gpu_neon/psx_gpu/psx_gpu_arm_neon.o: plugins/gpu_neon/psx_gpu/psx_gpu_arm_neon.S
-	$(CC) $(CFLAGS) -c $^ -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
+
+ifeq ($(platform),vita)
+# Core objects are shared between NEON and vitaGL. A single stamp follows
+# the last selected configuration, so switching back also rebuilds them.
+VITA_CORE_FLAGS := build-vita/core-compile-flags.txt
+VITA_CORE_FLAGS_CONTENT := $(CC) $(CXX) $(CPPFLAGS) $(CFLAGS) $(CXXFLAGS) USE_ASYNC_GPU=$(USE_ASYNC_GPU) USE_ASYNC_SPU=$(USE_ASYNC_SPU)
+.PHONY: vita-core-force
+$(VITA_CORE_FLAGS): vita-core-force
+	@mkdir -p $(dir $@)
+	@printf '%s\n' '$(VITA_CORE_FLAGS_CONTENT)' '$(OBJS)' '$(EXTRA_EXTERN_SYMS)' > $@.tmp
+	@cmp -s $@.tmp $@ || cp $@.tmp $@
+	@rm -f $@.tmp
+$(OBJS): $(VITA_CORE_FLAGS) Makefile.libretro Makefile
+endif

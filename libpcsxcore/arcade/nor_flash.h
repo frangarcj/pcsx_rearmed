@@ -45,6 +45,8 @@ int nor_flash_last_write_dirty_span(const nor_flash_t *flash,
                                     size_t *byte_offset, size_t *byte_length);
 void nor_flash_advance_us(nor_flash_t *flash, uint64_t microseconds);
 int nor_flash_ready(const nor_flash_t *flash);
+/* True only when reads return stable array bytes without device side effects. */
+int nor_flash_array_mode(const nor_flash_t *flash);
 
 uint8_t *nor_flash_image(nor_flash_t *flash);
 size_t nor_flash_image_size(const nor_flash_t *flash);

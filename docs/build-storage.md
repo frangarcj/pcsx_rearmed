@@ -55,7 +55,10 @@ For future work:
 - Before every build or validation batch, run
   `python3 scripts/check_validation_storage.py --reserve-mib N` on the output
   volume, reserving the estimated total new output. The check refuses batches
-  that would leave less than 10 GiB free; do not bypass that floor.
+  that would leave less than 4 GiB free; do not bypass that floor. The user
+  lowered the operational floor from 10 GiB on 2026-10-19; historical figures
+  and earlier decisions below retain their original meaning. Keep output
+  estimates small and avoid bulk captures.
 - The guard also refuses a new batch while WAV/RAM/VRAM/PPM captures remain
   in `artifacts/`. Preserve compact observations and hashes, then remove those
   intermediates before proceeding. It does not automatically delete anything.

@@ -303,6 +303,11 @@ static uint16_t status_read(nor_flash_t *flash)
     return (uint16_t)(flash->status ^ (flash->toggle ? 0x44 : 0));
 }
 
+int nor_flash_array_mode(const nor_flash_t *flash)
+{
+    return flash && flash->mode == MODE_ARRAY;
+}
+
 int nor_flash_read(nor_flash_t *flash, uint32_t address, uint16_t *value)
 {
     uint16_t result;

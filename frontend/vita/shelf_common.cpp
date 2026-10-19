@@ -143,7 +143,7 @@ ShelfConfig VitaShelf_Config(const ShelfMenus *menus)
 {
     static const std::string about = pcsx_shelf_about(PCSX_GIT_VERSION);
     const ShelfConfig config = { "PCSX", "ReArcade", APP_ROOT,
-        "Copy MAME romset zips or PlayStation discs to " APP_ROOT "/roms", MENU_W, MENU_H,
+        "Copy System 12 zips, prepared arcade folders or PlayStation discs to " APP_ROOT "/roms", MENU_W, MENU_H,
         arcade_catalog_styles, arcade_catalog_style_count, menus, about.c_str(), 0, 0 };
     return config;
 }

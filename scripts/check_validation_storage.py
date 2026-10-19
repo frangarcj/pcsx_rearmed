@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Refuse batches with pending raw captures or less than 10 GiB remaining."""
+"""Refuse batches with pending raw captures or less than 4 GiB remaining."""
 import argparse
 import json
 from pathlib import Path
 import shutil
 
-MIN_FREE_BYTES = 10 * 1024**3
+MIN_FREE_BYTES = 4 * 1024**3
 RAW_CAPTURE_SUFFIXES = {'.wav', '.ram', '.vram', '.ppm'}
 
 

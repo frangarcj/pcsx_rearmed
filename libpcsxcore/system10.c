@@ -11,6 +11,10 @@
 #include "arcade/namcos10_io.h"
 #include "arcade/psx_sio.h"
 #include "gpu_vram.h"
+#include "../plugins/dfsound/spu_config.h"
+#ifndef DRC_DISABLE
+#include "new_dynarec/new_dynarec.h"
+#endif
 
 #include <errno.h>
 #include <inttypes.h>
@@ -67,6 +71,10 @@ static struct {
     uint32_t last_address, last_value;
     unsigned last_width;
     int fault;
+#ifndef DRC_DISABLE
+    uint8_t *code_cache;
+    uint8_t code_valid[0x200000 / 0x1000];
+#endif
 } board;
 
 struct InputBinding { const char *name; uint32_t mask; unsigned system; };
@@ -296,6 +304,53 @@ static Region *region_by_tag(const char *tag)
     return NULL;
 }
 
+#ifndef DRC_DISABLE
+static void invalidate_code(void *opaque, uint32_t address, uint32_t bytes)
+{
+    uint32_t offset = address - 0x1f400000u;
+    uint32_t first, last;
+    (void)opaque;
+    if (!bytes || offset >= 0x200000 || bytes > 0x200000 - offset) return;
+    first = offset / 0x1000;
+    last = (offset + bytes - 1) / 0x1000;
+    memset(board.code_valid + first, 0, last - first + 1);
+    if (psxRegs.ptrs.psxM && psxCpu == &psxRec)
+        new_dynarec_invalidate_range_hard(address, address + bytes);
+}
+
+static int system10_code_span(unsigned int pc, const unsigned int **words,
+                              unsigned int *limit)
+{
+    uint32_t address = pc >= 0x80000000u && pc < 0xc0000000u ? pc & 0x1fffffffu : pc;
+    uint32_t offset, page, end_page, i;
+    int result;
+    if (!board.device || (pc & 3) || address < 0x1f400000u || address >= 0x1f600000u)
+        return 0;
+    offset = address - 0x1f400000u;
+    page = offset / 0x1000;
+    /* Keep the next page available for a branch's delay slot. A branch at
+     * the final window word must fetch its slot live across the bus boundary. */
+    if (offset == 0x1ffffc) return -1;
+    end_page = page < 511 ? page + 2 : page + 1;
+    for (i = page; i < end_page; i++) {
+        if (!board.code_valid[i]) {
+            result = ns10_board_code_copy(board.device, 0x1f400000u + i * 0x1000,
+                board.code_cache + i * 0x1000, 0x1000);
+            if (result <= 0) {
+                if (i == page) return result;
+                if ((offset & 0xfff) == 0xffc) return -1;
+                end_page = i;
+                break;
+            }
+            board.code_valid[i] = 1;
+        }
+    }
+    *words = (const unsigned int *)(board.code_cache + offset);
+    *limit = pc + end_page * 0x1000 - offset;
+    return 1;
+}
+#endif
+
 static int create_device(void)
 {
     NS10BoardConfig *cfg;
@@ -318,6 +373,11 @@ static int create_device(void)
     cfg->program_rom = board.program_rom;
     cfg->program_rom_size = SYSTEM10_ROM_SIZE;
     cfg->io = board.io;
+#ifndef DRC_DISABLE
+    board.code_cache = (uint8_t *)malloc(0x200000);
+    if (!board.code_cache) return -1;
+    cfg->code_changed = invalidate_code;
+#endif
 
     if (!strcmp(board.profile->board_type, "MEM(M)")) {
         flash_region = region_by_tag("nand");
@@ -391,6 +451,9 @@ int system10_load(const char *directory)
         if (psx_sio_create((psx_sio_variant_t)i, &callbacks, &board.sio[i]) != PSX_SIO_OK) goto bad;
     }
     system10_reset();
+#ifndef DRC_DISABLE
+    new_dynarec_set_code_span_provider(system10_code_span);
+#endif
     return 0;
 bad:
     fprintf(stderr, "System10: board initialization failed\n");
@@ -401,6 +464,10 @@ bad:
 void system10_unload(void)
 {
     size_t i;
+#ifndef DRC_DISABLE
+    new_dynarec_set_code_span_provider(NULL);
+    free(board.code_cache);
+#endif
     ns10_board_destroy(board.device);
     ns10_io_destroy(board.io);
     psx_sio_destroy(board.sio[0]); psx_sio_destroy(board.sio[1]);
@@ -548,8 +615,9 @@ int system10_fetch(uint32_t address, uint32_t *value)
 {
     uint32_t physical = physical_address(address), fetched = UINT32_MAX;
     int result;
-    if (!board.device || value == NULL || strcmp(board.profile->board_type, "MEM(M)") ||
-        physical < 0x1f400000u || physical > 0x1f5ffffcu) return 0;
+    if (!board.device || value == NULL || physical > 0x1f5ffffcu ||
+        physical < (!strcmp(board.profile->board_type, "MEM(M)") ? 0x1f400000u : 0x1f500000u))
+        return 0;
     (void)system10_sync(psxRegs.cycle);
     result = ns10_board_read(board.device, physical, 4, &fetched);
     if (result == NS10_BOARD_OK) {
@@ -660,7 +728,10 @@ int system10_selftest(void)
 
 void system10_report(FILE *out)
 {
+    unsigned completed = 0;
     if (!board.device || out == NULL) return;
+    int threaded = spu_thread_status(&completed);
+    fprintf(out, "System10: spu_thread=%u worker_jobs=%u\n", threaded, completed);
     fprintf(out, "System10 CPU: pc=%08x SR=%08x cause=%08x I_STAT=%04x I_MASK=%04x\n",
         psxRegs.pc, psxRegs.CP0.n.SR, psxRegs.CP0.n.Cause, psxHu16(0x1070), psxHu16(0x1074));
     fprintf(out, "System10: profile=%s board=%s crypto=%s RAM=%u ROM=%u NAND=%s x%s\n",

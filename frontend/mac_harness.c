@@ -1979,12 +1979,12 @@ int main(int argc, char **argv)
 #ifdef DRC_DISABLE
   if (use_drc) { fprintf(stderr, "Rebuild with DRC=1 for --drc.\n"); return 2; }
 #endif
-  if (use_drc && board && board_family != 12 && board_family != 102
+  if (use_drc && board && board_family != 10 && board_family != 11 && board_family != 12 && board_family != 100 && board_family != 102
 #ifdef PCSX_SYSTEM_GNET
       && board_family != 103
 #endif
       ) {
-    fprintf(stderr, "Arcade DRC validation currently covers System 12 only.\n"); return 2;
+    fprintf(stderr, "Arcade DRC validation does not cover this board.\n"); return 2;
   }
   Config.icache_emulation = icache;
   if (widescreen && use_drc) {

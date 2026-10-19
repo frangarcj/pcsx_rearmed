@@ -43,6 +43,12 @@ static void memm_tests()
     io_cfg.irq10 = [](void *p, int state) { assert(state == 1); ++*static_cast<unsigned *>(p); };
     assert(ns10_io_create(&io_cfg, &io) == NS10_IO_OK);
     cfg.io = io;
+    unsigned invalidations = 0;
+    cfg.code_opaque = &invalidations;
+    cfg.code_changed = [](void *p, uint32_t address, uint32_t bytes) {
+        assert(address >= 0x1f400000 && address + bytes <= 0x1f600000 && bytes);
+        ++*static_cast<unsigned *>(p);
+    };
     NS10Board *b = nullptr;
     assert(ns10_board_create(&cfg, &b) == NS10_BOARD_OK && b);
     /* MAME init copies the first 0x62000 bytes and unscrambles little-endian
@@ -51,9 +57,15 @@ static void memm_tests()
     assert(ns10_board_data_xor(b) == 0xaaaa);
     assert(readv(b, 0x1fb40000) == 0); /* bank_r switches to ROM-region path */
     assert(readv(b, 0x1f400000) == 0xe9ef);
+    uint8_t code[4] = {};
+    unsigned before = invalidations;
+    assert(ns10_board_code_copy(b, 0x9f400000, code, sizeof(code)) == 1);
+    assert(code[0] == 0xef && code[1] == 0xe9 && invalidations == before);
     writev(b, 0x1fb40000, 0x7777); /* bank_w selects by address offset, not data */
     assert(readv(b, 0x1f400000) == 0xffff); /* Intel array read follows flash bytes */
     writev(b, 0x1f400000, 0x0090);
+    assert(invalidations > before);
+    assert(ns10_board_code_copy(b, 0xbf400000, code, sizeof(code)) == -1);
     assert(readv(b, 0x1f400000) == 0x0089 && readv(b, 0x1f400002) == 0x0015);
     writev(b, 0x1f400000, 0x00ff);
     writev(b, 0x1f400200, 0x0040);
@@ -68,11 +80,16 @@ static void memm_tests()
     }
     writev(b, 0x1f300000, 0x8003);
     assert(ns10_board_crypto_active(b));
+    /* A compiler probing encrypted code must not consume the first words. */
+    assert(ns10_board_code_copy(b, 0x1f400000, code, sizeof(code)) == -1);
     for (unsigned i = 0; i < 16; i++)
         assert(readv(b, 0x1f400000 + i * 2) == vectors[0].plain[i]);
     ns10_board_reset(b);
     writev(b, 0x1fb40020, 0); /* bank 0x10 selects data ROM bank 0 */
     assert(readv(b, 0x1f400000) == 0x1357);
+    assert(ns10_board_code_copy(b, 0xbf400000, code, sizeof(code)) == 1);
+    assert(code[0] == 0x57 && code[1] == 0x13);
+    assert(ns10_board_code_copy(b, 0x1f5ffffe, code, sizeof(code)) == 0);
     uint32_t value = 0x12345678;
     assert(ns10_board_read(b, 0x1fbf0000, 2, &value) == NS10_BOARD_OK && value == 1);
     assert(ns10_board_write(b, 0x1fba0010, 2, 0, 0xffff) == NS10_BOARD_UNMAPPED);
@@ -152,6 +169,9 @@ static void memn_tests()
     assert(ns10_board_write(b, 0x1f500000, 2, 0x1234, 0xffff) == NS10_BOARD_OK);
     assert(ns10_board_write(b, 0x1f500000, 2, 0x00ab, 0x00ff) == NS10_BOARD_OK);
     assert(readv(b, 0x1f500000) == 0x12ab); /* one-bits-written COMBINE_DATA */
+    uint8_t code[4] = {};
+    assert(ns10_board_code_copy(b, 0xbf500000, code, sizeof(code)) == 1);
+    assert(code[0] == 0xab && code[1] == 0x12);
     assert(mainrom[0] == 0xfe && mainrom[1] == 0xb6); /* independent passive vector */
     assert(mainrom[0x20000] != 0x55); /* second MAME boot-copy range */
     assert(ns10_board_data_xor(b) == 0xaaaa);

@@ -55,6 +55,9 @@ typedef struct NS10BoardConfig {
     /* Optional borrowed base I/O device; reset and elapsed time are driven
      * by this board. Caller retains ownership and wires PSX INT10. */
     NS10IO *io;
+    /* Optional executable-window invalidation, in physical PSX bytes. */
+    void (*code_changed)(void *opaque, uint32_t address, uint32_t bytes);
+    void *code_opaque;
 } NS10BoardConfig;
 
 /* All ROM/NAND pointers remain caller-owned. Creation rejects missing or
@@ -71,6 +74,11 @@ int ns10_board_write(NS10Board *board, uint32_t address, unsigned width,
 /* MEM(N) DMA channel 5: generates `bytes` bytes in little-endian PSX RAM
  * order from NAND data words. The caller places the buffer at DMA MADR. */
 int ns10_board_dma_read(NS10Board *board, uint8_t *destination, size_t bytes);
+/* Side-effect-free code snapshot. Returns 1 for stable bytes, -1 if opcode
+ * reads must go through the live bus (active stream crypto/flash status),
+ * or 0 outside an executable board window. Never advances a crypto stream. */
+int ns10_board_code_copy(NS10Board *board, uint32_t address,
+                         uint8_t *destination, size_t bytes);
 /* Advance Intel flash and the connected base I/O timer. */
 void ns10_board_advance_us(NS10Board *board, uint64_t microseconds);
 int ns10_board_crypto_active(const NS10Board *board);

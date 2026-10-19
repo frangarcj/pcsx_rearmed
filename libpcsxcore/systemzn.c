@@ -1,5 +1,6 @@
 /* GPL-2.0-or-later. Native host wiring for source-derived Sony ZN daughterboards. */
 #include "systemzn.h"
+#include "plugins.h"
 #include "system10.h"
 #include "system11.h"
 #include "system12.h"
@@ -31,6 +32,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#ifndef DRC_DISABLE
+#include "new_dynarec/new_dynarec.h"
+#endif
+#ifdef SYSTEM12_BOARD_THREAD
+#include <stdatomic.h>
+#include <retro_timers.h>
+#include "../frontend/pcsxr-threads.h"
+#endif
 
 #define SYSTEMZN_PSX_CLOCK 33868800u
 #define SYSTEMZN_QSOUND_RATE 24038u
@@ -108,7 +117,12 @@ typedef struct SystemZn {
     uint64_t sound_cycles;
     uint64_t frames;
     unsigned peak;
+#ifdef SYSTEM12_BOARD_THREAD
+    atomic_uint faults;
+#else
     uint32_t faults;
+#endif
+    size_t mapped_bank_offset;
     PcmWav wav;
     void (*audio_callback)(void *, const int16_t *, unsigned);
     void *audio_opaque;
@@ -128,6 +142,234 @@ static uint32_t canonical_address(uint32_t address)
         return address & 0x1fffffffu;
     return address;
 }
+
+/* Only Z80/QSound advances run on the core-2 board worker. */
+#ifdef SYSTEM12_BOARD_THREAD
+#define ZN_QUEUE 64
+#define ZN_SLICES 64
+/* Retain every original nominal deadline. Only queue publication is batched;
+ * merging cycle budgets could move QSound accesses across sample edges. */
+struct zn_sound_work { unsigned count; u32 cycles[ZN_SLICES]; };
+#define ZN_AUDIO_FRAMES 65536
+static struct {
+    sthread_t *thread;
+    slock_t *lock;
+    scond_t *work, *done_cond;
+    struct zn_sound_work queue[ZN_QUEUE], pending;
+    unsigned posted;
+    atomic_uint done, audio_head, audio_tail;
+    int quit, active;
+    int16_t audio[ZN_AUDIO_FRAMES * 2];
+    u64 commands, worker_cycles, worker_slices;
+} bt;
+
+static void zn_audio_pump(void)
+{
+    for (;;) {
+        unsigned head = atomic_load_explicit(&bt.audio_head, memory_order_acquire);
+        unsigned tail = atomic_load_explicit(&bt.audio_tail, memory_order_relaxed);
+        unsigned count = head - tail, at = tail % ZN_AUDIO_FRAMES;
+        if (!count) break;
+        if (count > ZN_AUDIO_FRAMES - at) count = ZN_AUDIO_FRAMES - at;
+        if (board.audio_callback)
+            board.audio_callback(board.audio_opaque, bt.audio + at * 2, count);
+        atomic_store_explicit(&bt.audio_tail, tail + count, memory_order_release);
+    }
+}
+
+static void zn_audio_push(const int16_t *samples, unsigned frames)
+{
+    while (frames) {
+        unsigned head = atomic_load_explicit(&bt.audio_head, memory_order_relaxed);
+        unsigned tail = atomic_load_explicit(&bt.audio_tail, memory_order_acquire);
+        unsigned count = ZN_AUDIO_FRAMES - (head - tail), at = head % ZN_AUDIO_FRAMES;
+        if (!count) {
+            slock_lock(bt.lock);
+            scond_signal(bt.done_cond);
+            slock_unlock(bt.lock);
+            retro_sleep(1);
+            continue;
+        }
+        if (count > frames) count = frames;
+        if (count > ZN_AUDIO_FRAMES - at) count = ZN_AUDIO_FRAMES - at;
+        memcpy(bt.audio + at * 2, samples, (size_t)count * 4);
+        atomic_store_explicit(&bt.audio_head, head + count, memory_order_release);
+        samples += count * 2; frames -= count;
+    }
+}
+
+static STRHEAD_RET_TYPE zn_thread(void *unused)
+{
+    (void)unused;
+    slock_lock(bt.lock);
+    for (;;) {
+        unsigned next = atomic_load_explicit(&bt.done, memory_order_relaxed);
+        QSoundHLEStatus status;
+        const struct zn_sound_work *work;
+        if (next == bt.posted) {
+            if (bt.quit) break;
+            scond_wait(bt.work, bt.lock);
+            continue;
+        }
+        work = &bt.queue[next % ZN_QUEUE];
+        slock_unlock(bt.lock);
+        for (unsigned i = 0; i < work->count; i++) {
+            if (capcom_zn_run_sound_cycles(board.capcom, work->cycles[i]) < 0) board.faults |= 8u;
+            bt.worker_cycles += work->cycles[i];
+        }
+        bt.commands++; bt.worker_slices += work->count;
+        if (qsound_hle_get_status(board.qsound, &status)) board.faults |= 2u;
+        slock_lock(bt.lock);
+        atomic_store_explicit(&bt.done, next + 1, memory_order_release);
+        scond_signal(bt.done_cond);
+    }
+    slock_unlock(bt.lock);
+    STRHEAD_RETURN();
+}
+
+static void zn_wait(unsigned target)
+{
+    if ((int)(atomic_load_explicit(&bt.done, memory_order_acquire) - target) >= 0)
+        return;
+    slock_lock(bt.lock);
+    while ((int)(atomic_load_explicit(&bt.done, memory_order_acquire) - target) < 0) {
+        if (atomic_load_explicit(&bt.audio_head, memory_order_acquire) !=
+            atomic_load_explicit(&bt.audio_tail, memory_order_relaxed)) {
+            slock_unlock(bt.lock);
+            zn_audio_pump();
+            slock_lock(bt.lock);
+        } else scond_wait(bt.done_cond, bt.lock);
+    }
+    slock_unlock(bt.lock);
+}
+
+static void zn_post_pending(void)
+{
+    if (!bt.pending.count) return;
+    zn_wait(bt.posted - ZN_QUEUE + 1);
+    bt.queue[bt.posted % ZN_QUEUE] = bt.pending;
+    bt.pending.count = 0;
+    slock_lock(bt.lock);
+    bt.posted++;
+    scond_signal(bt.work);
+    slock_unlock(bt.lock);
+}
+#endif
+
+static void zn_drain(void)
+{
+#ifdef SYSTEM12_BOARD_THREAD
+    if (bt.active) {
+        zn_post_pending();
+        zn_wait(bt.posted);
+        zn_audio_pump();
+    }
+#endif
+}
+
+static void zn_flush_audio(void)
+{
+    zn_drain();
+    if (board.audio_callback && board.audio_buffer_frames)
+        board.audio_callback(board.audio_opaque, board.audio_buffer, board.audio_buffer_frames);
+    board.audio_buffer_frames = 0;
+}
+
+static void zn_run_sound(u32 cycles)
+{
+#ifdef SYSTEM12_BOARD_THREAD
+    if (bt.active) {
+        bt.pending.cycles[bt.pending.count++] = cycles;
+        if (bt.pending.count == ZN_SLICES) zn_post_pending();
+        return;
+    }
+#endif
+    if (capcom_zn_run_sound_cycles(board.capcom, cycles) < 0) board.faults |= 8u;
+}
+
+int systemzn_board_thread_active(void)
+{
+#ifdef SYSTEM12_BOARD_THREAD
+    return bt.active;
+#else
+    return 0;
+#endif
+}
+
+int systemzn_board_thread_start(void)
+{
+#ifdef SYSTEM12_BOARD_THREAD
+    if (bt.active) return 0;
+    if (!systemzn_capcom_active()) return -1;
+    bt.lock = slock_new(); bt.work = scond_new(); bt.done_cond = scond_new();
+    if (bt.lock && bt.work && bt.done_cond) {
+        bt.posted = 0; bt.quit = 0; bt.commands = bt.worker_cycles = bt.worker_slices = 0; bt.pending.count = 0;
+        atomic_store(&bt.done, 0);
+        atomic_store(&bt.audio_head, 0); atomic_store(&bt.audio_tail, 0);
+        bt.active = 1;
+        bt.thread = pcsxr_sthread_create(zn_thread, PCSXRT_BOARD);
+        if (bt.thread) {
+            SysPrintf("SystemZN: board thread started (Z80 + QSound)\n");
+            return 0;
+        }
+        bt.active = 0;
+    }
+    if (bt.done_cond) scond_free(bt.done_cond);
+    if (bt.work) scond_free(bt.work);
+    if (bt.lock) slock_free(bt.lock);
+    bt.done_cond = bt.work = NULL; bt.lock = NULL;
+#endif
+    return -1;
+}
+
+void systemzn_board_thread_stop(void)
+{
+#ifdef SYSTEM12_BOARD_THREAD
+    if (!bt.active) return;
+    zn_flush_audio();
+    slock_lock(bt.lock);
+    bt.quit = 1; scond_signal(bt.work);
+    slock_unlock(bt.lock);
+    sthread_join(bt.thread); bt.thread = NULL; bt.active = 0;
+    scond_free(bt.done_cond); scond_free(bt.work); slock_free(bt.lock);
+    bt.done_cond = bt.work = NULL; bt.lock = NULL;
+    SysPrintf("SystemZN: board thread stopped\n");
+#endif
+}
+
+void systemzn_audio_pump(void)
+{
+#ifdef SYSTEM12_BOARD_THREAD
+    if (bt.active) { zn_post_pending(); zn_audio_pump(); }
+#endif
+}
+
+int systemzn_capcom_active(void) { return board.active && board.capcom != NULL; }
+
+#ifndef DRC_DISABLE
+static int systemzn_code_span(unsigned pc, const unsigned **words, unsigned *limit)
+{
+    u32 address = canonical_address(pc), end;
+    const uint8_t *region;
+    size_t offset, size;
+    if (!systemzn_capcom_active() || (pc & 3)) return 0;
+    if (address >= 0x1f000000u && address < 0x1f800000u) {
+        region = board.regions[1]; size = board.sizes[1];
+        if (address < 0x1f400000u) {
+            offset = address - 0x1f000000u; end = 0x1f400000u;
+        } else {
+            offset = board.mapped_bank_offset + address - 0x1f400000u; end = 0x1f800000u;
+        }
+    } else if (address >= 0x1fb80000u && address < 0x1fc00000u) {
+        region = board.regions[2]; size = board.sizes[2];
+        offset = address - 0x1fb80000u; end = 0x1fc00000u;
+    } else return 0;
+    if (address == end - 4 || offset > size || size - offset < 4) return -1;
+    *words = (const unsigned *)(region + offset);
+    *limit = pc + end - address;
+    return 1;
+}
+#endif
 
 static const ZnProfile *find_profile(const char *set)
 {
@@ -318,7 +560,11 @@ static void qsound_pcm(void *opaque, int16_t left, int16_t right, uint64_t frame
         unsigned index = board.audio_buffer_frames++ * 2;
         board.audio_buffer[index] = left; board.audio_buffer[index + 1] = right;
         if (board.audio_buffer_frames == 256) {
-            board.audio_callback(board.audio_opaque, board.audio_buffer, 256);
+#ifdef SYSTEM12_BOARD_THREAD
+            if (bt.active) zn_audio_push(board.audio_buffer, 256);
+            else
+#endif
+                board.audio_callback(board.audio_opaque, board.audio_buffer, 256);
             board.audio_buffer_frames = 0;
         }
     }
@@ -659,6 +905,9 @@ static int load_board(const char *directory, int family, int synthetic)
     Config.HLE = FALSE;
     board.last_psx_cycle = psxRegs.cycle;
     if (systemzn_sync(psxRegs.cycle) < 0) goto bad;
+#ifndef DRC_DISABLE
+    if (board.capcom) new_dynarec_set_code_span_provider(systemzn_code_span);
+#endif
     return 0;
 bad:
     fprintf(stderr, "SystemZN: media/profile initialization failed\n");
@@ -728,6 +977,10 @@ int systemzn_tps_active(void) { return board.active && board.tps; }
 void systemzn_unload(void)
 {
     unsigned i;
+    systemzn_board_thread_stop();
+#ifndef DRC_DISABLE
+    if (board.capcom) new_dynarec_set_code_span_provider(NULL);
+#endif
     /* Executable LUT pages borrow the region buffers until unload. */
     static const uint32_t bases[] = {0x1f000000u, 0x9f000000u, 0xbf000000u};
     if (board.active && psxRegs.ptrs.memRLUT && psxRegs.ptrs.memWLUT) {
@@ -786,7 +1039,7 @@ static void map_window(uint32_t base, const uint8_t *data, size_t size, int writ
     if (!psxRegs.ptrs.memRLUT || !psxRegs.ptrs.memWLUT) return;
     for (i = 0; i < size; i += SYSTEMZN_ROM_PAGE) {
         uint32_t address = base + (uint32_t)i;
-        uintptr_t offset = (uintptr_t)data - (uintptr_t)address;
+        uintptr_t offset = (uintptr_t)data - (uintptr_t)base;
         psxRegs.ptrs.memRLUT[address >> PSXM_SHIFT] = offset;
         psxRegs.ptrs.memWLUT[address >> PSXM_SHIFT] = writable ? offset : INVALID_PTR_VAL;
     }
@@ -850,7 +1103,13 @@ static void map_bankedroms(void)
         }
         return;
     }
+    zn_drain();
     capcom_zn_get_status(board.capcom, &status);
+#ifndef DRC_DISABLE
+    if (psxCpu == &psxRec && board.mapped_bank_offset != status.main_bank_offset)
+        new_dynarec_invalidate_range_hard(0x1f400000u, 0x1f800000u);
+#endif
+    board.mapped_bank_offset = status.main_bank_offset;
     for (a = 0; a < 3; a++)
         map_window(fixed_aliases[a], board.regions[1], CAPCOM_ZN_MAIN_FIXED_SIZE, 0);
     for (a = 0; a < 3; a++) {
@@ -871,6 +1130,7 @@ static void map_bankedroms(void)
 
 void systemzn_mem_reset(void)
 {
+    zn_drain();
     if (!board.active || !psxRegs.ptrs.psxM) return;
     memcpy(psxRegs.ptrs.psxR, board.regions[0], board.sizes[0]);
     if ((!board.primal && !board.nbajam && !board.jdredd && !board.metro) || !board.memory_initialized) memset(psxRegs.ptrs.psxM, 0, psxRamSize);
@@ -886,6 +1146,7 @@ void systemzn_mem_reset(void)
 void systemzn_reset(void)
 {
     if (!board.active) return;
+    zn_flush_audio();
     /* MAME has no device_reset override for the shared ZN MCU, CAT702, AT28C16
      * or PSX SIO devices; preserve their pin/timer/storage state on soft reset. */
     board.faults = 0;
@@ -955,14 +1216,14 @@ int systemzn_sync(u32 psx_cycle)
         if (board.cbaj && cbaj_sound_sync(board.cbaj_sound, board.sound_cycles)) board.faults |= 8;
         if (board.atlus && atlus_sound_sync(board.atlus_sound, board.sound_cycles)) board.faults |= 8;
         if (board.raizing && raizing_sound_sync(board.raizing_sound, board.sound_cycles)) board.faults |= 8u;
-        if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && !board.nbajam && !board.jdredd && !board.metro && sound_cycles && capcom_zn_run_sound_cycles(board.capcom, sound_cycles) < 0)
-            board.faults |= 8u;
+        if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && !board.nbajam && !board.jdredd && !board.metro && sound_cycles)
+            zn_run_sound(sound_cycles);
     }
     sio_bus_advance(board.sio[0], board.sio_cycles);
     sio_bus_advance(board.sio[1], board.sio_cycles);
     if (sync_peripherals_to_cycle(board.sio_cycles)) board.faults |= 1u;
-    if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && !board.nbajam && !board.jdredd && !board.metro && qsound_hle_get_status(board.qsound, &status)) board.faults |= 2u;
-    if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && !board.nbajam && !board.jdredd && !board.metro) {
+    if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && !board.nbajam && !board.jdredd && !board.metro && !systemzn_board_thread_active() && qsound_hle_get_status(board.qsound, &status)) board.faults |= 2u;
+    if (!board.tps && !board.raizing && !board.visco && !board.atlus && !board.cbaj && !board.primal && !board.nbajam && !board.jdredd && !board.metro && !systemzn_board_thread_active()) {
         capcom_zn_status_t cap_status;
         capcom_zn_get_status(board.capcom, &cap_status);
         if (cap_status.faults) board.faults |= 8u;
@@ -1098,6 +1359,8 @@ int systemzn_read(u32 address, unsigned width, u32 *value)
         }
         return 1;
     }
+    if (board.capcom && ((physical >= 0x1f000000u && physical < 0x1f800000u) ||
+        (physical >= 0x1fb00000u && physical < 0x1fc00000u))) zn_drain();
     result = board.tps || board.raizing || board.visco || board.atlus || board.cbaj || board.primal || board.nbajam || board.jdredd || board.metro ? 0 : capcom_zn_main_read(board.capcom, physical, width, value);
     if (result == CAPCOM_ZN_HANDLED) return 1;
     if (result < 0) { board.faults |= 8u; *value = UINT32_MAX; return 1; }
@@ -1186,6 +1449,7 @@ int systemzn_write(u32 address, unsigned width, u32 value)
         } else if (raizing_sound_irq(board.raizing_sound)) board.faults |= 8;
         return 1;
     }
+    if (board.capcom && physical >= 0x1fb00000u && physical < 0x1fc00000u) zn_drain();
     result = board.tps || board.raizing || board.visco || board.atlus || board.cbaj || board.primal || board.nbajam || board.jdredd || board.metro ? 0 : capcom_zn_main_write(board.capcom, physical, width, value);
     if (result == CAPCOM_ZN_HANDLED) { if (physical == 0x1fb00000) map_bankedroms(); return 1; }
     if (result < 0) { board.faults |= 8u; return 1; }
@@ -1368,7 +1632,7 @@ int systemzn_eeprom_export(unsigned char *image, size_t size)
     if(board.nbajam)memcpy(image+2080,board.nba_bus.sram,32768);return 0;
 }
 void systemzn_set_audio_output(void (*callback)(void *, const int16_t *, unsigned), void *opaque)
-{ board.audio_callback = callback; board.audio_opaque = opaque; board.audio_buffer_frames = 0; }
+{ zn_flush_audio(); board.audio_callback = callback; board.audio_opaque = opaque; board.audio_buffer_frames = 0; }
 void systemzn_set_rax_audio_output(void (*callback)(void *,const float *,size_t,unsigned,const uint64_t *),void *opaque)
 { board.rax_callback=callback;board.rax_opaque=opaque; }
 void systemzn_set_ymf_audio_output(void (*callback)(void *, float, float, uint64_t), void *opaque)
@@ -1378,15 +1642,17 @@ void systemzn_set_ymz_audio_output(void (*callback)(void *, float, float, uint64
 int systemzn_open_audio(const char *path)
 {
     if (!board.active || board.tps || board.primal || board.nbajam || board.jdredd || board.wav.file) return -1;
+    zn_flush_audio();
     return pcm_wav_open(&board.wav, path, board.atlus || board.cbaj ? 88200 : board.raizing ? 44100 : SYSTEMZN_QSOUND_RATE);
 }
-int systemzn_close_audio(void) { return pcm_wav_close(&board.wav); }
+int systemzn_close_audio(void) { zn_flush_audio(); return pcm_wav_close(&board.wav); }
 
 int systemzn_selftest(void)
 {
     uint32_t value;
     unsigned before;
     if (!board.active) return -1;
+    zn_drain();
     if (systemzn_read(0x1fa10200, 1, &value) != 1 ||
         value != (board.primal ? 0x6a : board.profile->vram_size == 0x200000 ? 0x69 : 0x61)) return -1;
     if (systemzn_read(0x1f000000, 4, &value) != 1 ||
@@ -1493,6 +1759,11 @@ void systemzn_report(FILE *out)
     uint16_t qreg78 = 0, qreg1 = 0, qreg2 = 0, qreg4 = 0, qreg5 = 0, qreg6 = 0;
     uint8_t sound_f010, sound_f020;
     if (!board.active || !out) return;
+    zn_flush_audio();
+#ifdef SYSTEM12_BOARD_THREAD
+    if (board.capcom) fprintf(out, "SystemZN: board_thread=%u worker_commands=%" PRIu64 " worker_cycles=%" PRIu64 " worker_slices=%" PRIu64 "\n",
+        bt.active, bt.commands, bt.worker_cycles, bt.worker_slices);
+#endif
     if(board.metro){
         MetroZnBus *b=&board.metro_bus;
         fprintf(out,"Metro ZN: profile=%s RAM=4194304 VRAM=2097152 bank=%u command=%04x faults=%u media=%s H8=NO_DUMP ATA_transport=UNIMPLEMENTED disk_data_accesses=0 DSW=%02x\n",board.profile->set,b->bank,b->command,board.faults,board.synthetic?"SYNTHETIC_FIXTURE":"SOURCE_VERIFIED",board.metro_dsw);
@@ -1605,6 +1876,8 @@ void systemzn_report(FILE *out)
         board.kicks[0], board.kicks[1]);
     fprintf(out, "SystemZN: Z80 cycles=%" PRIu64 " bank=%u IRQ=%" PRIu64 " latch=%u faults=%u\n",
         status.sound_cycles, status.sound_bank, status.irq_ticks, status.sound_latch_pending, board.faults | status.faults);
+    fprintf(out, "SystemZN: Z80 pc=%04x instructions=%" PRIu64 " unsupported=%" PRIu64 " NMIs=%" PRIu64 "\n",
+        status.z80_pc, status.z80_instructions, status.z80_unsupported, status.z80_nmis);
     fprintf(out, "SystemZN: QSound rate=%u frames=%" PRIu64 " peak=%u WAV_bytes=%" PRIu64 " firmware=0x1000words samples=%u\n",
         qstatus.sample_rate, qstatus.frames, board.peak, board.wav.bytes, qstatus.sample_region_bank);
     fprintf(out, "SystemZN: QSound commands=%" PRIu64 " state=%04x next=%04x ready=%u output=%d/%d voice0=%d regs78/1/2/4/5/6=%04x/%04x/%04x/%04x/%04x/%04x Z80ram[f010/f020]=%02x/%02x\n",

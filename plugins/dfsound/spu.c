@@ -1013,7 +1013,12 @@ void do_samples(unsigned int cycles_to, int force_no_thread)
 
  silentch = ~(spu.dwChannelsAudible | spu.dwNewChannel) & 0xffffff;
 
- force_no_thread |= (silentch == 0xffffff);
+ /* CD reverb shares the main-thread CD mix scratch. Keep that path serial. */
+ force_no_thread |= (silentch == 0xffffff) || (spu.spuCtrl & CTRL_CDREVERB);
+ /* Noise used as a frequency-modulation source is also decoded on main. */
+ for (int ch = 0; ch < MAXCHAN; ch++)
+  if (spu.s_chan[ch].bNoise && spu.s_chan[ch].bFMod == 2)
+   force_no_thread = 1;
  if (worker != NULL)
   sync_worker_thread(force_no_thread);
 
@@ -1063,8 +1068,10 @@ void do_samples(unsigned int cycles_to, int force_no_thread)
   if (unlikely(spu.rvb->dirty))
    REVERBPrep();
 
-  //if (unlikely(spu.interpolation != spu_config.iUseInterpolation))
-  spu.interpolation = spu_config.iUseInterpolation;
+  if (spu.interpolation != spu_config.iUseInterpolation) {
+   if (worker != NULL) sync_worker_thread(1);
+   spu.interpolation = spu_config.iUseInterpolation;
+  }
 
   if (force_no_thread || worker == NULL || !spu_config.iUseThread) {
    do_channels(ns_to);
@@ -1306,102 +1313,96 @@ static void RemoveStreams(void)
 #elif defined(USE_ASYNC_SPU)
 
 #include "../../frontend/pcsxr-threads.h"
-#ifdef _3DS
-#include <3ds/svc.h> // semaphore.h dep
-#endif
-#include <semaphore.h>
-
+/* Mutex/condition backend also works on macOS (unnamed POSIX semaphores
+ * are unsupported there) and Vita. Both command publication and completion
+ * use the lock: i_done is never polled through an unsynchronized C access. */
 static struct {
  sthread_t *thread;
- sem_t sem_avail;
- sem_t sem_done;
+ slock_t *lock;
+ scond_t *avail, *done;
+ unsigned ready;
+ int quit;
 } t;
-
-/* generic pthread implementation */
 
 static void thread_work_start(void)
 {
- sem_post(&t.sem_avail);
+ slock_lock(t.lock);
+ t.ready = worker->i_ready;
+ scond_signal(t.avail);
+ slock_unlock(t.lock);
 }
 
 static void thread_work_wait_sync(struct work_item *work, int force)
 {
- sem_wait(&t.sem_done);
+ (void)work; (void)force;
+ slock_lock(t.lock);
+ while (worker->i_done == worker->i_reaped)
+  scond_wait(t.done, t.lock);
+ slock_unlock(t.lock);
 }
 
 static int thread_get_i_done(void)
 {
- return worker->i_done;
+ unsigned done;
+ slock_lock(t.lock);
+ done = worker->i_done;
+ slock_unlock(t.lock);
+ return done;
 }
 
-static void thread_sync_caches(void)
-{
-}
+static void thread_sync_caches(void) {}
 
 static STRHEAD_RET_TYPE spu_worker_thread(void *unused)
 {
- struct work_item *work;
-
- while (1) {
-  sem_wait(&t.sem_avail);
-  if (worker->exit_thread)
-   break;
-
+ (void)unused;
+ slock_lock(t.lock);
+ for (;;) {
+  struct work_item *work;
+  while (worker->i_done == t.ready && !t.quit)
+   scond_wait(t.avail, t.lock);
+  if (t.quit) break;
   work = &worker->i[worker->i_done & WORK_I_MASK];
+  slock_unlock(t.lock);
   do_channel_work(work);
+  slock_lock(t.lock);
   worker->i_done++;
-
-  sem_post(&t.sem_done);
+  scond_signal(t.done);
  }
-
+ slock_unlock(t.lock);
  STRHEAD_RETURN();
 }
 
 static void init_spu_thread(void)
 {
- int ret;
-
  spu.sb_thread = spu.sb_thread_;
- if (!spu_config.iUseThread)
-  return;
- if (worker)
-  return;
+ if (!spu_config.iUseThread || worker) return;
  worker = calloc(1, sizeof(*worker));
- if (worker == NULL)
-  return;
- ret = sem_init(&t.sem_avail, 0, 0);
- if (ret != 0)
-  goto fail_sem_avail;
- ret = sem_init(&t.sem_done, 0, 0);
- if (ret != 0)
-  goto fail_sem_done;
-
- t.thread = pcsxr_sthread_create(spu_worker_thread, PCSXRT_SPU);
- if (!t.thread)
-  goto fail_thread;
-
- return;
-
-fail_thread:
- sem_destroy(&t.sem_done);
-fail_sem_done:
- sem_destroy(&t.sem_avail);
-fail_sem_avail:
- free(worker);
- worker = NULL;
+ if (!worker) return;
+ t.lock = slock_new(); t.avail = scond_new(); t.done = scond_new();
+ if (t.lock && t.avail && t.done) {
+  t.ready = 0; t.quit = 0;
+  t.thread = pcsxr_sthread_create(spu_worker_thread, PCSXRT_SPU);
+  if (t.thread) return;
+ }
+ if (t.done) scond_free(t.done);
+ if (t.avail) scond_free(t.avail);
+ if (t.lock) slock_free(t.lock);
+ memset(&t, 0, sizeof(t));
+ free(worker); worker = NULL;
 }
 
 static void exit_spu_thread(void)
 {
- if (worker == NULL)
-  return;
- worker->exit_thread = 1;
- sem_post(&t.sem_avail);
+ if (!worker) return;
+ /* Reap all work before changing the ADPCM state or releasing RAM. */
+ sync_worker_thread(1);
+ slock_lock(t.lock);
+ t.quit = 1; scond_signal(t.avail);
+ slock_unlock(t.lock);
  sthread_join(t.thread);
- sem_destroy(&t.sem_done);
- sem_destroy(&t.sem_avail);
- free(worker);
- worker = NULL;
+ scond_free(t.done); scond_free(t.avail); slock_free(t.lock);
+ memset(&t, 0, sizeof(t));
+ free(worker); worker = NULL;
 }
 
 #else // if !defined(USE_ASYNC_SPU)
@@ -1415,6 +1416,22 @@ static void exit_spu_thread(void)
 }
 
 #endif
+
+/* Main-thread barriers used by MMIO and diagnostics. */
+void spu_thread_barrier(void)
+{
+ if (worker != NULL) sync_worker_thread(1);
+}
+
+int spu_thread_status(unsigned *completed)
+{
+ spu_thread_barrier();
+ if (completed) *completed = 0;
+#if defined(USE_ASYNC_SPU) || defined(WANT_THREAD_CODE)
+ if (worker && completed) *completed = thread_get_i_done();
+#endif
+ return worker != NULL;
+}
 
 long CALLBACK SPUfreeze(int ulFreezeMode, SPUFreeze_t * pF, unsigned short **ram,
  void * pF2, unsigned int cycles)
@@ -1479,6 +1496,12 @@ long CALLBACK SPUclose(void)
 {
  if (!spu.bSPUIsOpen) return 0;                        // some security
 
+ spu_thread_barrier();
+ /* Deliver the tail before closing the frontend; all callbacks stay on main. */
+ if (spu.pS != (short *)spu.pSpuBuffer) {
+  out_current->feed(spu.pSpuBuffer, (unsigned char *)spu.pS - spu.pSpuBuffer);
+  spu.pS = (short *)spu.pSpuBuffer;
+ }
  spu.bSPUIsOpen = 0;                                   // no more open
 
  out_current->finish();                                // no more sound handling

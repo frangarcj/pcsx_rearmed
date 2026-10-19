@@ -40,6 +40,69 @@ nonzero QSound capture. The fixtures also independently verify main CPU to
 Z80/SIO clock ratios. Full timing equivalence and the mainboard SPU audio mix
 remain pending.
 
+## DRC and Vita core 2
+
+Capcom profiles now retain the selected MIPS DRC in both the production
+libretro core and the native harness. A code-span provider exposes the fixed
+ROM, selected 4 MiB ROM bank and country ROM through physical and KSEG aliases.
+Changing the bank invalidates translations before publishing the new mapping.
+Cross-window delay slots use the live interpreter path; RAM retains normal
+self-modifying-code invalidation. Both SIO blocks use the board handlers under
+the DRC. The shared ROM LUT helper also now advances the source across pages;
+it previously repeated the first page throughout each mapped window.
+
+The optional `pcsx_rearmed_system12_board_thread` worker runs the interpreted
+Z80 and QSound on Vita core 2. MIPS/DRC remains on core 0 and the NEON GPU worker
+on core 1. SIO, MCU, EEPROM, inputs and main IRQ scheduling stay on main.
+Sound latch writes drain earlier work before delivering the Z80 NMI. Queue
+publication groups up to 64 advances while preserving every original cycle
+budget and deadline. A bounded PCM ring delivers callbacks on main and pumps
+while waiting, including when one advance exceeds the ring's capacity. Reset,
+worker changes and unload drain pending work before changing device ownership.
+Other ZN daughterboards retain their existing CPU and sound paths.
+
+Generated ZN-1 (`sfex`) and ZN-2 (`rvschool`) production-libretro checks cover
+interpreter/DRC, serial/threaded sound, bank replacement and aliases, mapping
+boundary delay slots, RAM code rewrites, SIO/MCU/EEPROM timing and IRQs, KICK
+inputs, Z80 latch NMIs, ring backpressure, reset and worker restart. Both reset
+passes produce identical audio counts and hashes with and without the worker.
+The profile-switching test also checks worker teardown and restoration when
+moving between System 10, System 11, Capcom ZN and console layouts.
+
+```sh
+python3 scripts/check_validation_storage.py --reserve-mib 96 && \
+  python3 tests/check_zn_drc.py \
+    --core build/mac-libretro/src/pcsx_rearmed_libretro.dylib \
+    --host build/mac-libretro/test-zn-drc
+```
+
+The test host is built from `tests/test_zn_drc_libretro.c` with the libretro
+headers and `-ldl`. On 2026-10-19, verified real Street Fighter EX media also
+completed 1800 scripted NEON frames in all four CPU/worker combinations.
+All audio WAV hashes matched; serial/threaded per-frame video hashes matched
+within each CPU backend. Interpreter and DRC video sequences differ in timing.
+Compact local evidence is in `artifacts/validation/zn-drc-thread-20261019/`;
+raw WAV/PPM intermediates were hashed and removed. This does not establish
+physical Vita performance or validate all 43 titles.
+
+The NEON Vita executable also completed the same 1800-frame/42-event replay
+in Vita3K with both GPU and board workers enabled. Its report confirms ari64,
+43,875 sound work items containing 2,663,609 original advances, 240,677,278
+Z80 cycles, 723,175 QSound frames, zero unsupported Z80 operations and zero
+board faults; the frontend reports zero audio errors. Separate controls with
+either worker disabled completed with the same final board state. The tested
+executable SHA-256 is
+`26fd2d0d56f8a2b4f37c953710c7b02ef34b436dfe5ba87c5e75f864fe08c35f`.
+This updates the standalone NEON eboot, not the older root VPK.
+
+Vita3K did not exit cleanly: completed runs reached `Stopping -> Idle` before
+its existing `free(MemState)` host crash. The first run with both workers
+instead aborted during play in the host's `handle_timeout/condvar_wait`
+with `condition_variable wait failed: Invalid argument`; a repeat completed
+without changing the guest executable. Preserve that intermittent host
+failure separately from the successful guest result. Recoverable native
+access signals followed by guest progress were allowed throughout.
+
 
 The shared native `systemzn` motherboard now also has an explicit
 `--tecmo-tps` loader for the source-reviewed common TPS map. That path uses

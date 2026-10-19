@@ -43,7 +43,9 @@ int  new_dynarec_quick_check_range(unsigned int start, unsigned int end);
 void new_dynarec_invalidate_range(unsigned int start, unsigned int end);
 /* Arcade boards may change the backing bytes for one guest address (ROM bank
  * switches). This invalidates translations without allowing old-source block
- * restoration. The source callback returns a stable word span [pc, limit). */
+ * restoration. The source callback returns a stable word span [pc, limit),
+ * zero outside its window, or -1 when opcode fetch has bus side effects and
+ * must execute live through the interpreter instead of speculative decoding. */
 typedef int (*ndrc_code_span_fn)(unsigned int pc, const unsigned int **words,
 	unsigned int *limit);
 void new_dynarec_set_code_span_provider(ndrc_code_span_fn provider);

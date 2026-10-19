@@ -53,10 +53,27 @@ jobs:
       - name: Short commit
         id: rev
         run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Verify package and checksum
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          from zipfile import ZipFile
+          package = Path('pcsx-rearcade.vpk')
+          with ZipFile(package) as archive:
+              assert archive.testzip() is None, 'corrupt VPK member'
+              for name in ('eboot.bin', 'eboot_neon.bin', 'sce_sys/param.sfo'):
+                  assert archive.getinfo(name).file_size > 0, name
+              assert archive.read('eboot.bin') != archive.read('eboot_neon.bin'), 'duplicate renderer executable'
+          Path('pcsx-rearcade.vpk.sha256').write_text(
+              hashlib.sha256(package.read_bytes()).hexdigest() + '  ' + package.name + '\n')
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: pcsx-rearcade-${{ steps.rev.outputs.short }}
-          path: pcsx-rearcade.vpk
+          path: |
+            pcsx-rearcade.vpk
+            pcsx-rearcade.vpk.sha256
           if-no-files-found: error
 
   release:
@@ -74,6 +91,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" pcsx-rearcade.vpk \
+          gh release create "$GITHUB_REF_NAME" pcsx-rearcade.vpk pcsx-rearcade.vpk.sha256 \
             --title "PCSX ReArcade $GITHUB_REF_NAME" \
             --notes-file "docs/releases/$GITHUB_REF_NAME.md"

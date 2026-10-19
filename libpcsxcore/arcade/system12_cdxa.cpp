@@ -9,6 +9,7 @@
 #include <new>
 #include <cinttypes>
 #include <cstdlib>
+#include <cstdio>
 
 namespace {
 constexpr uint64_t CPU_HZ = 14745600;
@@ -360,7 +361,14 @@ void S12Cdxa::tick(uint64_t cycle) {
         if (++s.audio_phase == 4) {
             s.audio_phase = 0; unsigned next = (s.audio_head + 1) % 4096;
             if (next == s.audio_tail) s.faults++;
-            else { s.audio[s.audio_head] = {uint64_t((__uint128_t(when) * 88200) / CPU_HZ), s.pcm[0], s.pcm[1]}; s.audio_head = next; }
+            else {
+                /* ARMv7 has no 128-bit integer type. Split before scaling;
+                 * both products fit and this is the same exact floor. */
+                const uint64_t frame = (when / CPU_HZ) * 88200 +
+                    (when % CPU_HZ) * 88200 / CPU_HZ;
+                s.audio[s.audio_head] = {frame, s.pcm[0], s.pcm[1]};
+                s.audio_head = next;
+            }
             s.audio_frames++;
         }
         s.sci_busy = 0; sci_start();

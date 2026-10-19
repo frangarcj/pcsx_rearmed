@@ -262,9 +262,9 @@ struct retro_core_option_v2_definition option_defs_us[] = {
 #if defined(ARCADE_SYSTEM12) && defined(SYSTEM12_BOARD_THREAD)
    {
       "pcsx_rearmed_system12_board_thread",
-      "System 12 board threading",
+      "Arcade board threading",
       NULL,
-      "Run the System 12 sound/IO CPU (H8) and PCM chip (C352) on another thread. Results are identical; it needs a free CPU core.",
+      "Run System 10 SPU synthesis, System 11/12 C76/H8 and C352, or Capcom ZN Z80 and QSound on another thread. Results are identical; it needs a free CPU core.",
       NULL,
       "system",
       {

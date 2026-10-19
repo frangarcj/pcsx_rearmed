@@ -17,8 +17,8 @@ int system10_sync(uint32_t psx_cycle);
 int system10_read(uint32_t address, unsigned width, uint32_t *value);
 int system10_write(uint32_t address, unsigned width, uint32_t value,
                    uint32_t mem_mask);
-/* Opcode fetch hook for dynamically banked MEM(M) ROM; ordinary code ROM is
- * copied into the normal 4 MiB PSX ROM map. */
+/* Opcode fetch hook for dynamically banked MEM(M) ROM and MEM(N) shared RAM;
+ * ordinary code ROM is copied into the normal 4 MiB PSX ROM map. */
 int system10_fetch(uint32_t address, uint32_t *value);
 /* DMA channel 5 read callback; destination is the caller's PSX RAM span. */
 int system10_dma_read(uint8_t *destination, size_t bytes);

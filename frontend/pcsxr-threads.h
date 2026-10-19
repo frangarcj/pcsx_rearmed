@@ -7,7 +7,7 @@ enum pcsxr_thread_type
 	PCSXRT_DRC,
 	PCSXRT_GPU,
 	PCSXRT_SPU,
-	PCSXRT_BOARD, // arcade board CPU/devices (System 12 H8 + C352)
+	PCSXRT_BOARD, // arcade board CPU/devices (System 11 C76 / System 12 H8 + C352)
 	PCSXRT_GPU2, // gpu_neon's second render stage
 	PCSXRT_COUNT // must be last
 };

@@ -153,6 +153,23 @@ class System12VitaGameplayEvidenceTests(unittest.TestCase):
             self.assertEqual((output / "system12-12000.txt").read_text(), "partial report")
             self.assertTrue(Path(evidence["native_screenshots"][0]["path"]).is_file())
 
+    def test_valid_page_protection_signal_does_not_stop_guest(self):
+        fragments = ("test guest completed",)
+        for recovered in (True, False):
+            with self.subTest(recovered=recovered), tempfile.TemporaryDirectory() as directory:
+                lines = ["Unhandled EXC_BAD_ACCESS at pc 0x101234000"]
+                if recovered:
+                    lines += ["|C| [handle_access_violation]: Unhandled write protected region was valid. Address=0x606A5018"]
+                lines += [fragments[0], "Stopping -> Idle"]
+                code = "import time; " + "; ".join(f"print({line!r},flush=True)" for line in lines) + "; time.sleep(10)"
+                process = subprocess.Popen([sys.executable, "-u", "-c", code], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                captured = GAMEPLAY.CapturedGuest(process, Path(directory) / 'log', 'native protection', fragments)
+                try:
+                    self.assertEqual(captured.wait_for_messages(fragments, 0.6, stable=0.1), recovered)
+                finally:
+                    process.terminate(); process.wait(timeout=5); captured.close()
+                self.assertEqual(bool(sum(captured.issue_counts.values())), not recovered)
+
     def test_short_guest_markers_are_visible_and_late_fatal_invalidates(self):
         fragments = ("pcsx-vita: system12-report PASS",)
         with tempfile.TemporaryDirectory() as directory:

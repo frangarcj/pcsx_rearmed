@@ -8,6 +8,11 @@ void system11_unload(void);
 int system11_active(void);
 void system11_mem_reset(void);
 void system11_reset(void);
+/* Uses the shared arcade board-thread option; Vita worker affinity: core 2. */
+int system11_board_thread_start(void);
+void system11_board_thread_stop(void);
+int system11_board_thread_active(void);
+void system11_audio_pump(void);
 int system11_sync(u32 psx_cycle);
 int system11_read(u32 address, unsigned width, u32 *value);
 int system11_write(u32 address, unsigned width, u32 value);

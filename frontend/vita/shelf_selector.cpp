@@ -100,10 +100,26 @@ static uint64_t games_signature(void)
             continue;
         memset(&entry, 0, sizeof(entry));
         while (sceIoDread(dir, &entry) > 0) {
-            if (!SCE_S_ISDIR(entry.d_stat.st_mode) && is_game_file(entry.d_name)) {
+            bool profile = false;
+            SceIoStat config_stat;
+            if (SCE_S_ISDIR(entry.d_stat.st_mode) && entry.d_name[0] != '.') {
+                const std::string base = std::string(folder) + "/" + entry.d_name;
+                profile = !sceIoGetstat((base + "/board.ini").c_str(), &config_stat) ||
+                    !sceIoGetstat((base + "/board.cfg").c_str(), &config_stat);
+            }
+            if (profile || (!SCE_S_ISDIR(entry.d_stat.st_mode) && is_game_file(entry.d_name))) {
                 for (const char *c = entry.d_name; *c; c++)
                     hash = (hash ^ (unsigned char)*c) * 0x100000001b3ULL;
                 hash = (hash ^ (uint64_t)entry.d_stat.st_size) * 0x100000001b3ULL;
+                if (profile) {
+                    hash = (hash ^ (uint64_t)config_stat.st_size) * 0x100000001b3ULL;
+                    const unsigned char *times = (const unsigned char *)&entry.d_stat.st_mtime;
+                    for (size_t i = 0; i < sizeof(entry.d_stat.st_mtime); i++)
+                        hash = (hash ^ times[i]) * 0x100000001b3ULL;
+                    times = (const unsigned char *)&config_stat.st_mtime;
+                    for (size_t i = 0; i < sizeof(config_stat.st_mtime); i++)
+                        hash = (hash ^ times[i]) * 0x100000001b3ULL;
+                }
             }
             memset(&entry, 0, sizeof(entry));
         }

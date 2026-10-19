@@ -3,6 +3,10 @@
 #include <ctype.h>
 #include <string.h>
 #include <algorithm>
+#include <stdio.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include "arcade_profile.h"
 
 #include "../libpcsxcore/arcade/system12_romset.h"
 
@@ -30,6 +34,15 @@ const ShelfSystemStyle arcade_catalog_styles[] = {
 };
 const int arcade_catalog_style_count = sizeof(arcade_catalog_styles) / sizeof(arcade_catalog_styles[0]);
 
+struct PreparedProfile {
+	ArcadeProfileKind kind;
+	const char *system, *set, *parent, *description, *parent_description, *files;
+	int year;
+};
+static const PreparedProfile prepared_profiles[] = {
+#include "arcade_catalog_profiles.inc"
+};
+
 /* "Soul Calibur (Asia, SOC14/VER.C)" -> "Soul Calibur" and "Asia, SOC14/VER.C". */
 static void split_description(const char *description, std::string *title, std::string *label)
 {
@@ -55,32 +68,84 @@ void ArcadeCatalog::build(const std::string &rompath, bool demo)
 	games_.clear();
 	if (demo)
 		std::fill(available.begin(), available.end(), 1);
-	else if (system12_romset_scan(rompath.c_str(), available.data()) < 0)
-		return;
+	else
+		system12_romset_scan(rompath.c_str(), available.data());
 	for (unsigned i = 0; i < count; i++) {
 		const system12_romset_info *info = system12_romset_at(i);
 		if (!available[i] || strcmp(info->unsupported, "none"))
 			continue;
-		const std::string key = info->parent[0] ? info->parent : info->name;
-		std::string title, label;
-		split_description(info->description, &title, &label);
-		auto game = std::find_if(entries_.begin(), entries_.end(), [&](const Game &g) { return g.key == key; });
-		if (game == entries_.end()) {
-			entries_.push_back(Game{ key, title, SHELF_CABINET, {}, {}, {}, {}, {}, {} });
-			game = entries_.end() - 1;
-		}
-		/* The parent first: its title names the game. */
-		const size_t at = info->parent[0] ? game->ids.size() : 0;
-		if (!info->parent[0])
-			game->title = title;
-		game->ids.insert(game->ids.begin() + at, info->name);
-		game->labels.insert(game->labels.begin() + at, label);
-		game->launches.insert(game->launches.begin() + at, rompath + "/" + info->name + ".zip");
-		game->arts.insert(game->arts.begin() + at, "");
-		game->years.insert(game->years.begin() + at, info->year);
+		add_arcade("Namco System 12", info->name, info->parent, info->description,
+			info->description, info->year, rompath + "/" + info->name + ".zip");
 	}
+	if (demo) {
+		for (const PreparedProfile &p : prepared_profiles)
+			if (p.kind != ARCADE_PROFILE_SYSTEM12)
+				add_arcade(p.system, p.set, p.parent, p.description, p.parent_description, p.year, rompath + "/" + p.set);
+	} else
+		scan_profiles(rompath);
 	std::sort(entries_.begin(), entries_.end(), [](const Game &a, const Game &b) { return a.title < b.title; });
 	link();
+}
+
+void ArcadeCatalog::add_arcade(const char *system, const char *set, const char *parent,
+	const char *description, const char *parent_description, int year, const std::string &path)
+{
+	const std::string key = parent[0] ? parent : set;
+	std::string title, label, parent_label;
+	split_description(description, &title, &label);
+	auto game = std::find_if(entries_.begin(), entries_.end(),
+		[&](const Game &g) { return g.kind == SHELF_CABINET && g.system == system && g.key == key; });
+	if (game == entries_.end()) {
+		std::string group_title;
+		split_description(parent[0] ? parent_description : description, &group_title, &parent_label);
+		entries_.push_back(Game{ key, group_title, system, SHELF_CABINET, {}, {}, {}, {}, {}, {} });
+		game = entries_.end() - 1;
+	}
+	/* Prefer a prepared profile to its zip, without listing the set twice. */
+	auto existing = std::find(game->ids.begin(), game->ids.end(), set);
+	if (existing != game->ids.end()) {
+		game->launches[existing - game->ids.begin()] = path;
+		return;
+	}
+	const size_t at = parent[0] ? game->ids.size() : 0;
+	if (!parent[0]) game->title = title;
+	game->ids.insert(game->ids.begin() + at, set);
+	game->labels.insert(game->labels.begin() + at, label);
+	game->launches.insert(game->launches.begin() + at, path);
+	game->arts.insert(game->arts.begin() + at, "");
+	game->years.insert(game->years.begin() + at, year);
+}
+
+void ArcadeCatalog::scan_profiles(const std::string &rompath)
+{
+	DIR *dir = opendir(rompath.c_str());
+	if (!dir) return;
+	struct dirent *entry;
+	while ((entry = readdir(dir))) {
+		if (entry->d_name[0] == '.') continue;
+		const std::string path = rompath + "/" + entry->d_name;
+		ArcadeProfile profile;
+		if (!arcade_profile_read(path.c_str(), &profile)) continue;
+		for (const PreparedProfile &p : prepared_profiles) {
+			if (p.kind != profile.kind || strcmp(p.set, profile.set)) continue;
+			bool complete = true;
+			std::string files = p.files;
+			size_t begin = 0;
+			while (begin < files.size()) {
+				size_t end = files.find('|', begin);
+				if (end == std::string::npos) end = files.size();
+				struct stat st;
+				if (stat((path + "/" + files.substr(begin, end - begin)).c_str(), &st) || !S_ISREG(st.st_mode)) {
+					complete = false; break;
+				}
+				begin = end + 1;
+			}
+			if (complete)
+				add_arcade(p.system, p.set, p.parent, p.description, p.parent_description, p.year, path);
+			break;
+		}
+	}
+	closedir(dir);
 }
 
 /* "Ridge Racer Type 4 (Europe) (Disc 1)" -> "Ridge Racer Type 4" and
@@ -118,7 +183,7 @@ void ArcadeCatalog::add_disc(const std::string &path, const std::string &file_ti
 	if (game == entries_.end()) {
 		auto at = std::find_if(entries_.begin(), entries_.end(),
 			[&](const Game &g) { return g.kind == SHELF_DISC && title < g.title; });
-		game = entries_.insert(at, Game{ title, title, SHELF_DISC, {}, {}, {}, {}, {}, {} });
+		game = entries_.insert(at, Game{ title, title, "PlayStation", SHELF_DISC, {}, {}, {}, {}, {}, {} });
 	}
 	const size_t slash = path.find_last_of("/\\");
 	game->ids.push_back(slash == std::string::npos ? path : path.substr(slash + 1));
@@ -138,7 +203,7 @@ void ArcadeCatalog::link()
 			game.versions.push_back(ShelfVersion{ game.ids[v].c_str(), game.labels[v].c_str(),
 				game.launches[v].c_str(), game.years[v], game.arts[v].c_str() });
 		games_.push_back(ShelfGame{ game.key.c_str(), game.title.c_str(),
-			game.kind == SHELF_DISC ? "PlayStation" : "Namco System 12", game.kind,
+			game.system.c_str(), game.kind,
 			game.versions.data(), (int)game.versions.size() });
 	}
 }

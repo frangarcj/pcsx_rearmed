@@ -15,6 +15,10 @@
 #include "../psxmem.h"
 #include "emu_if.h"
 #include "pcsxmem.h"
+#ifdef PCSX_SYSTEM12
+#include "../system10.h"
+#include "../systemzn.h"
+#endif
 
 #ifdef __thumb__
 #error the dynarec is incompatible with Thumb functions,
@@ -611,6 +615,25 @@ void new_dyna_pcsx_mem_init(void)
 
 	mem_rtab = mem_readtab;
 	mem_wtab = mem_writetab;
+
+#ifdef PCSX_SYSTEM12
+	/* System 10 and Capcom ZN use both real PSX serial devices. Console SIO handlers
+	 * and direct-register shortcuts must not bypass the board's SIO1 state. */
+	if (system10_active() || systemzn_capcom_active()) {
+		for (i = 0x1040; i < 0x1060; i += 4) {
+			map_item(&mem_iortab[IOMEM32(i)], board_read32, 1);
+			map_item(&mem_iowtab[IOMEM32(i)], board_write32, 1);
+		}
+		for (i = 0x1040; i < 0x1060; i += 2) {
+			map_item(&mem_iortab[IOMEM16(i)], board_read16, 1);
+			map_item(&mem_iowtab[IOMEM16(i)], board_write16, 1);
+		}
+		for (i = 0x1040; i < 0x1060; i++) {
+			map_item(&mem_iortab[IOMEM8(i)], board_read8, 1);
+			map_item(&mem_iowtab[IOMEM8(i)], board_write8, 1);
+		}
+	}
+#endif
 
 	new_dyna_pcsx_mem_load_state();
 	if (new_dynarec_arcade_memory_enabled() && !new_dyna_pcsx_mem_arcade_selftest()) {

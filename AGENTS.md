@@ -9,7 +9,7 @@ has already interrupted this work; do not accumulate another set of raw captures
   Chain the guard and batch with `&&` in one shell command, or explicitly check
   the returned exit code before calling another tool. Printing its result alone
   is not a gate.
-- Keep at least 10 GiB free after the estimated output. Limit a batch's new raw
+- Keep at least 4 GiB free after the estimated output. Limit a batch's new raw
   captures to 256 MiB. Reuse the existing Mac build directories.
 - After comparing a batch, retain its commands, diagnostics, hashes, compact CSV
   observations and useful PNGs; remove generated WAV/RAM/VRAM/PPM intermediates.

@@ -284,6 +284,7 @@ typedef struct
 extern SPUInfo spu;
 
 void do_samples(unsigned int cycles_to, int force_no_thread);
+void spu_thread_barrier(void);
 void schedule_next_irq(void);
 void check_irq_io(unsigned int addr);
 void do_irq_io(int cycles_after);

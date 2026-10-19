@@ -77,7 +77,8 @@ typedef struct capcom_zn_status {
     uint64_t irq_ticks;
     uint64_t irq_acknowledgements;
     uint32_t faults;
-    uint64_t z80_cycles;
+    uint64_t z80_cycles, z80_instructions, z80_unsupported, z80_nmis;
+    unsigned z80_pc;
     int64_t z80_cycle_debt;
     uint64_t qsound_sound_cycles;
     uint64_t qsound_cycles;

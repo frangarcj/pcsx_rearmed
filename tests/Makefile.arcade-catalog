@@ -1,0 +1,17 @@
+.DEFAULT_GOAL := test
+CXX := xcrun clang++
+BUILD ?= build/arcade-catalog-tests
+TARGET := $(BUILD)/test-arcade-catalog
+CORE ?= build/mac-libretro/src/pcsx_rearmed_libretro.dylib
+.PHONY: test libretro-test
+$(TARGET): tests/test_arcade_catalog.cpp frontend/arcade_catalog.cpp frontend/arcade_catalog.h frontend/arcade_profile.h frontend/arcade_catalog_profiles.inc
+	@mkdir -p $(BUILD)
+	$(CXX) -std=c++17 -O2 -Wall -Wextra -Werror -Ideps/arcade-shelf/include tests/test_arcade_catalog.cpp frontend/arcade_catalog.cpp -o $@
+test: $(TARGET)
+	python3 scripts/generate_arcade_catalog.py --check
+	@d=$$(mktemp -d $(BUILD)/profiles.XXXXXX); $(TARGET) "$$d"; result=$$?; rm -rf "$$d"; exit $$result
+$(BUILD)/test-arcade-profiles: tests/test_arcade_profiles_libretro.c tools/libretro-host/s12_libretro_host.c
+	@mkdir -p $(BUILD)
+	xcrun clang -arch arm64 -std=gnu99 -O2 -Wall -Ideps/libretro-common/include $< -o $@
+libretro-test: $(BUILD)/test-arcade-profiles
+	python3 tests/check_arcade_profiles_libretro.py --core $(CORE) --host $(BUILD)/test-arcade-profiles --work-dir $(BUILD)

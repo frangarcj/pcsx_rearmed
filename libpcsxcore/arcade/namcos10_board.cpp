@@ -54,7 +54,15 @@ struct NS10Board {
     int banked_region_mode;
     uint8_t nand_rnb_state[16];
     NS10IO *io;
+    void (*code_changed)(void *, uint32_t, uint32_t);
+    void *code_opaque;
 };
+
+static void code_changed(NS10Board *b, uint32_t address = 0x1f400000u,
+                         uint32_t bytes = 0x200000u)
+{
+    if (b->code_changed) b->code_changed(b->code_opaque, address, bytes);
+}
 
 static uint32_t physical(uint32_t a)
 {
@@ -149,6 +157,7 @@ static int read_word(NS10Board *b, uint32_t address, uint16_t *value)
         if (address >= 0x1f400000u && address <= 0x1f5ffffeu)
             return read_memm_word(b, address, value);
         if (address >= 0x1fb40000u && address <= 0x1fb5fffeu) {
+            if (!b->banked_region_mode) code_changed(b);
             b->banked_region_mode = 1;
             *value = 0; /* MAME's bank_r predictor. */
             return NS10_BOARD_OK;
@@ -191,6 +200,7 @@ static int write_word(NS10Board *b, uint32_t address, uint16_t data, uint16_t me
                 return NS10_BOARD_CRYPTO;
             if (!info.type) return NS10_BOARD_OK; /* MAME leaves absent CPLDs inert. */
             {
+                code_changed(b);
                 int result = ns10_crypto_control_write(b->crypto, data);
                 return result == NS10_OK ? NS10_BOARD_OK : NS10_BOARD_CRYPTO;
             }
@@ -198,10 +208,14 @@ static int write_word(NS10Board *b, uint32_t address, uint16_t data, uint16_t me
         if (address >= 0x1f400000u && address <= 0x1f5ffffeu) {
             uint32_t offset = (address - 0x1f400000u) >> 1;
             if (b->banked_region_mode) return NS10_BOARD_OK; /* MAME ignores writes in ROM mode. */
+            code_changed(b);
             return nor_flash_write(b->flash, offset, data) == NOR_FLASH_OK
                 ? NS10_BOARD_OK : NS10_BOARD_FLASH;
         }
         if (address >= 0x1fb40000u && address <= 0x1fb5fffeu) {
+            const uint32_t bank = (address - 0x1fb40000u) >> 1;
+            if (b->bank_index != bank || b->banked_region_mode != int(bank >= 0x10))
+                code_changed(b);
             b->bank_index = (address - 0x1fb40000u) >> 1;
             b->banked_region_mode = b->bank_index >= 0x10;
             return NS10_BOARD_OK;
@@ -212,6 +226,7 @@ static int write_word(NS10Board *b, uint32_t address, uint16_t data, uint16_t me
     if (address >= 0x1f500000u && address <= 0x1f5ffffeu) {
         size_t offset = address - 0x1f500000u;
         uint16_t old_value = load_le16(b->shared_ram + offset);
+        code_changed(b, address, 2);
         store_le16(b->shared_ram + offset, combine(old_value, data, mem_mask));
         return NS10_BOARD_OK;
     }
@@ -324,6 +339,7 @@ static int bus_write_byte(NS10Board *b, uint32_t address, uint8_t byte, uint8_t 
     if (peripheral_unimplemented(a)) return NS10_BOARD_UNIMPLEMENTED;
     if (b->kind == NS10_BOARD_MEMN && a >= 0x1f500000u && a < 0x1f600000u) {
         size_t offset = a - 0x1f500000u;
+        code_changed(b, a, 1);
         b->shared_ram[offset] = uint8_t((b->shared_ram[offset] & ~byte_mask) | (byte & byte_mask));
         return NS10_BOARD_OK;
     }
@@ -427,6 +443,8 @@ int ns10_board_create(const NS10BoardConfig *cfg, NS10Board **out)
         copy_pages(0x120, 0x1f00, 0x20000);
     }
     b->io = cfg->io;
+    b->code_changed = cfg->code_changed;
+    b->code_opaque = cfg->code_opaque;
     ns10_board_reset(b);
     *out = b;
     return NS10_BOARD_OK;
@@ -448,6 +466,7 @@ void ns10_board_destroy(NS10Board *b)
 void ns10_board_reset(NS10Board *b)
 {
     if (!b) return;
+    code_changed(b);
     if (b->io) ns10_io_reset(b->io);
     b->bank_index = b->nand_address = b->ctrl_reg = 0;
     b->selected_nand = 0;
@@ -523,6 +542,28 @@ int ns10_board_write(NS10Board *b, uint32_t address, unsigned width,
         if (status != NS10_BOARD_OK) return status;
     }
     return NS10_BOARD_OK;
+}
+
+int ns10_board_code_copy(NS10Board *b, uint32_t address, uint8_t *out, size_t bytes)
+{
+    const uint32_t a = physical(address);
+    if (!b || !out || !bytes || (a & 1) || (bytes & 1)) return 0;
+    if (b->kind == NS10_BOARD_MEMN) {
+        if (a < 0x1f500000u || a >= 0x1f600000u || bytes > 0x1f600000u - a)
+            return 0;
+        std::memcpy(out, b->shared_ram + a - 0x1f500000u, bytes);
+        return 1;
+    }
+    if (a < 0x1f400000u || a >= 0x1f600000u || bytes > 0x1f600000u - a)
+        return 0;
+    if ((!b->banked_region_mode && !nor_flash_array_mode(b->flash)) ||
+        (b->banked_region_mode && ns10_crypto_active(b->crypto))) return -1;
+    for (size_t i = 0; i < bytes; i += 2) {
+        uint16_t word;
+        if (read_memm_word(b, a + uint32_t(i), &word) != NS10_BOARD_OK) return -1;
+        store_le16(out + i, word);
+    }
+    return 1;
 }
 
 int ns10_board_dma_read(NS10Board *b, uint8_t *destination, size_t bytes)
