@@ -8,6 +8,7 @@
 #include "psxmem.h"
 #include "r3000a.h"
 #include "psxinterpreter.h"
+#include "arcade/arcade_media.h"
 #include "arcade/namcos11_board.h"
 #include "arcade/pcm_wav.h"
 #include "../include/gpu_vram.h"
@@ -312,8 +313,8 @@ static int read_config(const char *directory, const Profile **profile)
     char path[4096], line[512], values[11][128] = {{0}};
     unsigned seen = 0, i, j; FILE *file;
     if (snprintf(path, sizeof(path), "%s/board.ini", directory) >= (int)sizeof(path)) return -1;
-    file = fopen(path, "r");
-    if (!file) { perror(path); return -1; }
+    file = arcade_media_open_text(path);
+    if (!file) { fprintf(stderr, "%s: cannot open board.ini\n", path); return -1; }
     while (fgets(line, sizeof(line), file)) {
         char *equal, *end;
         if (!strchr(line, '\n') && !feof(file)) goto bad;
@@ -342,20 +343,17 @@ bad:
 static int load_region(const char *directory, const char *name, unsigned index,
     size_t minimum, size_t maximum, size_t *size)
 {
-    char path[4096]; FILE *file; long length;
+    char path[4096]; size_t length;
     if (snprintf(path, sizeof(path), "%s/%s", directory, name) >= (int)sizeof(path)) return -1;
-    file = fopen(path, "rb");
-    if (!file) { perror(path); return -1; }
-    if (fseek(file, 0, SEEK_END) || (length = ftell(file)) < 0 ||
-        (size_t)length < minimum || (size_t)length > maximum || fseek(file, 0, SEEK_SET)) {
+    if (arcade_media_size(path, &length)) { fprintf(stderr, "%s: cannot open region\n", path); return -1; }
+    if (length < minimum || length > maximum) {
         fprintf(stderr, "%s: invalid System11 region size (expected %zu..%zu bytes)\n", path, minimum, maximum);
-        fclose(file); return -1;
+        return -1;
     }
-    *size = (size_t)length;
+    *size = length;
     board.regions[index] = malloc(*size ? *size : 1);
-    if (!board.regions[index]) { fclose(file); return -1; }
-    if (fread(board.regions[index], 1, *size, file) != *size) { fclose(file); return -1; }
-    return fclose(file) ? -1 : 0;
+    if (!board.regions[index]) return -1;
+    return arcade_media_read(path, board.regions[index], *size) ? -1 : 0;
 }
 int system11_load(const char *directory)
 {

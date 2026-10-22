@@ -1,5 +1,9 @@
 # System 12 from MAME romset zips
 
+System 10, System 11 and Capcom ZN load from zips the same way
+([arcade-romsets.md](arcade-romsets.md)); both share the zip index
+(`mame_romindex.c`) and the ROM_LOAD placement (`mame_romload.c`).
+
 The core loads a Namco System 12 game straight from MAME romset zips. The
 console needs no Python preparation step. The prepared region directories
 (`scripts/prepare_system12_board.py`) still work and stay the format of the

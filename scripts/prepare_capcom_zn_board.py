@@ -151,6 +151,26 @@ def _regions_for_set(set_name: str, source: Path, rompath: Path,
                      "media_origins": source_map}, selected_bios
 
 
+def board_ini(set_name: str, profile: dict[str, Any], selected_bios: str | None) -> str:
+    return "\n".join([
+        "format=pcsx-aow-capcom-zn-v1",
+        f"mame_set={set_name}",
+        f"mame_parent={profile.get('parent') or 'none'}",
+        f"bios_parent={profile.get('bios_parent') or 'none'}",
+        f"bios={selected_bios or 'fixed'}",
+        f"board_model={profile['board_model']}",
+        f"board_family={profile['board_family']}",
+        f"cpu_device={profile['cpu_device']}",
+        f"cpu_clock_hz={profile['cpu_clock_hz']}",
+        f"gpu_device={profile['gpu_device']}",
+        f"gpu_clock_hz={profile['gpu_clock_hz']}",
+        f"main_ram_size={profile['main_ram_size']}",
+        f"vram_size={profile['vram_size']}",
+        "board_execution_verified=false",
+        "",
+    ])
+
+
 def package_regions(set_name: str, profile: dict[str, Any], regions: dict[str, bytes],
                     qsound_dsp: bytes, output_dir: Path,
                     source_metadata: dict[str, Any]) -> dict[str, Any]:
@@ -168,23 +188,6 @@ def package_regions(set_name: str, profile: dict[str, Any], regions: dict[str, b
         raise CapcomPreparationError("QSound DSP image must assemble to exactly 0x2000 bytes")
     payloads = {filename: regions[tag] for tag, filename in OUTPUTS.items()}
     payloads["qsound_dsp.bin"] = qsound_dsp
-    board_ini = "\n".join([
-        "format=pcsx-aow-capcom-zn-v1",
-        f"mame_set={set_name}",
-        f"mame_parent={profile.get('parent') or 'none'}",
-        f"bios_parent={profile.get('bios_parent') or 'none'}",
-        f"bios={source_metadata.get('selected_bios') or 'fixed'}",
-        f"board_model={profile['board_model']}",
-        f"board_family={profile['board_family']}",
-        f"cpu_device={profile['cpu_device']}",
-        f"cpu_clock_hz={profile['cpu_clock_hz']}",
-        f"gpu_device={profile['gpu_device']}",
-        f"gpu_clock_hz={profile['gpu_clock_hz']}",
-        f"main_ram_size={profile['main_ram_size']}",
-        f"vram_size={profile['vram_size']}",
-        "board_execution_verified=false",
-        "",
-    ])
     manifest: dict[str, Any] = {
         "mame_source_commit": profiles.COMMIT,
         "mame_driver": profiles.DRIVER,
@@ -210,7 +213,8 @@ def package_regions(set_name: str, profile: dict[str, Any], regions: dict[str, b
         stage = Path(temp)
         for name, data in payloads.items():
             (stage / name).write_bytes(data)
-        (stage / "board.ini").write_text(board_ini, encoding="utf-8")
+        (stage / "board.ini").write_text(
+            board_ini(set_name, profile, source_metadata.get("selected_bios")), encoding="utf-8")
         (stage / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         for name in [*payloads, "board.ini", "manifest.json"]:
             os.replace(stage / name, output_dir / name)

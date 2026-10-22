@@ -1,6 +1,7 @@
 /* Exercise the production shelf with prepared profiles, without ROM data. */
 #include "../frontend/arcade_catalog.h"
 #include "../frontend/arcade_profile.h"
+#include "../libpcsxcore/arcade/arcade_romset.h"
 #include "../libpcsxcore/arcade/system12_romset.h"
 #include <cassert>
 #include <cstdio>
@@ -15,6 +16,12 @@
 extern "C" unsigned system12_romset_count(void) { return 0; }
 extern "C" const system12_romset_info *system12_romset_at(unsigned) { return nullptr; }
 extern "C" int system12_romset_scan(const char *, unsigned char *) { return 0; }
+extern "C" int system12_romset_scan_index(const mame_romindex *, unsigned char *) { return 0; }
+extern "C" unsigned arcade_romset_count(void) { return 0; }
+extern "C" const arcade_romset_info *arcade_romset_at(unsigned) { return nullptr; }
+extern "C" int arcade_romset_scan_index(const mame_romindex *, unsigned char *) { return 0; }
+extern "C" mame_romindex *mame_romindex_open(const char *) { return nullptr; }
+extern "C" void mame_romindex_close(mame_romindex *) {}
 
 static void put(const std::string &path, const std::string &text = "")
 { std::ofstream f(path); assert(f); f << text; }

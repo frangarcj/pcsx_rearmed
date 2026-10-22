@@ -47,6 +47,8 @@
 #include "../libpcsxcore/systemzn.h"
 /* Keep the native report FILE type before libretro VFS remaps stdio. */
 typedef FILE ArcadeReportFile;
+#include "../libpcsxcore/arcade/arcade_media.h"
+#include "../libpcsxcore/arcade/arcade_romset.h"
 #include "../libpcsxcore/arcade/system12_romset.h"
 #include "arcade_profile.h"
 #include <sys/stat.h>
@@ -128,10 +130,14 @@ typedef struct {
    unsigned sample_rate;
    int (*nvram_import)(const unsigned char *, size_t);
    int (*nvram_export)(unsigned char *, size_t);
+   /* Flash/NAND the game wrote: a file in the save directory (optional). */
+   int (*flash_import)(const char *);
+   int (*flash_export)(const char *);
 } RetroArcadeBoard;
 static const RetroArcadeBoard other_arcade_boards[] = {
    {"pcsx-aow-system10-v1", system10_load, system10_unload, system10_set_input,
-      NULL, system10_report, system10_sync, 0, NULL, NULL},
+      NULL, system10_report, system10_sync, 0, NULL, NULL,
+      system10_persist_import, system10_persist_export},
    {"pcsx-aow-system11-v1", system11_load, system11_unload, system11_set_input,
       system11_set_audio_output, system11_report, system11_sync, 88200,
       system11_eeprom_import, system11_eeprom_export},
@@ -140,7 +146,9 @@ static const RetroArcadeBoard other_arcade_boards[] = {
       systemzn_eeprom_import, systemzn_eeprom_export},
 };
 static const RetroArcadeBoard *retro_other_arcade;
-static char retro_arcade_nvram_path[1024];
+static char retro_arcade_nvram_path[1024], retro_arcade_flash_path[1024];
+/* The set of the System 10/11 or Capcom ZN zip being loaded. */
+static char retro_arcade_zip_set[64];
 static const RetroArcadeBoard *retro_find_other_arcade(const char *directory)
 {
    char path[4096], line[128];
@@ -148,7 +156,7 @@ static const RetroArcadeBoard *retro_find_other_arcade(const char *directory)
    unsigned i;
    if (snprintf(path, sizeof(path), "%s/board.ini", directory) >= (int)sizeof(path))
       return NULL;
-   file = fopen(path, "r");
+   file = arcade_media_open_text(path);
    if (!file) return NULL;
    if (!fgets(line, sizeof(line), file)) line[0] = 0;
    fclose(file);
@@ -1357,7 +1365,7 @@ void retro_get_system_info(struct retro_system_info *info)
 #endif
    info->library_version  = "r26" GIT_VERSION;
 #ifdef ARCADE_SYSTEM12
-   /* zip: a System 12 MAME romset (roms/<set>.zip). */
+   /* zip: a MAME romset of System 10, 11, 12 or Capcom ZN (roms/<set>.zip). */
    info->valid_extensions = "bin|cue|img|mdf|pbp|toc|cbn|m3u|chd|iso|exe|zip";
 #else
    info->valid_extensions = "bin|cue|img|mdf|pbp|toc|cbn|m3u|chd|iso|exe";
@@ -2211,22 +2219,50 @@ static void retro_update_system_av_info(void)
 /* `psxShutdown` releases the currently selected CPU backend and dynamic memory
  * map. Switching the layout around it keeps Config.Cpu (and thus the DRC)
  * selected while letting the board choose PSX RAM/ROM sizes before psxInit. */
+/* The MAME set of the game being loaded, for the names of its save files. */
+static const char *retro_arcade_set_name(const char *directory)
+{
+   static ArcadeProfile profile;
+   if (arcade_profile_read(directory, &profile)) return profile.set;
+   if (retro_arcade_zip_set[0]) return retro_arcade_zip_set;
+   if (system12_romset_is_zip(directory)) {
+      const system12_romset_info *info = system12_romset_identify(directory);
+      if (info) return info->name;
+   }
+   return NULL;
+}
+
+/* Flash/NAND changes of a System 10 game: <save>/<set>.arcade-flash. */
+static void retro_arcade_flash_load(const char *directory)
+{
+   const char *save_dir = NULL, *set;
+   retro_arcade_flash_path[0] = 0;
+   if (!retro_other_arcade || !retro_other_arcade->flash_import) return;
+   if (!(set = retro_arcade_set_name(directory))) return;
+   environ_cb(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &save_dir);
+   if (!save_dir || !*save_dir || snprintf(retro_arcade_flash_path,
+       sizeof(retro_arcade_flash_path), "%s/%s.arcade-flash", save_dir, set) >=
+       (int)sizeof(retro_arcade_flash_path)) {
+      retro_arcade_flash_path[0] = 0;
+      LogWarn("Arcade flash: no usable save directory\n");
+      return;
+   }
+   if (retro_other_arcade->flash_import(retro_arcade_flash_path)) {
+      LogWarn("Arcade flash: %s does not belong to these media; kept as it is\n", retro_arcade_flash_path);
+      retro_arcade_flash_path[0] = 0; /* Preserve the rejected file. */
+   }
+}
+
 static void retro_arcade_nvram_load(const char *directory)
 {
    const char *save_dir = NULL;
-   ArcadeProfile profile;
    unsigned char image[2080];
    FILE *file;
-   const char *set = NULL;
+   const char *set;
    retro_arcade_nvram_path[0] = 0;
    if (retro_other_arcade && !retro_other_arcade->nvram_import) return;
    if (!retro_other_arcade && !system12_active()) return;
-   if (arcade_profile_read(directory, &profile)) set = profile.set;
-   else if (system12_romset_is_zip(directory)) {
-      const system12_romset_info *info = system12_romset_identify(directory);
-      if (info) set = info->name;
-   }
-   if (!set) return;
+   if (!(set = retro_arcade_set_name(directory))) return;
    environ_cb(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &save_dir);
    if (!save_dir || !*save_dir || snprintf(retro_arcade_nvram_path,
        sizeof(retro_arcade_nvram_path), "%s/%s.arcade-nvram", save_dir, set) >=
@@ -2244,6 +2280,14 @@ static void retro_arcade_nvram_load(const char *directory)
       retro_arcade_nvram_path[0] = 0; /* Preserve the rejected installed image. */
    }
    fclose(file);
+}
+
+static void retro_arcade_flash_save(void)
+{
+   if (retro_arcade_flash_path[0] && retro_other_arcade && retro_other_arcade->flash_export &&
+       retro_other_arcade->flash_export(retro_arcade_flash_path))
+      LogWarn("Arcade flash: cannot save %s\n", retro_arcade_flash_path);
+   retro_arcade_flash_path[0] = 0;
 }
 
 static void retro_arcade_nvram_save(void)
@@ -2284,6 +2328,7 @@ static void retro_system12_restore_console(void)
     * plugin buffers must be released before the next profile selects it. */
    if (retro_other_arcade) ReleasePlugins();
    retro_arcade_nvram_save();
+   retro_arcade_flash_save();
    psxShutdown();
    system12_set_audio_output(NULL, NULL);
    if (retro_other_arcade) {
@@ -2302,12 +2347,32 @@ static void retro_system12_restore_console(void)
    retro_update_system_av_info();
 }
 
-/* A prepared profile directory, or a MAME romset zip (roms/<set>.zip). */
+/* A prepared profile directory, or a MAME romset zip (roms/<set>.zip). A
+ * System 10/11 or Capcom ZN zip is staged as a virtual board directory,
+ * which only the board loader reads (arcade_romset.h). */
 static bool retro_load_system12_profile(const char *directory)
 {
    int load_result;
    unsigned i;
-   const RetroArcadeBoard *other = retro_find_other_arcade(directory);
+   const arcade_romset_info *zip_info = NULL;
+   const char *staged = NULL;
+   const RetroArcadeBoard *other;
+
+   retro_arcade_zip_set[0] = 0;
+   {
+      struct retro_variable var = { "pcsx_rearmed_arcade_zn_bios", NULL };
+      /* "auto" is no BIOS name: the set's default. */
+      arcade_romset_set_bios(environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value ? var.value : "");
+   }
+   if (system12_romset_is_zip(directory) && (staged = arcade_romset_stage(directory, &zip_info)))
+      snprintf(retro_arcade_zip_set, sizeof(retro_arcade_zip_set), "%s", zip_info->name);
+   other = retro_find_other_arcade(staged ? staged : directory);
+   if (staged && !other)
+   {
+      LogErr("no board loader for %s\n", directory);
+      arcade_romset_release();
+      return false;
+   }
 
 #ifdef PCSX_SYSTEM_GNET
    if (systemgnet_active())
@@ -2325,8 +2390,10 @@ static bool retro_load_system12_profile(const char *directory)
    set_cd_image(NULL);
    retro_system12_saved_cycle_multiplier = Config.cycle_multiplier;
    psxShutdown();
-   load_result = other ? other->load(directory) : system12_romset_is_zip(directory)
+   load_result = other ? other->load(staged ? staged : directory) : system12_romset_is_zip(directory)
       ? system12_romset_load(directory) : system12_load(directory);
+   if (staged)
+      arcade_romset_release();
    if (load_result != 0)
    {
       LogErr("could not load System12 profile: %s (%d)\n",
@@ -2348,6 +2415,7 @@ static bool retro_load_system12_profile(const char *directory)
       }
    }
    retro_arcade_nvram_load(directory);
+   retro_arcade_flash_load(directory);
 
    /* Core initialization selects the board's clock domain and multiplier.
     * The choice of CPU backend remains the one selected by the core options. */
@@ -4896,6 +4964,7 @@ void retro_deinit(void)
    system11_board_thread_stop();
    systemzn_board_thread_stop();
    retro_arcade_nvram_save();
+   retro_arcade_flash_save();
 #endif
 
    if (plugins_opened)

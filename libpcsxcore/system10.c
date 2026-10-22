@@ -7,6 +7,8 @@
 #include "systemzn.h"
 #include "psxhw.h"
 #include "psxmem.h"
+#include "arcade/arcade_media.h"
+#include "zlib_wrapper.h"
 #include "arcade/namcos10_board.h"
 #include "arcade/namcos10_io.h"
 #include "arcade/psx_sio.h"
@@ -51,6 +53,14 @@ typedef struct ProfileRegion {
     size_t size;
 } ProfileRegion;
 
+#define PERSIST_CHUNK 0x4000u
+#define PERSIST_MAGIC "S10FLSH1"
+typedef struct {
+    uint8_t *data;
+    size_t size;
+    uint32_t *crc; /* of each chunk, as loaded */
+} PersistTarget;
+
 static struct {
     NS10Board *device;
     NS10IO *io;
@@ -61,6 +71,9 @@ static struct {
     size_t region_count;
     uint8_t *program_rom;
     uint8_t *flash_image;
+    PersistTarget persist[MAX_REGIONS];
+    size_t persist_count;
+    uint32_t persist_fingerprint;
     uint16_t system_inputs;
     uint32_t player_inputs;
     uint32_t last_cycle;
@@ -206,8 +219,8 @@ static int parse_config(const char *directory, const Profile **profile_out,
     FILE *file;
     const Profile *profile;
     if (snprintf(path, sizeof(path), "%s/board.ini", directory) >= (int)sizeof(path)) return -1;
-    file = fopen(path, "r");
-    if (file == NULL) { perror(path); return -1; }
+    file = arcade_media_open_text(path);
+    if (file == NULL) { fprintf(stderr, "%s: cannot open board.ini\n", path); return -1; }
     while (fgets(line, sizeof(line), file) != NULL) {
         char *end = line + strcspn(line, "\r\n");
         char *equal, *key, *value;
@@ -274,22 +287,16 @@ static int load_region(const char *directory, const ProfileRegion *expected,
                        Region *region)
 {
     char path[4096];
-    FILE *file;
-    long length;
+    size_t length;
     if (snprintf(path, sizeof(path), "%s/%s", directory, expected->filename) >= (int)sizeof(path)) return -1;
-    file = fopen(path, "rb");
-    if (file == NULL) { perror(path); return -1; }
-    if (fseek(file, 0, SEEK_END) || (length = ftell(file)) < 0 ||
-        (size_t)length != expected->size || fseek(file, 0, SEEK_SET)) {
+    if (arcade_media_size(path, &length)) { fprintf(stderr, "%s: cannot open region\n", path); return -1; }
+    if (length != expected->size) {
         fprintf(stderr, "%s: region size mismatch (expected %zu bytes)\n", path, expected->size);
-        fclose(file); return -1;
+        return -1;
     }
     region->bytes = (uint8_t *)malloc(expected->size);
-    if (region->bytes == NULL) { fclose(file); return -1; }
-    if (fread(region->bytes, 1, expected->size, file) != expected->size) {
-        fclose(file); return -1;
-    }
-    if (fclose(file)) return -1;
+    if (region->bytes == NULL) return -1;
+    if (arcade_media_read(path, region->bytes, expected->size)) return -1;
     strcpy(region->tag, expected->tag);
     strcpy(region->filename, expected->filename);
     region->size = expected->size;
@@ -350,6 +357,133 @@ static int system10_code_span(unsigned int pc, const unsigned int **words,
     return 1;
 }
 #endif
+
+static size_t persist_chunks(const PersistTarget *t) { return (t->size + PERSIST_CHUNK - 1) / PERSIST_CHUNK; }
+static size_t persist_chunk_size(const PersistTarget *t, size_t chunk)
+{
+    return t->size - chunk * PERSIST_CHUNK < PERSIST_CHUNK ? t->size - chunk * PERSIST_CHUNK : PERSIST_CHUNK;
+}
+static uint32_t persist_crc(const PersistTarget *t, size_t chunk)
+{
+    return (uint32_t)crc32(0, t->data + chunk * PERSIST_CHUNK, (uInt)persist_chunk_size(t, chunk));
+}
+
+/* The media the game can write, with a fingerprint of their loaded contents:
+ * MEM(M) the flash (a copy of the nand region), MEM(N) each NAND chip. */
+static int persist_begin(void)
+{
+    size_t i, c;
+    uint32_t fingerprint = 0;
+    board.persist_count = 0;
+    if (board.flash_image) {
+        board.persist[board.persist_count].data = board.flash_image;
+        board.persist[board.persist_count++].size = region_by_tag("nand")->size;
+    } else
+        for (i = 0; i < board.region_count; i++)
+            if (!strncmp(board.regions[i].tag, "nand", 4) && board.regions[i].tag[4]) {
+                board.persist[board.persist_count].data = board.regions[i].bytes;
+                board.persist[board.persist_count++].size = board.regions[i].size;
+            }
+    for (i = 0; i < board.persist_count; i++) {
+        PersistTarget *t = &board.persist[i];
+        uint32_t size = (uint32_t)t->size;
+        t->crc = (uint32_t *)malloc(persist_chunks(t) * sizeof(uint32_t));
+        if (!t->crc) return -1;
+        fingerprint = (uint32_t)crc32(fingerprint, (const Bytef *)&size, sizeof(size));
+        for (c = 0; c < persist_chunks(t); c++) {
+            t->crc[c] = persist_crc(t, c);
+            fingerprint = (uint32_t)crc32(fingerprint, (const Bytef *)&t->crc[c], sizeof(uint32_t));
+        }
+    }
+    board.persist_fingerprint = fingerprint;
+    return 0;
+}
+
+static void le32_put(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24); }
+static uint32_t le32_get(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
+
+int system10_persist_import(const char *path)
+{
+    uint8_t *file = NULL, *p, *end;
+    long length;
+    uint32_t count, i;
+    FILE *f = fopen(path, "rb");
+    int result = -1;
+    if (!f) return 0;
+    if (!board.device || fseek(f, 0, SEEK_END) || (length = ftell(f)) < 16 || length > 0x4000000 || fseek(f, 0, SEEK_SET)) goto done;
+    if (!(file = (uint8_t *)malloc((size_t)length)) || fread(file, 1, (size_t)length, f) != (size_t)length) goto done;
+    if (memcmp(file, PERSIST_MAGIC, 8) || le32_get(file + 8) != board.persist_fingerprint) goto done;
+    count = le32_get(file + 12);
+    end = file + length;
+    /* Check every record before the first byte is changed. */
+    for (p = file + 16, i = 0; i < count; i++) {
+        uint32_t target, chunk;
+        const PersistTarget *t;
+        if (end - p < 8) goto done;
+        target = le32_get(p); chunk = le32_get(p + 4);
+        if (target >= board.persist_count) goto done;
+        t = &board.persist[target];
+        if (chunk >= persist_chunks(t) || (size_t)(end - p - 8) < persist_chunk_size(t, chunk)) goto done;
+        p += 8 + persist_chunk_size(t, chunk);
+    }
+    if (p != end) goto done;
+    for (p = file + 16, i = 0; i < count; i++) {
+        const PersistTarget *t = &board.persist[le32_get(p)];
+        uint32_t chunk = le32_get(p + 4);
+        memcpy(t->data + (size_t)chunk * PERSIST_CHUNK, p + 8, persist_chunk_size(t, chunk));
+        p += 8 + persist_chunk_size(t, chunk);
+    }
+    result = 0;
+done:
+    free(file);
+    fclose(f);
+    return result;
+}
+
+int system10_persist_export(const char *path)
+{
+    char temporary[4200];
+    uint8_t header[16], record[8];
+    uint32_t count = 0;
+    size_t i, c;
+    FILE *f;
+    int ok = 1;
+    if (!board.device || snprintf(temporary, sizeof(temporary), "%s.tmp", path) >= (int)sizeof(temporary)) return -1;
+    for (i = 0; i < board.persist_count; i++)
+        for (c = 0; c < persist_chunks(&board.persist[i]); c++)
+            count += persist_crc(&board.persist[i], c) != board.persist[i].crc[c];
+    if (!count) { remove(path); return 0; }
+    if (!(f = fopen(temporary, "wb"))) return -1;
+    memcpy(header, PERSIST_MAGIC, 8);
+    le32_put(header + 8, board.persist_fingerprint);
+    le32_put(header + 12, count);
+    ok = fwrite(header, 1, sizeof(header), f) == sizeof(header);
+    for (i = 0; ok && i < board.persist_count; i++) {
+        const PersistTarget *t = &board.persist[i];
+        for (c = 0; ok && c < persist_chunks(t); c++) {
+            if (persist_crc(t, c) == t->crc[c]) continue;
+            le32_put(record, (uint32_t)i); le32_put(record + 4, (uint32_t)c);
+            ok = fwrite(record, 1, sizeof(record), f) == sizeof(record) &&
+                fwrite(t->data + c * PERSIST_CHUNK, 1, persist_chunk_size(t, c), f) == persist_chunk_size(t, c);
+        }
+    }
+    if (fclose(f)) ok = 0;
+    if (!ok || rename(temporary, path)) { remove(temporary); return -1; }
+    return 0;
+}
+
+int system10_test_media_byte(size_t target, size_t offset)
+{
+    if (!board.device || target >= board.persist_count || offset >= board.persist[target].size) return -1;
+    return board.persist[target].data[offset];
+}
+
+int system10_test_media_poke(size_t target, size_t offset, uint8_t value)
+{
+    if (system10_test_media_byte(target, offset) < 0) return -1;
+    board.persist[target].data[offset] = value;
+    return 0;
+}
 
 static int create_device(void)
 {
@@ -417,7 +551,8 @@ static int create_device(void)
         cfg->nand_chip_count = nand_count;
     }
     result = ns10_board_create(cfg, &board.device);
-    return result == NS10_BOARD_OK ? 0 : -1;
+    if (result != NS10_BOARD_OK) return -1;
+    return persist_begin();
 }
 
 static uint32_t physical_address(uint32_t address)
@@ -473,6 +608,7 @@ void system10_unload(void)
     psx_sio_destroy(board.sio[0]); psx_sio_destroy(board.sio[1]);
     free(board.program_rom);
     free(board.flash_image);
+    for (i = 0; i < board.persist_count; i++) free(board.persist[i].crc);
     for (i = 0; i < board.region_count; i++) free(board.regions[i].bytes);
     memset(&board, 0, sizeof(board));
     if (!psxRegs.ptrs.psxM && !systemtaito_active() && !systemzn_active() && !system11_active() && !system12_active()) {

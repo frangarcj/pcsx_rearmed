@@ -28,6 +28,7 @@
 #include "../libpcsxcore/psxmem.h"
 #ifdef PCSX_SYSTEM12
 #include "../libpcsxcore/system12.h"
+#include "../libpcsxcore/arcade/arcade_romset.h"
 #include "../libpcsxcore/arcade/system12_romset.h"
 #include "../libpcsxcore/system11.h"
 #include "../libpcsxcore/system10.h"
@@ -2111,6 +2112,13 @@ int main(int argc, char **argv)
     else if (visco_fixture) board_load_result = systemzn_test_load_visco(board);
     else if (raizing_fixture) board_load_result = systemzn_test_load_raizing(board);
     else if (fx1z_fixture) board_load_result = systemtaito_test_load_fx1z(board);
+    else if ((selected_board->family == 10 || selected_board->family == 11 || selected_board->family == 100) &&
+             system12_romset_is_zip(board)) {
+      /* A System 10/11 or Capcom ZN MAME zip: its board package is built in memory. */
+      const char *staged = arcade_romset_stage(board, NULL);
+      board_load_result = staged ? selected_board->load(staged) : -1;
+      arcade_romset_release();
+    }
     else board_load_result = selected_board->load(board);
     if (board_load_result) {
       if (trace) fclose(trace); return 1;

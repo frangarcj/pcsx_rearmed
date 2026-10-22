@@ -49,6 +49,10 @@ static const ShelfChoice k_arcade_functions[] = {
 };
 static const int k_arcade_function_count = sizeof(k_arcade_functions) / sizeof(k_arcade_functions[0]);
 
+static const ShelfChoice k_zn_bios_choices[] = {
+	{ "auto", "Auto (Japan)" }, { "j", "Japan" }, { "e", "English (debug)" }
+};
+
 static const ShelfChoice k_volume_choices[] = {
 	{ "100", "100% (MAME)" }, { "200", "200%" }, { "300", "300%" }, { "400", "400%" },
 	{ "600", "600%" }, { "800", "800%" }
@@ -108,6 +112,8 @@ static const struct
 	  "pcsx_rearmed_arcade_r2", k_arcade_functions, k_arcade_function_count, 0, 0, NULL } },
 	{ SCOPE_ARCADE, { "ARCADE", "Volume", "Amplifies the board's sound, as a cabinet's amplifier does: 100% is the sound chip's own level, the one MAME plays. Very loud scenes can clip above 400%.",
 	  "pcsx_rearmed_arcade_volume", k_volume_choices, 6, 0, 0, NULL } },
+	{ SCOPE_ARCADE, { "ARCADE", "Capcom ZN BIOS", "The BIOS of the Capcom ZN-1 games that have two (Street Fighter EX, Star Gladiator, Tech Romancer...). Japan is MAME's default; English (debug) is the BIOS with the debug menu. Needs the BIOS in the zips; a game loads with the other if only that one is there. Applies to the next game started.",
+	  "pcsx_rearmed_arcade_zn_bios", k_zn_bios_choices, 3, 0, 0, NULL } },
 	{ SCOPE_ARCADE_PAUSE, { "ARCADE", "Test Switch", "The board's test switch: On opens the game's test menu (input and sound tests, settings, bookkeeping). Turn it Off and leave the menu to play. Off again for every new game.",
 	  "pcsx_rearmed_arcade_test", k_toggle_choices, 2, 0, 0, NULL } },
 };
@@ -136,7 +142,7 @@ std::string pcsx_shelf_about(const char *version)
 		text += std::string(" ") + version;
 	text +=
 		"\n"
-		"Namco System 12 arcade games and PlayStation discs on the PS Vita, by "
+		"Namco System 10, 11 and 12 and Capcom ZN arcade games, and PlayStation discs, on the PS Vita, by "
 		"Francisco José García García (frangarcj).\n"
 		"\n"
 		"# Built on\n"
@@ -147,8 +153,8 @@ std::string pcsx_shelf_about(const char *version)
 		"The native PS1 renderer by aalhendi, from PsyCross (REDRIVER2 Project, MIT).\n"
 		"\n"
 		"# Arcade hardware\n"
-		"MAME and its developers: this port follows MAME's Namco System 12 driver, its devices and its "
-		"romset definitions (BSD-3-Clause).\n"
+		"MAME and its developers: this port follows MAME's Namco and Capcom ZN drivers, their devices and "
+		"their romset definitions (BSD-3-Clause).\n"
 		"\n"
 		"# Libraries\n"
 		"VitaSDK, vitaGL, SDL, Dear ImGui (Omar Cornut), libpng, zlib, libchdr, and the Roboto font "

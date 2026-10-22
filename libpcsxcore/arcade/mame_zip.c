@@ -15,7 +15,7 @@ enum {
 };
 
 struct mame_zip {
-	FILE *file;
+	char *path;
 	unsigned count;
 	mame_zip_entry *entries;
 };
@@ -59,9 +59,10 @@ mame_zip *mame_zip_open(const char *path)
 	uint32_t directory_size, directory_offset;
 	unsigned count, i;
 	mame_zip *zip = calloc(1, sizeof(*zip));
-	if (!zip || !(zip->file = fopen(path, "rb")))
+	FILE *file = zip ? fopen(path, "rb") : NULL;
+	if (!file || !(zip->path = strdup(path)))
 		goto fail;
-	if (find_eocd(zip->file, eocd) < 0)
+	if (find_eocd(file, eocd) < 0)
 		goto fail;
 	count = le16(eocd + 10);
 	directory_size = le32(eocd + 12);
@@ -72,7 +73,7 @@ mame_zip *mame_zip_open(const char *path)
 		goto fail;
 	directory = malloc(directory_size ? directory_size : 1);
 	zip->entries = calloc(count ? count : 1, sizeof(*zip->entries));
-	if (!directory || !zip->entries || read_at(zip->file, (long)directory_offset, directory, directory_size))
+	if (!directory || !zip->entries || read_at(file, (long)directory_offset, directory, directory_size))
 		goto fail;
 	for (i = 0, p = directory; i < count; i++) {
 		mame_zip_entry *entry = &zip->entries[i];
@@ -95,9 +96,12 @@ mame_zip *mame_zip_open(const char *path)
 	}
 	zip->count = count;
 	free(directory);
+	fclose(file);
 	return zip;
 fail:
 	free(directory);
+	if (file)
+		fclose(file);
 	mame_zip_close(zip);
 	return NULL;
 }
@@ -106,8 +110,7 @@ void mame_zip_close(mame_zip *zip)
 {
 	if (!zip)
 		return;
-	if (zip->file)
-		fclose(zip->file);
+	free(zip->path);
 	free(zip->entries);
 	free(zip);
 }
@@ -161,25 +164,31 @@ static int inflate_member(FILE *file, uint32_t compressed_size, uint8_t *dst, ui
 	return ret == Z_STREAM_END && z.avail_out == 0 ? 0 : -1;
 }
 
-int mame_zip_read(mame_zip *zip, const mame_zip_entry *entry, uint8_t *dst)
+static int read_member(FILE *file, const mame_zip_entry *entry, uint8_t *dst)
 {
 	uint8_t local[LOCAL_SIZE];
 	long data_offset;
-	if (!zip || !entry || read_at(zip->file, (long)entry->local_offset, local, sizeof(local)) ||
-	    le32(local) != LOCAL_SIGNATURE)
+	if (read_at(file, (long)entry->local_offset, local, sizeof(local)) || le32(local) != LOCAL_SIGNATURE)
 		return -1;
 	data_offset = (long)entry->local_offset + LOCAL_SIZE + le16(local + 26) + le16(local + 28);
-	if (fseek(zip->file, data_offset, SEEK_SET))
+	if (fseek(file, data_offset, SEEK_SET))
 		return -1;
-	if (entry->method == METHOD_STORED) {
-		if (entry->compressed_size != entry->size ||
-		    fread(dst, 1, entry->size, zip->file) != entry->size)
-			return -1;
-	} else if (entry->method == METHOD_DEFLATED) {
-		if (inflate_member(zip->file, entry->compressed_size, dst, entry->size))
-			return -1;
-	} else {
+	if (entry->method == METHOD_STORED)
+		return entry->compressed_size == entry->size && fread(dst, 1, entry->size, file) == entry->size ? 0 : -1;
+	if (entry->method == METHOD_DEFLATED)
+		return inflate_member(file, entry->compressed_size, dst, entry->size);
+	return -1;
+}
+
+/* The file is opened for the read only: an index of hundreds of zips must
+ * not hold hundreds of handles. */
+int mame_zip_read(mame_zip *zip, const mame_zip_entry *entry, uint8_t *dst)
+{
+	FILE *file = zip && entry ? fopen(zip->path, "rb") : NULL;
+	int result;
+	if (!file)
 		return -1;
-	}
-	return (uint32_t)crc32(0, dst, entry->size) == entry->crc32 ? 0 : -1;
+	result = read_member(file, entry, dst);
+	fclose(file);
+	return !result && (uint32_t)crc32(0, dst, entry->size) == entry->crc32 ? 0 : -1;
 }

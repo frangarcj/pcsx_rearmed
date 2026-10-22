@@ -174,6 +174,23 @@ def _digest(data: bytes) -> tuple[str, str]:
     return f"{zlib.crc32(data) & 0xffffffff:08x}", hashlib.sha1(data).hexdigest()
 
 
+def board_ini(set_name: str, profile: dict[str, Any]) -> str:
+    return "\n".join([
+        "format=pcsx-aow-system11-v1",
+        f"mame_set={set_name}",
+        f"mame_parent={profile.get('parent') or 'none'}",
+        f"board_model={profile['model']}",
+        f"banking={profile['banking']}",
+        f"keycus={profile['keycus']}",
+        f"lightgun={'true' if profile['lightgun'] else 'false'}",
+        f"mame_machine={profile['machine']}",
+        f"mame_input={profile['input']}",
+        f"mame_flags={profile['flags']}",
+        "board_execution_verified=false",
+        "",
+    ])
+
+
 def package_regions(set_name: str, profile: dict[str, Any], regions: dict[str, bytes],
                     c76_bios: bytes, output_dir: Path,
                     source_metadata: dict[str, Any] | None = None,
@@ -195,20 +212,6 @@ def package_regions(set_name: str, profile: dict[str, Any], regions: dict[str, b
         "c76bios.bin": c76_bios,
         "wave.bin": regions["c352"],
     }
-    board_ini = "\n".join([
-        "format=pcsx-aow-system11-v1",
-        f"mame_set={set_name}",
-        f"mame_parent={profile.get('parent') or 'none'}",
-        f"board_model={profile['model']}",
-        f"banking={profile['banking']}",
-        f"keycus={profile['keycus']}",
-        f"lightgun={'true' if profile['lightgun'] else 'false'}",
-        f"mame_machine={profile['machine']}",
-        f"mame_input={profile['input']}",
-        f"mame_flags={profile['flags']}",
-        "board_execution_verified=false",
-        "",
-    ])
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="prepare-system11-") as temp_dir:
         stage = Path(temp_dir)
@@ -217,7 +220,7 @@ def package_regions(set_name: str, profile: dict[str, Any], regions: dict[str, b
             (stage / name).write_bytes(data)
             crc, sha = _digest(data)
             payload_info[name] = {"size": len(data), "crc32": crc, "sha1": sha}
-        (stage / "board.ini").write_text(board_ini, encoding="utf-8")
+        (stage / "board.ini").write_text(board_ini(set_name, profile), encoding="utf-8")
         manifest = {
             "mame_source_commit": load_profiles()[0],
             "mame_driver": DRIVER,

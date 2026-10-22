@@ -601,14 +601,15 @@ def _load_rom_files(romset: RomSet, rompath: Path, lineage: list[str],
     return data_by_index, origin_by_index
 
 
-def _mark_written(written: bytearray, start: int, length: int, stride: int, tag: str) -> None:
+def _mark_written(written: bytearray, start: int, length: int, stride: int, tag: str,
+                  overlap_ok: bool = False) -> None:
     if length < 0 or start < 0 or stride <= 0:
         raise PreparationError(f"invalid write bounds in region {tag}")
     end = start + (length - 1) * stride + 1 if length else start
     if end > len(written):
         raise PreparationError(f"write exceeds region {tag}: ends at {end:#x}, size {len(written):#x}")
     selected = written[start:end:stride]
-    if any(selected):
+    if not overlap_ok and any(selected):
         raise PreparationError(f"overlapping ROM writes in region {tag} at {start:#x}")
     written[start:end:stride] = b"\x01" * length
 
@@ -628,7 +629,9 @@ def _apply_load(region: bytearray, written: bytearray, op: LoadOp, source: bytes
     for lane in range(op.group):
         lane_src = block[lane::op.group]
         lane_dst = op.offset + lane
-        _mark_written(written, lane_dst, units, op.stride, tag)
+        # MAME writes a ROM_CONTINUE over what is there ("first & second half
+        # identical"): the later write wins. Any other overlap is a defect.
+        _mark_written(written, lane_dst, units, op.stride, tag, overlap_ok=op.macro == "ROM_CONTINUE")
         if op.swap:
             other_src = block[(op.group - 1 - lane)::op.group]
             region[lane_dst:lane_dst + units * op.stride:op.stride] = other_src

@@ -1212,7 +1212,7 @@ static bool has_ext(const char *name, const char *ext)
 
 static int extension_rank(const char *name)
 {
-    /* .zip: a System 12 MAME romset; the core checks the set name. */
+    /* .zip: a MAME romset of System 10, 11, 12 or Capcom ZN; the core identifies the set. */
     static const char *exts[] = { ".cue", ".chd", ".pbp", ".m3u", ".iso", ".img", ".bin", ".exe", ".zip" };
     int i;
     for (i = 0; i < (int)(sizeof(exts) / sizeof(exts[0])); i++)

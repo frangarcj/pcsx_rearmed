@@ -134,6 +134,16 @@ class PrepareMamePsxTests(unittest.TestCase):
             self.assertEqual(found[0], content)
             self.assertEqual(Path(origins[0]).name, "personal-name.zip")
 
+    def test_rom_continue_may_rewrite_loaded_bytes(self):
+        source = f'''ROM_START(again)
+          ROM_REGION(2, "r", 0)
+          {declaration("a", b"abab", 0).replace("0x4", "0x2")}
+          ROM_CONTINUE(0, 2)
+          ROM_END'''
+        again = prepare_mame_psx.parse_driver(source, "test/x.cpp")[0]["again"]
+        data = {spec.index: b"abab" for spec in again.files}
+        self.assertEqual(prepare_mame_psx.assemble_regions(again, data)["r"], b"ab")
+
     def test_fails_closed_on_collision_bounds_nodump_and_unknown_layout(self):
         overlap_source = f'''ROM_START(overlap)
           ROM_REGION(4, "r", 0)

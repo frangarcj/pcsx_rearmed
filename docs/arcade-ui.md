@@ -11,12 +11,15 @@ its controls, the art it reads, the optional Arcade Database download
 
 `frontend/arcade_catalog.cpp` builds the catalogue that arcade-shelf shows:
 
-- one game per MAME parent, from the System 12 sets that are complete in
-  the rompath (`system12_romset_scan`) and that the board adapter emulates;
+- one game per MAME parent, from the System 10, System 11, System 12 and
+  Capcom ZN sets that are complete in the rompath (`system12_romset_scan_index`,
+  `arcade_romset_scan_index`, over one `mame_romindex`) and that the board
+  adapter emulates;
 - the parent's version first, then its clones, with the region and
   revision from MAME's description;
 - a launch path for each version, `<rompath>/<set>.zip`, which the core
-  resolves by name or by content (docs/system12-romsets.md);
+  resolves by name or by content (docs/system12-romsets.md,
+  docs/arcade-romsets.md);
 - the cabinet colours of each board family (`arcade_catalog_styles`).
 
 ## Preview on macOS

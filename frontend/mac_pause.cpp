@@ -41,7 +41,7 @@ static std::vector<std::pair<std::string, std::string> > settings = {
 	{ "pcsx_rearmed_arcade_l1", "button5" }, { "pcsx_rearmed_arcade_r1", "button6" },
 	{ "pcsx_rearmed_arcade_l2", "button7" }, { "pcsx_rearmed_arcade_r2", "button8" },
 	{ "pcsx_rearmed_arcade_select", "coin" }, { "pcsx_rearmed_arcade_test", "disabled" },
-	{ "pcsx_rearmed_arcade_volume", "400" },
+	{ "pcsx_rearmed_arcade_volume", "400" }, { "pcsx_rearmed_arcade_zn_bios", "auto" },
 };
 
 static const char *get_option(void *, const char *key)

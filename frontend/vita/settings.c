@@ -50,6 +50,7 @@ static VitaOptionEntry g_options[] = {
     { "pcsx_rearmed_arcade_start", "start", {0} },
     { "pcsx_rearmed_arcade_test", "disabled", {0} },
     { "pcsx_rearmed_arcade_volume", "400", {0} },
+    { "pcsx_rearmed_arcade_zn_bios", "auto", {0} },
     /* Which executable runs the games: eboot.bin (vitaGL) or eboot_neon.bin. */
     { "pcsx_rearcade_renderer", "vitagl", {0} },
 };

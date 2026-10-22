@@ -13,9 +13,9 @@ used in [PS Classic](https://en.wikipedia.org/wiki/PlayStation_Classic)
 
 ## PCSX ReArcade (PS Vita)
 
-PCSX ReArcade is this fork's PS Vita app: Namco System 12 arcade games
-(Soul Calibur, Tekken 3...) from MAME romsets, prepared System 10/11 and
-Capcom ZN board folders, and PlayStation discs, on one 3D game shelf
+PCSX ReArcade is this fork's PS Vita app: Namco System 10, System 11 and
+System 12 and Capcom ZN arcade games (Soul Calibur, Tekken 3, Street Fighter
+EX...) from MAME romsets, and PlayStation discs, on one 3D game shelf
 ([arcade-shelf](deps/arcade-shelf)).
 
 ```sh
@@ -30,14 +30,19 @@ options, Select credits, Triangle exit. Start + Select pauses a game.
 `ARCADE_SHELF=0` builds the same core as the validation app (`PCSXG0012`,
 `ux0:data/pcsx-rearmed`) that the measurement tools use.
 
-For System 10, System 11 and Capcom ZN, prepare the local media with
-`scripts/prepare_system10_board.py`, `scripts/prepare_system11_board.py` or
-`scripts/prepare_capcom_zn_board.py` (see each script's `--help`), then place
-the resulting folder directly inside `roms/`. Keep `board.ini` and all its
-region files together. The shelf uses the profile's MAME set and parent to
-name and group games; these families do not load raw MAME zips yet. Prepared
-System 12 folders with `board.cfg` are also listed, including CDXA profiles
-when their required media is supplied.
+Copy the MAME zips of the four families into `roms/`, whether the sets are
+merged, split or non-merged: files are found by CRC32 and size, so zip names do
+not matter, and the BIOS and sound sets that a game needs (`namcoc76.zip`,
+`coh1000c.zip`, `qsound.zip`...) are found next to it
+([System 10/11/Capcom ZN](docs/arcade-romsets.md),
+[System 12](docs/system12-romsets.md)). The shelf lists the complete sets and
+groups clones under their parent. Prepared folders still work: prepare local
+media with `scripts/prepare_system10_board.py`,
+`scripts/prepare_system11_board.py` or `scripts/prepare_capcom_zn_board.py`
+(see each script's `--help`) and place the folder directly inside `roms/`,
+keeping `board.ini` and all its region files together. Prepared System 12
+folders with `board.cfg` are also listed, including CDXA profiles when their
+required media is supplied.
 
 System 10, System 11, System 12 and Capcom ZN support the native ARMv7 dynarec.
 Capcom ZN invalidates translated code when its 4 MiB ROM bank changes and
@@ -47,7 +52,8 @@ Live stream-encrypted opcode fetches use an interpreter trampoline without
 speculatively consuming the stream. The arcade button assignments
 apply to all four families. System 12/11 and Capcom EEPROM images are saved
 separately from the ROM files in the frontend save directory as
-`<set>.arcade-nvram`. System 10 mutable flash/NAND persistence remains open.
+`<set>.arcade-nvram`. What a System 10 game writes to its flash or NAND is saved
+as `<set>.arcade-flash`, only the 16 KiB chunks that differ from the ROM media.
 The pause menu offers save states only when the active board supports them.
 
 System 10 offloads SPU synthesis to a worker; System 11 uses a board worker

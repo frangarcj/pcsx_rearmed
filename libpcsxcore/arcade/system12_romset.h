@@ -6,6 +6,8 @@
 #define PCSX_SYSTEM12_ROMSET_H
 #include <stddef.h>
 
+#include "mame_romindex.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -24,6 +26,8 @@ const system12_romset_info *system12_romset_identify(const char *zip_path);
 /* available[i] (one byte per set, system12_romset_count()) is 1 when every
  * file of set i is in some zip of rompath. Returns how many are, or -1. */
 int system12_romset_scan(const char *rompath, unsigned char *available);
+/* The same for an index of the rompath's zips that the caller already has. */
+int system12_romset_scan_index(const mame_romindex *index, unsigned char *available);
 /* 0 if every file of the set is in the zips of rompath; otherwise -1, with
  * the first missing file written to missing. */
 int system12_romset_verify(const char *rompath, const char *set, char *missing, size_t missing_size);

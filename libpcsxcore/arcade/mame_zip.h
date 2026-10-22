@@ -1,5 +1,6 @@
 /* Minimal reader for MAME romset zips: the central directory, and stored or
- * deflated members read whole and checked against their CRC32. No zip64,
+ * deflated members read whole and checked against their CRC32. The zip file
+ * is open only while a directory or a member is read. No zip64,
  * encryption or multi-disk archives (MAME sets do not use them). */
 #ifndef PCSX_MAME_ZIP_H
 #define PCSX_MAME_ZIP_H
@@ -8,7 +9,7 @@
 
 typedef struct mame_zip mame_zip;
 typedef struct {
-	char name[256];
+	char name[32]; /* the start of the name; members are found by CRC32 */
 	uint32_t crc32, compressed_size, size, local_offset;
 	uint16_t method;
 } mame_zip_entry;

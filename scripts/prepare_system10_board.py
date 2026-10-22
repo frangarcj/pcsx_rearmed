@@ -165,10 +165,9 @@ def _make_payloads(profile: dict[str, Any], regions: dict[str, bytes]) -> tuple[
     return ({names[tag]: regions[tag] for tag in required}, names)
 
 
-def package_regions(set_name: str, profile: dict[str, Any], regions: dict[str, bytes],
-                    output_dir: Path, source_metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-    _refuse_unsupported(set_name, profile)
-    payloads, region_names = _make_payloads(profile, regions)
+def board_ini(set_name: str, profile: dict[str, Any], region_names: dict[str, str],
+              region_sizes: dict[str, int]) -> str:
+    """The package's board.ini: region_names maps each region tag to its file."""
     lines = [
         "format=pcsx-aow-system10-v1", f"mame_set={set_name}",
         f"mame_parent={profile.get('parent') or 'none'}",
@@ -180,8 +179,25 @@ def package_regions(set_name: str, profile: dict[str, Any], regions: dict[str, b
     ]
     for tag, filename in region_names.items():
         lines.append(f"region.{tag}={filename}")
-        lines.append(f"region.{tag}.size={len(regions[tag])}")
-    board_ini = "\n".join(lines) + "\n"
+        lines.append(f"region.{tag}.size={region_sizes[tag]}")
+    return "\n".join(lines) + "\n"
+
+
+def region_files(profile: dict[str, Any], tags: Iterable[str]) -> dict[str, str]:
+    """Package file of each assembled region of a MEM(M) or MEM(N) profile."""
+    tags = set(tags)
+    if profile["board_type"] == "MEM(M)":
+        names = {"maincpu:rom": "main.bin", "nand": "rawflash.bin", "data": "datarom.bin"}
+        return {tag: name for tag, name in names.items() if tag in tags}
+    nand_tags = sorted((tag for tag in tags if re.fullmatch(r"nand\d+", tag)), key=lambda tag: int(tag[4:]))
+    return {"maincpu:rom": "main.bin", **{tag: f"raw{tag}.bin" for tag in nand_tags}}
+
+
+def package_regions(set_name: str, profile: dict[str, Any], regions: dict[str, bytes],
+                    output_dir: Path, source_metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    _refuse_unsupported(set_name, profile)
+    payloads, region_names = _make_payloads(profile, regions)
+    board_ini_text = board_ini(set_name, profile, region_names, {tag: len(regions[tag]) for tag in region_names})
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="prepare-system10-") as temp:
         stage = Path(temp)
@@ -190,7 +206,7 @@ def package_regions(set_name: str, profile: dict[str, Any], regions: dict[str, b
             (stage / name).write_bytes(data)
             crc, sha = _digest(data)
             payload_info[name] = {"size": len(data), "crc32": crc, "sha1": sha}
-        (stage / "board.ini").write_text(board_ini, encoding="ascii")
+        (stage / "board.ini").write_text(board_ini_text, encoding="ascii")
         manifest = {
             "system": "Namco System 10", "mame_driver": DRIVER,
             "mame_source_commit": mame.PINNED_MAME_COMMIT, "mame_set": set_name,

@@ -33,7 +33,9 @@ class System12RomsetTest(unittest.TestCase):
         cls.driver = cls.tmp / "system12_romset_test"
         subprocess.run([compiler, "-O1", "-Wall", "-Wextra", "-Werror", f"-I{ROOT / 'include'}",
                         "-o", str(cls.driver), str(ROOT / "tests/system12_romset_test.c"),
-                        str(ROOT / "libpcsxcore/arcade/mame_zip.c"), "-lz"], check=True)
+                        str(ROOT / "libpcsxcore/arcade/mame_zip.c"),
+                        str(ROOT / "libpcsxcore/arcade/mame_romindex.c"),
+                        str(ROOT / "libpcsxcore/arcade/mame_romload.c"), "-lz"], check=True)
 
     @classmethod
     def tearDownClass(cls):

@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include "arcade_profile.h"
 
+#include "../libpcsxcore/arcade/arcade_romset.h"
 #include "../libpcsxcore/arcade/system12_romset.h"
 
 #define COLOUR(r, g, b) (0xff000000u | ((unsigned)(b) << 16) | ((unsigned)(g) << 8) | (unsigned)(r))
@@ -62,20 +63,32 @@ static void split_description(const char *description, std::string *title, std::
 
 void ArcadeCatalog::build(const std::string &rompath, bool demo)
 {
-	const unsigned count = system12_romset_count();
-	std::vector<unsigned char> available(count, 0);
+	const unsigned count = system12_romset_count(), other_count = arcade_romset_count();
+	std::vector<unsigned char> available(count, 0), other_available(other_count, 0);
 	entries_.clear();
 	games_.clear();
-	if (demo)
+	if (demo) {
 		std::fill(available.begin(), available.end(), 1);
-	else
-		system12_romset_scan(rompath.c_str(), available.data());
+		std::fill(other_available.begin(), other_available.end(), 1);
+	} else if (mame_romindex *index = mame_romindex_open(rompath.c_str())) {
+		/* One pass over the zips serves every family. */
+		system12_romset_scan_index(index, available.data());
+		arcade_romset_scan_index(index, other_available.data());
+		mame_romindex_close(index);
+	}
 	for (unsigned i = 0; i < count; i++) {
 		const system12_romset_info *info = system12_romset_at(i);
 		if (!available[i] || strcmp(info->unsupported, "none"))
 			continue;
 		add_arcade("Namco System 12", info->name, info->parent, info->description,
 			info->description, info->year, rompath + "/" + info->name + ".zip");
+	}
+	/* System 10, System 11 and Capcom ZN zips: the core builds their board package. */
+	for (unsigned i = 0; i < other_count; i++) {
+		const arcade_romset_info *info = arcade_romset_at(i);
+		if (other_available[i])
+			add_arcade(info->system, info->name, info->parent, info->description,
+				info->description, info->year, rompath + "/" + info->name + ".zip");
 	}
 	if (demo) {
 		for (const PreparedProfile &p : prepared_profiles)

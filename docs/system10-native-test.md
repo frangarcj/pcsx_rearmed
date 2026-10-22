@@ -69,7 +69,8 @@ python3 tests/check_system10_drc.py \
 The largest generated profile is approximately 169 MiB (five raw NAND chips),
 kept one board at a time and removed after comparison. No raw frame/audio
 captures are needed. This verifies CPU and bus integration, not compatibility
-with every game or flash/NAND persistence across application launches.
+with every game. Flash/NAND persistence is checked by the libretro zip test
+(`tests/check_arcade_romset_libretro.py`); no real game has written to it yet.
 
 
 ## SPU worker on Vita core 2

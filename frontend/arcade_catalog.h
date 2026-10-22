@@ -1,5 +1,5 @@
-/* The arcade-shelf catalogue of PCSX ReArcade: System 12 MAME zips and
- * prepared System 10/11/12 and Capcom ZN profiles, one game per parent, then the
+/* The arcade-shelf catalogue of PCSX ReArcade: System 10, 11 and 12 and Capcom ZN
+ * MAME zips and prepared board profiles, one game per parent, then the
  * PlayStation discs, and the cabinet colours of each board family. */
 #ifndef PCSX_ARCADE_CATALOG_H
 #define PCSX_ARCADE_CATALOG_H
@@ -12,8 +12,8 @@
 class ArcadeCatalog {
 public:
 	/* Lists the supported sets complete in rompath (all of them with
-	 * demo, for UI work). Prepared directories launch directly; System 12
-	 * zip versions launch "<rompath>/<set>.zip". */
+	 * demo, for UI work). Prepared directories launch directly; the
+	 * versions found as MAME zips launch "<rompath>/<set>.zip". */
 	void build(const std::string &rompath, bool demo);
 	/* Adds a PlayStation disc after the arcade games. Files named
 	 * "<title> (<tags>)" share one disc per title, each file a version
